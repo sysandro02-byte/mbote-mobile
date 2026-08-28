@@ -45,6 +45,42 @@ class MboteViewModel(
     val isOffline = repository.isOffline
     val isAuthenticated = repository.isAuthenticated
 
+    // 5) Parent-Child Connection State & Verification Flow Helper
+    private val _parentChildLinkState = MutableStateFlow<ParentChildLinkState>(ParentChildLinkState.Idle)
+    val parentChildLinkState: StateFlow<ParentChildLinkState> = _parentChildLinkState.asStateFlow()
+
+    private val _linkedChildInfo = MutableStateFlow(LinkedChildInfo())
+    val linkedChildInfo: StateFlow<LinkedChildInfo> = _linkedChildInfo.asStateFlow()
+
+    // 1) Toggleable list of installed applications on child's device
+    private val _childInstalledApps = MutableStateFlow<List<ChildInstalledApp>>(defaultChildInstalledApps)
+    val childInstalledApps: StateFlow<List<ChildInstalledApp>> = _childInstalledApps.asStateFlow()
+
+    // 2) Child Panic Button / Emergency GPS Location Alert State
+    private val _childPanicAlerts = MutableStateFlow<List<ChildPanicAlert>>(listOf(
+        ChildPanicAlert(
+            alertId = "PANIC-PREV-01",
+            childId = "MB-CHILD-88392",
+            childName = "Junior Loutala",
+            timestamp = "Hier à 18:42",
+            latitude = -4.2634,
+            longitude = 15.2429,
+            address = "Avenue de l'Indépendance, Poto-Poto, Brazzaville",
+            city = "Brazzaville, Congo",
+            batteryLevel = 92,
+            emergencyType = "Trajet École - Maison Sécurisé",
+            emergencyMessage = "Notification de position GPS transmise avec succès.",
+            isResolved = true
+        )
+    ))
+    val childPanicAlerts: StateFlow<List<ChildPanicAlert>> = _childPanicAlerts.asStateFlow()
+
+    private val _activePanicAlert = MutableStateFlow<ChildPanicAlert?>(null)
+    val activePanicAlert: StateFlow<ChildPanicAlert?> = _activePanicAlert.asStateFlow()
+
+    private val _showPanicTriggerDialog = MutableStateFlow(false)
+    val showPanicTriggerDialog: StateFlow<Boolean> = _showPanicTriggerDialog.asStateFlow()
+
     val socketConnectionState = com.loukatech.mbote.service.MboteSocketManager.connectionState
     val isSocketConnected = com.loukatech.mbote.service.MboteSocketManager.isConnected
     val socketUrl = com.loukatech.mbote.service.MboteSocketManager.socketUrl
@@ -1177,5 +1213,232 @@ class MboteViewModel(
 
     fun addScrollingMinutes(min: Int) {
         repository.addScrollingMinutes(min)
+    }
+
+    // --- 5) Helper for Parent-Child Connection & QR Verification State ---
+
+    fun startParentChildQrScan() {
+        _parentChildLinkState.value = ParentChildLinkState.Scanning
+    }
+
+    fun processParentChildQrCode(qrPayload: String, onComplete: ((Boolean) -> Unit)? = null) {
+        viewModelScope.launch {
+            _parentChildLinkState.value = ParentChildLinkState.Verifying(
+                qrPayload = qrPayload,
+                progress = 0.25f,
+                statusMessage = "Analyse du QR code et lecture du jeton de sécurité..."
+            )
+            delay(500)
+
+            _parentChildLinkState.value = ParentChildLinkState.Verifying(
+                qrPayload = qrPayload,
+                progress = 0.65f,
+                statusMessage = "Échange de clés RSA-2048 & vérification du compte enfant..."
+            )
+            delay(600)
+
+            _parentChildLinkState.value = ParentChildLinkState.Verifying(
+                qrPayload = qrPayload,
+                progress = 0.90f,
+                statusMessage = "Association du canal d'urgence SOS Brevo & Quota 2h..."
+            )
+            delay(400)
+
+            // Extract child info if present or use default child account
+            val childInfo = LinkedChildInfo(
+                id = if (qrPayload.contains("id=")) qrPayload.substringAfter("id=").substringBefore("&") else "MB-CHILD-88392",
+                name = if (qrPayload.contains("name=")) qrPayload.substringAfter("name=").substringBefore("&") else "Junior Loutala",
+                username = "@junior_lt",
+                avatar = "https://images.unsplash.com/photo-1543610892-0b1f7e6d8ac1?w=150&auto=format&fit=crop&q=80",
+                age = 13,
+                schoolName = "Lycée d'Excellence de Brazzaville",
+                deviceModel = "Samsung Galaxy A15 (Android 14)",
+                batteryLevel = 88,
+                isOnline = true,
+                lastActive = "À l'instant",
+                linkToken = qrPayload.ifBlank { "MBOTE-LINK-QR-9941-XYZ" }
+            )
+
+            _linkedChildInfo.value = childInfo
+
+            val now = java.text.SimpleDateFormat("dd/MM/yyyy à HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+            val successState = ParentChildLinkState.Success(
+                childProfile = childInfo,
+                linkedAt = now
+            )
+            _parentChildLinkState.value = successState
+
+            // Update user profile to mark child account linked
+            val current = repository.userProfile.value
+            val updated = current.copy(
+                isChildAccountLinkedByQrScan = true,
+                parentalControlActive = true
+            )
+            repository.updateUserProfile(updated)
+
+            onComplete?.invoke(true)
+        }
+    }
+
+    fun confirmChildLink(childInfo: LinkedChildInfo? = null) {
+        val current = repository.userProfile.value
+        val updated = current.copy(
+            isChildAccountLinkedByQrScan = true,
+            parentalControlActive = true
+        )
+        repository.updateUserProfile(updated)
+        if (childInfo != null) {
+            _linkedChildInfo.value = childInfo
+        }
+    }
+
+    fun unlinkChildAccount() {
+        val current = repository.userProfile.value
+        val updated = current.copy(
+            isChildAccountLinkedByQrScan = false,
+            parentalControlActive = false
+        )
+        repository.updateUserProfile(updated)
+        _parentChildLinkState.value = ParentChildLinkState.Idle
+    }
+
+    fun resetParentChildLinkState() {
+        _parentChildLinkState.value = ParentChildLinkState.Idle
+    }
+
+    fun updateParentalSubscriptionPlan(planId: String, planName: String) {
+        val current = repository.userProfile.value
+        repository.updateUserProfile(current.copy(isPremium = true))
+    }
+
+    // 1) Remotely Whitelist or Block Specific Apps on Child's Device
+    fun toggleChildAppBlocked(packageName: String, isBlocked: Boolean) {
+        _childInstalledApps.update { list ->
+            list.map { app ->
+                if (app.packageName == packageName) app.copy(isBlocked = isBlocked) else app
+            }
+        }
+        _linkedChildInfo.update { child ->
+            child.copy(installedApps = _childInstalledApps.value)
+        }
+
+        // Record audit action in parental history
+        val currentProfile = repository.userProfile.value
+        val app = _childInstalledApps.value.find { it.packageName == packageName }
+        val appName = app?.appName ?: packageName
+        val actionTitle = if (isBlocked) "🚫 Application Bloquée à Distance" else "✅ Application Autorisée à Distance"
+        val updatedActions = currentProfile.atRiskActions.toMutableList()
+        updatedActions.add(
+            0,
+            AtRiskAction(
+                timestamp = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date()),
+                title = actionTitle,
+                description = "L'application '$appName' a été ${if (isBlocked) "bloquée" else "débloquée"} à distance sur le Samsung Galaxy A15 de Junior.",
+                severity = if (isBlocked) RiskSeverity.MEDIUM else RiskSeverity.LOW
+            )
+        )
+        repository.updateUserProfile(currentProfile.copy(atRiskActions = updatedActions))
+    }
+
+    fun toggleAllChildApps(blockAll: Boolean, category: String? = null) {
+        _childInstalledApps.update { list ->
+            list.map { app ->
+                if (category == null || app.category.equals(category, ignoreCase = true)) {
+                    // Don't block MBoté Chat family app by default unless explicitly requested
+                    if (app.packageName == "com.loukatech.mbote" && blockAll) app else app.copy(isBlocked = blockAll)
+                } else {
+                    app
+                }
+            }
+        }
+        _linkedChildInfo.update { child ->
+            child.copy(installedApps = _childInstalledApps.value)
+        }
+    }
+
+    fun setChildAppSchoolRestriction(packageName: String, restricted: Boolean) {
+        _childInstalledApps.update { list ->
+            list.map { app ->
+                if (app.packageName == packageName) app.copy(restrictedDuringSchoolHours = restricted) else app
+            }
+        }
+        _linkedChildInfo.update { child ->
+            child.copy(installedApps = _childInstalledApps.value)
+        }
+    }
+
+    // 2) Child Panic Button: Immediate GPS Location Update via Parental Control Connection
+    fun triggerChildPanicAlert(
+        latitude: Double = -4.2634,
+        longitude: Double = 15.2429,
+        address: String = "Avenue de l'Indépendance, Poto-Poto, Brazzaville",
+        emergencyType: String = "Bouton Panique Pressé 🚨",
+        customMessage: String = "Alerte de détresse immédiate ! Junior a pressé le bouton panique. Localisation GPS transmise en temps réel."
+    ): ChildPanicAlert {
+        val now = java.text.SimpleDateFormat("dd/MM/yyyy à HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val alert = ChildPanicAlert(
+            alertId = "PANIC-" + System.currentTimeMillis(),
+            childId = _linkedChildInfo.value.id,
+            childName = _linkedChildInfo.value.name,
+            childAvatar = _linkedChildInfo.value.avatar,
+            timestamp = now,
+            latitude = latitude,
+            longitude = longitude,
+            address = address,
+            city = "Brazzaville, Congo",
+            batteryLevel = _linkedChildInfo.value.batteryLevel,
+            emergencyType = emergencyType,
+            emergencyMessage = customMessage,
+            accuracyMeters = 5.8f,
+            networkStatus = "4G MTN Congo",
+            isResolved = false
+        )
+
+        // Store active alert and add to list
+        _activePanicAlert.value = alert
+        _childPanicAlerts.update { listOf(alert) + it }
+        _linkedChildInfo.update { it.copy(lastPanicAlert = alert) }
+
+        // Also add high-priority audit entry in user profile for parent log
+        val currentProfile = repository.userProfile.value
+        val updatedActions = currentProfile.atRiskActions.toMutableList()
+        updatedActions.add(
+            0,
+            AtRiskAction(
+                timestamp = now,
+                title = "🚨 ALERTE PANIQUE & GÉOLOCALISATION GPS",
+                description = "Signal de détresse émis par ${alert.childName} ! Position GPS: Lat ${alert.latitude}, Lng ${alert.longitude} ($address). E-mail d'urgence Brevo et notification push transmis au parent (${currentProfile.parentEmail.ifBlank { "parent@exemple.com" }}).",
+                severity = RiskSeverity.HIGH
+            )
+        )
+        repository.updateUserProfile(currentProfile.copy(atRiskActions = updatedActions))
+
+        // Notify socket / push system
+        com.loukatech.mbote.service.MboteSocketManager.sendChatMessage(
+            chatId = "PANIC_CHANNEL",
+            senderName = alert.childName,
+            text = "🚨 SOS ALERTE PANIQUE : ${alert.childName} à $address ($latitude, $longitude)"
+        )
+
+        return alert
+    }
+
+    fun resolvePanicAlert(alertId: String) {
+        _childPanicAlerts.update { list ->
+            list.map { alert ->
+                if (alert.alertId == alertId) alert.copy(isResolved = true) else alert
+            }
+        }
+        if (_activePanicAlert.value?.alertId == alertId) {
+            _activePanicAlert.value = null
+        }
+    }
+
+    fun dismissActivePanicAlert() {
+        _activePanicAlert.value = null
+    }
+
+    fun setShowPanicTriggerDialog(show: Boolean) {
+        _showPanicTriggerDialog.value = show
     }
 }

@@ -4,12 +4,15 @@ import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -31,7 +34,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.loukatech.mbote.model.ChildInstalledApp
+import com.loukatech.mbote.model.ChildPanicAlert
+import com.loukatech.mbote.model.LinkedChildInfo
 import com.loukatech.mbote.model.UserProfile
+import com.loukatech.mbote.model.defaultChildInstalledApps
 import com.loukatech.mbote.ui.theme.MbotePurpleLight
 import com.loukatech.mbote.ui.theme.MbotePurplePrimary
 import com.loukatech.mbote.ui.theme.MbotePurpleSoft
@@ -51,7 +58,17 @@ fun ParentalControlDialog(
         isChildLinked: Boolean
     ) -> Unit,
     onSendSosAlert: (String, String) -> Boolean = { _, _ -> true },
-    onUnlockPremium: () -> Unit = {}
+    onUnlockPremium: () -> Unit = {},
+    onOpenPremiumScreen: () -> Unit = {},
+    linkedChild: LinkedChildInfo = LinkedChildInfo(),
+    childApps: List<ChildInstalledApp> = defaultChildInstalledApps,
+    onToggleAppBlocked: (packageName: String, isBlocked: Boolean) -> Unit = { _, _ -> },
+    onToggleAllApps: (blockAll: Boolean, category: String?) -> Unit = { _, _ -> },
+    onToggleAppSchoolRestriction: (packageName: String, restricted: Boolean) -> Unit = { _, _ -> },
+    panicAlerts: List<ChildPanicAlert> = emptyList(),
+    activePanicAlert: ChildPanicAlert? = null,
+    onTriggerPanicAlert: (latitude: Double, longitude: Double, address: String, emergencyType: String, message: String) -> Unit = { _, _, _, _, _ -> },
+    onResolvePanicAlert: (alertId: String) -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -97,6 +114,19 @@ fun ParentalControlDialog(
                         Text("Débloquer MBoté Premium 👑", fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            onDismiss()
+                            onOpenPremiumScreen()
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Icon(Icons.Default.Shield, contentDescription = null, tint = MbotePurplePrimary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Voir les Tarifs & Avantages Bouclier", fontWeight = FontWeight.SemiBold, color = MbotePurplePrimary)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
                     TextButton(onClick = onDismiss) {
                         Text("Plus tard", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -117,10 +147,14 @@ fun ParentalControlDialog(
     var strictNightCommentDisable by remember { mutableStateOf(true) } // 5) Strict comment disable during night mode (22:00 - 06:00)
     var isChildLinked by remember { mutableStateOf(userProfile.isChildAccountLinkedByQrScan) } // 1) QR Code scanning link
     var showQrScanDialog by remember { mutableStateOf(false) }
+    var showLinkSuccessDialog by remember { mutableStateOf(false) }
+    var linkedChildState by remember { mutableStateOf(linkedChild) }
     var isAuthenticatedAsParent by remember { mutableStateOf(!userProfile.parentalControlActive) }
     var authPinInput by remember { mutableStateOf("") }
     var showSosDialog by remember { mutableStateOf(false) }
     var sosReasonInput by remember { mutableStateOf("") }
+    var showActivePanicDetail by remember { mutableStateOf(false) }
+    var selectedPanicForDetail by remember { mutableStateOf<ChildPanicAlert?>(null) }
 
     val scrollState = rememberScrollState()
 
@@ -166,46 +200,28 @@ fun ParentalControlDialog(
         )
     }
 
+    // 3) QR Code scanning interface using CameraX
     if (showQrScanDialog) {
-        AlertDialog(
-            onDismissRequest = { showQrScanDialog = false },
-            title = { Text("📷 Scanner le QR Code Enfant", fontWeight = FontWeight.Bold, color = MbotePurplePrimary) },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Pointez la caméra vers le QR Code affiché sur l'application de l'enfant pour lier les deux comptes et activer le contrôle parental.")
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Surface(
-                        modifier = Modifier.size(160.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MbotePurplePrimary.copy(alpha = 0.1f),
-                        border = BorderStroke(2.dp, MbotePurplePrimary)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = MbotePurplePrimary, modifier = Modifier.size(64.dp))
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text("Scan QR en cours...", fontSize = 12.sp, color = MbotePurplePrimary, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        isChildLinked = true
-                        showQrScanDialog = false
-                        Toast.makeText(context, "✅ QR Code scanné avec succès ! Comptes parent & enfant liés 🔗", Toast.LENGTH_LONG).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary)
-                ) {
-                    Text("Valider le Scan QR", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showQrScanDialog = false }) {
-                    Text("Annuler")
-                }
+        ChildQrScannerDialog(
+            onDismiss = { showQrScanDialog = false },
+            onQrScanned = { payload ->
+                isChildLinked = true
+                showQrScanDialog = false
+                showLinkSuccessDialog = true
+                Toast.makeText(context, "✅ QR Code scanné avec succès ! Comptes parent & enfant liés 🔗", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    // 2) Success Dialog component confirming the parent-child connection
+    if (showLinkSuccessDialog) {
+        ChildLinkSuccessDialog(
+            childInfo = linkedChildState,
+            linkedTimestamp = java.text.SimpleDateFormat("dd/MM/yyyy à HH:mm", java.util.Locale.getDefault()).format(java.util.Date()),
+            onDismiss = { showLinkSuccessDialog = false },
+            onConfigureRules = {
+                showLinkSuccessDialog = false
+                selectedTab = 0
             }
         )
     }
@@ -331,21 +347,35 @@ fun ParentalControlDialog(
                         }
                     }
                 } else {
-                    // TABS: Réglages vs Tableau de Bord (1)
-                    TabRow(
+                    // TABS: Réglages, Apps Enfant, Panique/GPS, Tableau de Bord
+                    ScrollableTabRow(
                         selectedTabIndex = selectedTab,
                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        contentColor = MbotePurplePrimary
+                        contentColor = MbotePurplePrimary,
+                        edgePadding = 8.dp
                     ) {
                         Tab(
                             selected = selectedTab == 0,
                             onClick = { selectedTab = 0 },
-                            text = { Text("⚙️ Réglages", fontWeight = FontWeight.Bold) }
+                            text = { Text("⚙️ Réglages", fontWeight = FontWeight.Bold, fontSize = 12.5.sp) }
                         )
                         Tab(
                             selected = selectedTab == 1,
                             onClick = { selectedTab = 1 },
-                            text = { Text("📊 Tableau de Bord", fontWeight = FontWeight.Bold) }
+                            text = { 
+                                val blockedCount = childApps.count { it.isBlocked }
+                                Text("📱 Apps (${blockedCount} 🚫)", fontWeight = FontWeight.Bold, fontSize = 12.5.sp) 
+                            }
+                        )
+                        Tab(
+                            selected = selectedTab == 2,
+                            onClick = { selectedTab = 2 },
+                            text = { Text("🚨 Panique & GPS", fontWeight = FontWeight.Bold, fontSize = 12.5.sp) }
+                        )
+                        Tab(
+                            selected = selectedTab == 3,
+                            onClick = { selectedTab = 3 },
+                            text = { Text("📊 Tableau de Bord", fontWeight = FontWeight.Bold, fontSize = 12.5.sp) }
                         )
                     }
 
@@ -357,10 +387,12 @@ fun ParentalControlDialog(
                             .verticalScroll(scrollState),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        if (selectedTab == 0) {
-                            // SETTINGS TAB
-                            // Activation & Account Association (7)
-                            Card(
+                        when (selectedTab) {
+                            0 -> {
+                                // SETTINGS TAB
+                                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    // Activation & Account Association (7)
+                                    Card(
                                 shape = RoundedCornerShape(16.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
@@ -623,159 +655,310 @@ fun ParentalControlDialog(
                                     }
                                 }
                             }
-                        } else {
-                            // DASHBOARD TAB (1): Weekly usage report & Recharts-style bar chart (3)
-                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                // Summary Card
-                                Card(
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MbotePurplePrimary.copy(alpha = 0.12f)),
-                                    border = BorderStroke(1.dp, MbotePurplePrimary.copy(alpha = 0.3f))
-                                ) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
-                                        Text(
-                                            text = "Rapport d'Utilisation Hebdomadaire 📊",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 15.sp,
-                                            color = MbotePurplePrimary
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column {
-                                                Text("Temps total (7j)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                Text("11h 45m", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
-                                            }
-                                            Column {
-                                                Text("Moyenne / jour", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                Text("1h 41m", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MbotePurplePrimary)
-                                            }
-                                            Column {
-                                                Text("Statut Limite 2h", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                Text("Respecté ✓", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF10B981))
-                                            }
+                        }
+                    }
+                    1 -> {
+                                // APPS MANAGEMENT TAB
+                                ChildAppManagementView(
+                                    childInfo = linkedChildState,
+                                    installedApps = childApps,
+                                    onToggleAppBlocked = onToggleAppBlocked,
+                                    onToggleAllApps = onToggleAllApps,
+                                    onToggleSchoolRestriction = onToggleAppSchoolRestriction
+                                )
+                            }
+                            2 -> {
+                                // PANIC & GPS TAB
+                                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    // Child Trigger Card
+                                    Card(
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                    ) {
+                                        Column(modifier = Modifier.padding(16.dp)) {
+                                            Text(
+                                                text = "Bouton d'Urgence Panique Enfant 🚨",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp,
+                                                color = Color(0xFFEF4444)
+                                            )
+                                            Text(
+                                                text = "Permet à l'enfant de déclencher un signal SOS instantané avec ses coordonnées GPS précises envoyées au parent.",
+                                                fontSize = 11.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(14.dp))
+                                            ChildPanicTriggerButton(
+                                                childInfo = linkedChildState,
+                                                onTriggerPanic = onTriggerPanicAlert
+                                            )
                                         }
                                     }
-                                }
 
-                                // Recharts-style Bar Chart (3)
-                                Card(
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                                ) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
-                                        Text(
-                                            text = "3) Visualisation de l'utilisation journalière (Derniers 7 jours)",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.5.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
+                                    // Active Alert Banner if any
+                                    if (activePanicAlert != null) {
+                                        ParentPanicAlertBanner(
+                                            alert = activePanicAlert,
+                                            onViewLocationDetails = {
+                                                selectedPanicForDetail = activePanicAlert
+                                                showActivePanicDetail = true
+                                            },
+                                            onDismiss = {
+                                                onResolvePanicAlert(activePanicAlert.alertId)
+                                            }
                                         )
-                                        Text(
-                                            text = "Ligne rouge : Limite quotidienne autorisée (120 min / 2h)",
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(modifier = Modifier.height(16.dp))
+                                    }
 
-                                        // Custom Canvas Bar Chart representing Recharts
-                                        val primaryColor = MbotePurplePrimary
-                                        val warningColor = Color(0xFFEF4444)
+                                    // Panic alerts history
+                                    Card(
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                    ) {
+                                        Column(modifier = Modifier.padding(16.dp)) {
+                                            Text(
+                                                text = "Historique des alertes SOS & Localisations GPS 📍",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Coordonnées géographiques capturées lors des déclenchements",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(12.dp))
 
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(140.dp)
-                                                .padding(horizontal = 8.dp)
-                                        ) {
-                                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                                val maxVal = 180f // 3 hours max scale
-                                                val chartHeight = size.height - 30f
-                                                val barWidth = size.width / (weeklyUsageMinutes.size * 2.2f)
-
-                                                // Draw limit line at 120 mins (2h)
-                                                val limitY = chartHeight * (1f - (120f / maxVal))
-                                                drawLine(
-                                                    color = warningColor.copy(alpha = 0.8f),
-                                                    start = Offset(0f, limitY),
-                                                    end = Offset(size.width, limitY),
-                                                    strokeWidth = 3f
+                                            if (panicAlerts.isEmpty()) {
+                                                Text(
+                                                    text = "Aucune alerte d'urgence enregistrée récemment. L'enfant est en sécurité.",
+                                                    fontSize = 12.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
-
-                                                weeklyUsageMinutes.forEachIndexed { index, mins ->
-                                                    val barHeight = chartHeight * (mins / maxVal)
-                                                    val left = index * (size.width / weeklyUsageMinutes.size) + barWidth / 2f
-                                                    val top = chartHeight - barHeight
-
-                                                    drawRect(
-                                                        color = if (mins > 120) warningColor else primaryColor,
-                                                        topLeft = Offset(left, top),
-                                                        size = Size(barWidth, barHeight)
-                                                    )
+                                            } else {
+                                                panicAlerts.forEach { alert ->
+                                                    Surface(
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        color = if (alert.isResolved) MaterialTheme.colorScheme.surface else Color(0xFFFEF2F2),
+                                                        border = BorderStroke(1.dp, if (alert.isResolved) MaterialTheme.colorScheme.outline.copy(alpha = 0.2f) else Color(0xFFFCA5A5)),
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(vertical = 4.dp)
+                                                            .clickable {
+                                                                selectedPanicForDetail = alert
+                                                                showActivePanicDetail = true
+                                                            }
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .padding(12.dp),
+                                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Row(
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                                modifier = Modifier.weight(1f)
+                                                            ) {
+                                                                Surface(
+                                                                    shape = CircleShape,
+                                                                    color = if (alert.isResolved) Color(0xFF10B981).copy(alpha = 0.15f) else Color(0xFFEF4444).copy(alpha = 0.15f),
+                                                                    modifier = Modifier.size(36.dp)
+                                                                ) {
+                                                                    Box(contentAlignment = Alignment.Center) {
+                                                                        Icon(
+                                                                            imageVector = if (alert.isResolved) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                                                            contentDescription = null,
+                                                                            tint = if (alert.isResolved) Color(0xFF10B981) else Color(0xFFEF4444),
+                                                                            modifier = Modifier.size(20.dp)
+                                                                        )
+                                                                    }
+                                                                }
+                                                                Column {
+                                                                    Text(
+                                                                        text = "${alert.emergencyType} • ${alert.timestamp}",
+                                                                        fontWeight = FontWeight.Bold,
+                                                                        fontSize = 12.5.sp,
+                                                                        color = MaterialTheme.colorScheme.onSurface
+                                                                    )
+                                                                    Text(
+                                                                        text = "📍 ${alert.address}",
+                                                                        fontSize = 11.sp,
+                                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                        maxLines = 1
+                                                                    )
+                                                                }
+                                                            }
+                                                            Icon(
+                                                                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                                                contentDescription = "Voir sur carte",
+                                                                tint = MbotePurplePrimary,
+                                                                modifier = Modifier.size(14.dp)
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
-
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceAround
-                                        ) {
-                                            daysOfWeek.forEach { day ->
-                                                Text(day, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                            3 -> {
+                                // DASHBOARD TAB (1): Weekly usage report & Recharts-style bar chart (3)
+                                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    // Summary Card
+                                    Card(
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MbotePurplePrimary.copy(alpha = 0.12f)),
+                                        border = BorderStroke(1.dp, MbotePurplePrimary.copy(alpha = 0.3f))
+                                    ) {
+                                        Column(modifier = Modifier.padding(16.dp)) {
+                                            Text(
+                                                text = "Rapport d'Utilisation Hebdomadaire 📊",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp,
+                                                color = MbotePurplePrimary
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Column {
+                                                    Text("Temps total (7j)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    Text("11h 45m", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                                                }
+                                                Column {
+                                                    Text("Moyenne / jour", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    Text("1h 41m", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MbotePurplePrimary)
+                                                }
+                                                Column {
+                                                    Text("Statut Limite 2h", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    Text("Respecté ✓", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF10B981))
+                                                }
                                             }
                                         }
                                     }
-                                }
 
-                                 // Summary of Restricted Actions Taken
-                                Card(
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                                ) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
-                                        Text(
-                                            text = "Résumé des actions de restriction appliquées",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.5.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        RestrictionActionRow(icon = Icons.Default.Nightlight, title = "Verrouillages nocturnes (00h-06h)", count = "12 activés")
-                                        RestrictionActionRow(icon = Icons.Default.Comment, title = "Couvre-feux commentaires de soirée", count = "5 appliqués")
-                                        RestrictionActionRow(icon = Icons.Default.School, title = "Restrictions heures de cours (08h-16h)", count = "8 alertes")
-                                        RestrictionActionRow(icon = Icons.Default.Timer, title = "Alerte dépassement limite 2h", count = "2 avertissements")
+                                    // Recharts-style Bar Chart (3)
+                                    Card(
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                    ) {
+                                        Column(modifier = Modifier.padding(16.dp)) {
+                                            Text(
+                                                text = "3) Visualisation de l'utilisation journalière (Derniers 7 jours)",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Ligne rouge : Limite quotidienne autorisée (120 min / 2h)",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(16.dp))
+
+                                            // Custom Canvas Bar Chart representing Recharts
+                                            val primaryColor = MbotePurplePrimary
+                                            val warningColor = Color(0xFFEF4444)
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(140.dp)
+                                                    .padding(horizontal = 8.dp)
+                                            ) {
+                                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                                    val maxVal = 180f // 3 hours max scale
+                                                    val chartHeight = size.height - 30f
+                                                    val barWidth = size.width / (weeklyUsageMinutes.size * 2.2f)
+
+                                                    // Draw limit line at 120 mins (2h)
+                                                    val limitY = chartHeight * (1f - (120f / maxVal))
+                                                    drawLine(
+                                                        color = warningColor.copy(alpha = 0.8f),
+                                                        start = Offset(0f, limitY),
+                                                        end = Offset(size.width, limitY),
+                                                        strokeWidth = 3f
+                                                    )
+
+                                                    weeklyUsageMinutes.forEachIndexed { index, mins ->
+                                                        val barHeight = chartHeight * (mins / maxVal)
+                                                        val left = index * (size.width / weeklyUsageMinutes.size) + barWidth / 2f
+                                                        val top = chartHeight - barHeight
+
+                                                        drawRect(
+                                                            color = if (mins > 120) warningColor else primaryColor,
+                                                            topLeft = Offset(left, top),
+                                                            size = Size(barWidth, barHeight)
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceAround
+                                            ) {
+                                                daysOfWeek.forEach { day ->
+                                                    Text(day, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                            }
+                                        }
                                     }
-                                }
 
-                                // Chronological list of 'at-risk' actions detected (3)
-                                Card(
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                                ) {
-                                    Column(modifier = Modifier.padding(16.dp)) {
-                                        Text(
-                                            text = "Chronologie des actions à risque détectées ⚠️",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 13.5.sp,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = "Tentatives de commentaires interdits, accès hors horaires, dépassements",
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        if (userProfile.atRiskActions.isEmpty()) {
-                                            Text("Aucune action à risque détectée récemment.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        } else {
-                                            userProfile.atRiskActions.forEach { action ->
-                                                AtRiskActionCard(action)
-                                                Spacer(modifier = Modifier.height(8.dp))
+                                     // Summary of Restricted Actions Taken
+                                    Card(
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                    ) {
+                                        Column(modifier = Modifier.padding(16.dp)) {
+                                            Text(
+                                                text = "Résumé des actions de restriction appliquées",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Spacer(modifier = Modifier.height(10.dp))
+                                            RestrictionActionRow(icon = Icons.Default.Nightlight, title = "Verrouillages nocturnes (00h-06h)", count = "12 activés")
+                                            RestrictionActionRow(icon = Icons.Default.Comment, title = "Couvre-feux commentaires de soirée", count = "5 appliqués")
+                                            RestrictionActionRow(icon = Icons.Default.School, title = "Restrictions heures de cours (08h-16h)", count = "8 alertes")
+                                            RestrictionActionRow(icon = Icons.Default.Timer, title = "Alerte dépassement limite 2h", count = "2 avertissements")
+                                        }
+                                    }
+
+                                    // Chronological list of 'at-risk' actions detected (3)
+                                    Card(
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                    ) {
+                                        Column(modifier = Modifier.padding(16.dp)) {
+                                            Text(
+                                                text = "Chronologie des actions à risque détectées ⚠️",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Tentatives de commentaires interdits, accès hors horaires, dépassements",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            if (userProfile.atRiskActions.isEmpty()) {
+                                                Text("Aucune action à risque détectée récemment.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            } else {
+                                                userProfile.atRiskActions.forEach { action ->
+                                                    AtRiskActionCard(action)
+                                                    Spacer(modifier = Modifier.height(8.dp))
+                                                }
                                             }
                                         }
                                     }
@@ -837,6 +1020,23 @@ fun ParentalControlDialog(
                 }
             }
         }
+    }
+
+    if (showActivePanicDetail && (selectedPanicForDetail ?: activePanicAlert) != null) {
+        val alertToDisplay = selectedPanicForDetail ?: activePanicAlert!!
+        ParentPanicLocationDetailDialog(
+            alert = alertToDisplay,
+            childInfo = linkedChildState,
+            onDismiss = { 
+                showActivePanicDetail = false 
+                selectedPanicForDetail = null
+            },
+            onResolve = { id ->
+                onResolvePanicAlert(id)
+                showActivePanicDetail = false
+                selectedPanicForDetail = null
+            }
+        )
     }
 }
 

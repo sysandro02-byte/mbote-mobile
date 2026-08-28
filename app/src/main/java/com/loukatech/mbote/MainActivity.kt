@@ -170,6 +170,11 @@ class MainActivity : ComponentActivity() {
             val selectedCreatorProfile by viewModel.selectedCreatorProfile.collectAsStateWithLifecycle()
             val selectedUserProfile by viewModel.selectedUserProfile.collectAsStateWithLifecycle()
             val userGiftState by viewModel.userGiftState.collectAsStateWithLifecycle()
+            val linkedChild by viewModel.linkedChildInfo.collectAsStateWithLifecycle()
+            val parentChildLinkState by viewModel.parentChildLinkState.collectAsStateWithLifecycle()
+            val childApps by viewModel.childInstalledApps.collectAsStateWithLifecycle()
+            val panicAlerts by viewModel.childPanicAlerts.collectAsStateWithLifecycle()
+            val activePanicAlert by viewModel.activePanicAlert.collectAsStateWithLifecycle()
 
             val isMeetingMuted by viewModel.isMutedInMeeting.collectAsStateWithLifecycle()
             val isMeetingVideoOff by viewModel.isVideoOffInMeeting.collectAsStateWithLifecycle()
@@ -485,7 +490,8 @@ class MainActivity : ComponentActivity() {
                                                 },
                                                 onOpenChat = { name ->
                                                     viewModel.openChatByName(name)
-                                                }
+                                                },
+                                                syncedContacts = syncedContacts
                                             )
                                         }
 
@@ -578,6 +584,31 @@ class MainActivity : ComponentActivity() {
                                                 },
                                                 onTogglePremium = { isPremium ->
                                                     viewModel.togglePremiumStatus(isPremium)
+                                                },
+                                                linkedChild = linkedChild,
+                                                onUpgradeParentalPlan = { planId, _ ->
+                                                    viewModel.updateParentalSubscriptionPlan(planId, planId)
+                                                },
+                                                onProcessScannedQr = { payload ->
+                                                    viewModel.processParentChildQrCode(payload)
+                                                },
+                                                childApps = childApps,
+                                                onToggleAppBlocked = { pkg, blocked ->
+                                                    viewModel.toggleChildAppBlocked(pkg, blocked)
+                                                },
+                                                onToggleAllApps = { blocked, category ->
+                                                    viewModel.toggleAllChildApps(blocked, category)
+                                                },
+                                                onToggleAppSchoolRestriction = { pkg, restricted ->
+                                                    viewModel.setChildAppSchoolRestriction(pkg, restricted)
+                                                },
+                                                panicAlerts = panicAlerts,
+                                                activePanicAlert = activePanicAlert,
+                                                onTriggerPanicAlert = { lat, lng, addr, type, msg ->
+                                                    viewModel.triggerChildPanicAlert(lat, lng, addr, type, msg)
+                                                },
+                                                onResolvePanicAlert = { alertId ->
+                                                    viewModel.resolvePanicAlert(alertId)
                                                 }
                                             )
                                         }

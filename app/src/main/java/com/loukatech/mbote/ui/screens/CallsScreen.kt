@@ -30,26 +30,71 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.loukatech.mbote.model.CallItem
+import com.loukatech.mbote.model.CallSettings
 import com.loukatech.mbote.model.CallType
+import com.loukatech.mbote.model.SyncedContact
+import com.loukatech.mbote.model.VoicemailItem
+import com.loukatech.mbote.ui.components.CallDialpadView
+import com.loukatech.mbote.ui.components.CallHelpFeedbackDialog
+import com.loukatech.mbote.ui.components.CallSettingsDialog
 import com.loukatech.mbote.ui.components.FilterChipRow
+import com.loukatech.mbote.ui.components.VisualVoicemailView
 import com.loukatech.mbote.ui.theme.PurplePrimary
 import com.loukatech.mbote.ui.theme.PurpleSoft
 
+enum class CallTabSection {
+    HISTORY,
+    DIALPAD,
+    VOICEMAIL
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CallsScreen(
     calls: List<CallItem>,
     onStartCall: (name: String, avatar: String, isVideo: Boolean) -> Unit,
     onOpenChat: (name: String) -> Unit = {},
+    syncedContacts: List<SyncedContact> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    var activeTab by remember { mutableStateOf(CallTabSection.HISTORY) }
     var selectedFilter by remember { mutableStateOf("Tous") }
     var searchQuery by remember { mutableStateOf("") }
-    var isSearchVisible by remember { mutableStateOf(searchQuery.isNotBlank()) }
     var showHeaderMenu by remember { mutableStateOf(false) }
-    var callList by remember { mutableStateOf(calls) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var showHelpFeedbackDialog by remember { mutableStateOf(false) }
+    var dialedNumber by remember { mutableStateOf("") }
 
-    // Keep callList synced if external list changes
+    var callList by remember { mutableStateOf(calls) }
+    var callSettings by remember { mutableStateOf(CallSettings()) }
+    var isVisualVoicemailActive by remember { mutableStateOf(false) }
+
+    var sampleVoicemails by remember {
+        mutableStateOf(
+            listOf(
+                VoicemailItem(
+                    callerName = "Grace Makiese",
+                    callerNumber = "+242 06 555 4321",
+                    callerAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+                    timestamp = "Aujourd'hui, 14:32",
+                    durationSeconds = 34,
+                    transcription = "Bonjour Marc, je te rappelle concernant la réunion de projet MBoté. Fais-moi signe dès que tu as 5 minutes !",
+                    isImportant = true
+                ),
+                VoicemailItem(
+                    callerName = "Aron Loutala",
+                    callerNumber = "+242 06 111 2233",
+                    callerAvatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+                    timestamp = "Hier, 18:10",
+                    durationSeconds = 52,
+                    transcription = "Salut Marc, les serveurs audio WebRTC sont prêts et validés pour Brazzaville et Kinshasa.",
+                    isImportant = false
+                )
+            )
+        )
+    }
+
     LaunchedEffect(calls) {
         if (calls.isNotEmpty() && callList.isEmpty()) {
             callList = calls
@@ -66,220 +111,343 @@ fun CallsScreen(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 88.dp)
-        ) {
-            // Header Row with Title, 3-dots Menu, and Search Loupe Toggle
-            item {
+    Scaffold(
+        topBar = {
+            // Modern Top Search Bar matching Image 2
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Journal des appels",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Appels vocaux et vidéo HD chiffrés",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    // Header Action Buttons: Search Loupe Toggle + 3-Dots Header Menu
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Search Loupe Toggle Button (placed BEFORE 3-dots icon)
-                        Surface(
-                            onClick = {
-                                isSearchVisible = !isSearchVisible
-                                if (!isSearchVisible && searchQuery.isNotBlank()) {
-                                    searchQuery = ""
-                                }
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (isSearchVisible || searchQuery.isNotBlank()) PurplePrimary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                            shadowElevation = 1.dp,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .testTag("calls_search_toggle_button")
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "Afficher la recherche",
-                                    tint = if (isSearchVisible || searchQuery.isNotBlank()) Color.White else MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        // 3-Dots Header Menu
-                        Box {
-                            Surface(
-                                onClick = { showHeaderMenu = true },
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                                shadowElevation = 1.dp,
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .testTag("calls_header_menu")
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.MoreVert,
-                                        contentDescription = "Options du journal",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-
-                            DropdownMenu(
-                                expanded = showHeaderMenu,
-                                onDismissRequest = { showHeaderMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Lancer une réunion HD") },
-                                    leadingIcon = { Icon(Icons.Default.VideoCall, contentDescription = null, tint = PurplePrimary) },
-                                    onClick = {
-                                        showHeaderMenu = false
-                                        onStartCall("Réunion MBoté Group", "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150", true)
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Effacer tout le journal") },
-                                    leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = Color(0xFFEF4444)) },
-                                    onClick = {
-                                        showHeaderMenu = false
-                                        callList = emptyList()
-                                        Toast.makeText(context, "Journal des appels effacé", Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                                HorizontalDivider()
-                                DropdownMenuItem(
-                                    text = { Text("Paramètres des appels") },
-                                    leadingIcon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
-                                    onClick = {
-                                        showHeaderMenu = false
-                                        Toast.makeText(context, "Qualité vidéo HD & Chiffrement E2E activés", Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Search Bar for Calls (Appears conditionally with animation below header)
-            item {
-                AnimatedVisibility(
-                    visible = isSearchVisible || searchQuery.isNotBlank(),
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
+                    // Search Contacts Bar (Image 2 style)
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text("Rechercher un contact ou un numéro...") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Rechercher", tint = PurplePrimary) },
+                        placeholder = {
+                            Text(
+                                "Search contacts",
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = PurplePrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Effacer")
+                                    Icon(
+                                        Icons.Default.Clear,
+                                        contentDescription = "Clear search",
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                 }
                             }
                         },
                         shape = RoundedCornerShape(24.dp),
                         colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            unfocusedBorderColor = Color.Transparent,
                             focusedBorderColor = PurplePrimary
                         ),
+                        singleLine = true,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("calls_search_input")
+                    )
+
+                    // 3-Dots Menu Button matching Image 2
+                    Box {
+                        IconButton(
+                            onClick = { showHeaderMenu = true },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .testTag("calls_overflow_menu_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Options",
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // 3-Dots Menu Dropdown matching Image 2 options
+                        DropdownMenu(
+                            expanded = showHeaderMenu,
+                            onDismissRequest = { showHeaderMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Call history") },
+                                leadingIcon = { Icon(Icons.Outlined.History, contentDescription = null, tint = PurplePrimary) },
+                                onClick = {
+                                    showHeaderMenu = false
+                                    activeTab = CallTabSection.HISTORY
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Settings") },
+                                leadingIcon = { Icon(Icons.Outlined.Settings, contentDescription = null, tint = PurplePrimary) },
+                                onClick = {
+                                    showHeaderMenu = false
+                                    showSettingsDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Help & feedback") },
+                                leadingIcon = { Icon(Icons.Outlined.HelpOutline, contentDescription = null, tint = PurplePrimary) },
+                                onClick = {
+                                    showHeaderMenu = false
+                                    showHelpFeedbackDialog = true
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Lancer une réunion HD") },
+                                leadingIcon = { Icon(Icons.Default.VideoCall, contentDescription = null, tint = Color(0xFF10B981)) },
+                                onClick = {
+                                    showHeaderMenu = false
+                                    onStartCall("Réunion MBoté HD", "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150", true)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Effacer le journal") },
+                                leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = Color(0xFFEF4444)) },
+                                onClick = {
+                                    showHeaderMenu = false
+                                    callList = emptyList()
+                                    Toast.makeText(context, "Journal des appels effacé", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Sub navigation / Segmented Tabs (Historique, Clavier, Messagerie)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TabSegmentButton(
+                        label = "Journal",
+                        icon = Icons.Outlined.History,
+                        isSelected = activeTab == CallTabSection.HISTORY,
+                        onClick = { activeTab = CallTabSection.HISTORY },
+                        modifier = Modifier.weight(1f)
+                    )
+                    TabSegmentButton(
+                        label = "Clavier",
+                        icon = Icons.Default.Dialpad,
+                        isSelected = activeTab == CallTabSection.DIALPAD,
+                        onClick = { activeTab = CallTabSection.DIALPAD },
+                        modifier = Modifier.weight(1f)
+                    )
+                    TabSegmentButton(
+                        label = "Messagerie",
+                        icon = Icons.Default.Voicemail,
+                        isSelected = activeTab == CallTabSection.VOICEMAIL,
+                        onClick = { activeTab = CallTabSection.VOICEMAIL },
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
-
-            item {
-                Spacer(modifier = Modifier.height(8.dp))
-                FilterChipRow(
-                    filters = filters,
-                    selectedFilter = selectedFilter,
-                    onSelectFilter = { selectedFilter = it },
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-            }
-
-            if (displayedCalls.isEmpty()) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(40.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
+        },
+        floatingActionButton = {
+            // Floating Keypad Button like in Image 2 (visible on History & Voicemail)
+            if (activeTab != CallTabSection.DIALPAD) {
+                Surface(
+                    onClick = { activeTab = CallTabSection.DIALPAD },
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFFD6E2FB), // Soft modern blue/lavender tint as in image 2
+                    shadowElevation = 6.dp,
+                    modifier = Modifier
+                        .padding(bottom = 72.dp)
+                        .size(56.dp)
+                        .testTag("fab_keypad_toggle")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Default.PhoneMissed,
-                            contentDescription = null,
-                            tint = Color.LightGray,
-                            modifier = Modifier.size(52.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = if (searchQuery.isNotBlank()) "Aucun résultat pour \"$searchQuery\"" else "Aucun appel dans cette catégorie",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
+                            imageVector = Icons.Default.Dialpad,
+                            contentDescription = "Ouvrir le clavier d'appel",
+                            tint = Color(0xFF0F172A),
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                 }
-            } else {
-                items(displayedCalls, key = { it.id }) { call ->
-                    CallItemRow(
-                        call = call,
-                        onRedial = { isVideo -> onStartCall(call.name, call.avatar, isVideo) },
-                        onOpenChat = { onOpenChat(call.name) },
-                        onDeleteCall = {
-                            callList = callList.filterNot { it.id == call.id }
-                            Toast.makeText(context, "Appel supprimé du journal", Toast.LENGTH_SHORT).show()
+            }
+        },
+        modifier = modifier.fillMaxSize()
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            when (activeTab) {
+                CallTabSection.HISTORY -> {
+                    // Call History View
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 96.dp)
+                    ) {
+                        item {
+                            FilterChipRow(
+                                filters = filters,
+                                selectedFilter = selectedFilter,
+                                onSelectFilter = { selectedFilter = it },
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
                         }
+
+                        if (displayedCalls.isEmpty()) {
+                            item {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(48.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PhoneMissed,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(52.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = if (searchQuery.isNotBlank()) "Aucun résultat pour \"$searchQuery\"" else "Aucun appel récent",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Vos appels récents s'afficheront ici",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        } else {
+                            items(displayedCalls, key = { it.id }) { call ->
+                                CallItemRow(
+                                    call = call,
+                                    onRedial = { isVideo -> onStartCall(call.name, call.avatar, isVideo) },
+                                    onOpenChat = { onOpenChat(call.name) },
+                                    onDeleteCall = {
+                                        callList = callList.filterNot { it.id == call.id }
+                                        Toast.makeText(context, "Appel supprimé du journal", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                CallTabSection.DIALPAD -> {
+                    // Dialpad matching Image 1
+                    CallDialpadView(
+                        dialedNumber = dialedNumber,
+                        onNumberChange = { dialedNumber = it },
+                        onStartCall = { number, isVideo ->
+                            onStartCall(
+                                number,
+                                "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+                                isVideo
+                            )
+                        },
+                        contacts = syncedContacts,
+                        onSelectContact = { contact ->
+                            onStartCall(contact.name, contact.avatarUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", false)
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                CallTabSection.VOICEMAIL -> {
+                    // Visual Voicemail matching Image 2
+                    VisualVoicemailView(
+                        isVisualVoicemailActive = isVisualVoicemailActive,
+                        onCallVoicemail = {
+                            onStartCall("Messagerie Vocale (123)", "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150", false)
+                        },
+                        onToggleActiveState = { isVisualVoicemailActive = it },
+                        voicemails = sampleVoicemails,
+                        onDeleteVoicemail = { id ->
+                            sampleVoicemails = sampleVoicemails.filterNot { it.id == id }
+                            Toast.makeText(context, "Message vocal supprimé", Toast.LENGTH_SHORT).show()
+                        },
+                        onCallBack = { name, number ->
+                            onStartCall(name, "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", false)
+                        },
+                        modifier = Modifier.fillMaxSize()
                     )
                 }
             }
         }
+    }
 
-        // FAB to start a quick call
-        FloatingActionButton(
-            onClick = {
-                onStartCall(
-                    "Grace Makiese",
-                    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                    false
-                )
-            },
-            containerColor = PurplePrimary,
-            contentColor = Color.White,
-            shape = CircleShape,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(bottom = 84.dp, end = 20.dp)
-                .testTag("fab_new_call")
+    // Call Settings Screen/Dialog (Image 3)
+    if (showSettingsDialog) {
+        CallSettingsDialog(
+            callSettings = callSettings,
+            onUpdateSettings = { callSettings = it },
+            onDismiss = { showSettingsDialog = false }
+        )
+    }
+
+    // Help & Feedback Dialog
+    if (showHelpFeedbackDialog) {
+        CallHelpFeedbackDialog(
+            onDismiss = { showHelpFeedbackDialog = false }
+        )
+    }
+}
+
+@Composable
+fun TabSegmentButton(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = if (isSelected) PurplePrimary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        border = BorderStroke(1.dp, if (isSelected) PurplePrimary else Color.Transparent),
+        modifier = modifier.height(38.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
         ) {
             Icon(
-                imageVector = Icons.Outlined.Call,
-                contentDescription = "Nouvel appel"
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = label,
+                fontSize = 13.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
@@ -310,7 +478,7 @@ fun CallItemRow(
         ) {
             Box(
                 modifier = Modifier
-                    .size(50.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(PurpleSoft)
             ) {
@@ -366,7 +534,7 @@ fun CallItemRow(
                 )
             }
 
-            // 3-Dots Item Menu according to requirements 3 & 7
+            // 3-Dots Item Menu
             Box {
                 IconButton(
                     onClick = { showCallItemMenu = true },

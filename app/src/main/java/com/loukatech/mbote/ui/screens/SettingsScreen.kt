@@ -41,6 +41,10 @@ import com.loukatech.mbote.ui.components.EditBioDialog
 import com.loukatech.mbote.ui.components.GiftHistoryDialog
 import com.loukatech.mbote.ui.components.GiftStoreDialog
 import com.loukatech.mbote.ui.components.ShareProfileQrDialog
+import com.loukatech.mbote.ui.components.ParentalControlPremiumBadge
+import com.loukatech.mbote.ui.components.ParentShieldProfileCard
+import com.loukatech.mbote.ui.components.ChildQrScannerDialog
+import com.loukatech.mbote.ui.components.ChildLinkSuccessDialog
 import com.loukatech.mbote.ui.theme.MbotePurpleLight
 import com.loukatech.mbote.ui.theme.MbotePurplePrimary
 import com.loukatech.mbote.ui.theme.MbotePurpleSoft
@@ -54,7 +58,8 @@ enum class SettingSection {
     BACKUP,
     AI_TOOLS,
     FIND_DEVICE,
-    HELP_SUPPORT
+    HELP_SUPPORT,
+    PARENTAL_CONTROL_PREMIUM
 }
 
 @Composable
@@ -88,6 +93,17 @@ fun SettingsScreen(
     onSaveParentalControl: (Boolean, String, Boolean, Int, Int, Boolean, Boolean) -> Unit = { _, _, _, _, _, _, _ -> },
     onSendSosAlert: (String, String) -> Boolean = { _, _ -> true },
     onTogglePremium: (Boolean) -> Unit = {},
+    linkedChild: LinkedChildInfo = LinkedChildInfo(),
+    onUpgradeParentalPlan: (String, Long) -> Unit = { _, _ -> },
+    onProcessScannedQr: (String) -> Unit = {},
+    childApps: List<ChildInstalledApp> = emptyList(),
+    onToggleAppBlocked: (packageName: String, isBlocked: Boolean) -> Unit = { _, _ -> },
+    onToggleAllApps: (blockAll: Boolean, category: String?) -> Unit = { _, _ -> },
+    onToggleAppSchoolRestriction: (packageName: String, restricted: Boolean) -> Unit = { _, _ -> },
+    panicAlerts: List<ChildPanicAlert> = emptyList(),
+    activePanicAlert: ChildPanicAlert? = null,
+    onTriggerPanicAlert: (latitude: Double, longitude: Double, address: String, emergencyType: String, message: String) -> Unit = { _, _, _, _, _ -> },
+    onResolvePanicAlert: (alertId: String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -106,6 +122,8 @@ fun SettingsScreen(
     var showWalletHubDialog by remember { mutableStateOf(false) }
     var showAnalyticsDialog by remember { mutableStateOf(false) }
     var showBadgeStoreDialog by remember { mutableStateOf(false) }
+    var showChildScannerDialog by remember { mutableStateOf(false) }
+    var showChildSuccessDialog by remember { mutableStateOf(false) }
 
     // Language Selection Dialog
     if (showLanguageDialog) {
@@ -219,8 +237,65 @@ fun SettingsScreen(
             onDismiss = { showParentalControlDialog = false },
             onSaveParentalControl = onSaveParentalControl,
             onSendSosAlert = onSendSosAlert,
-            onUnlockPremium = { onTogglePremium(true) }
+            onUnlockPremium = { onTogglePremium(true) },
+            onOpenPremiumScreen = {
+                showParentalControlDialog = false
+                activeSubSetting = SettingSection.PARENTAL_CONTROL_PREMIUM
+            },
+            linkedChild = linkedChild,
+            childApps = childApps,
+            onToggleAppBlocked = onToggleAppBlocked,
+            onToggleAllApps = onToggleAllApps,
+            onToggleAppSchoolRestriction = onToggleAppSchoolRestriction,
+            panicAlerts = panicAlerts,
+            activePanicAlert = activePanicAlert,
+            onTriggerPanicAlert = onTriggerPanicAlert,
+            onResolvePanicAlert = onResolvePanicAlert
         )
+    }
+
+    // Direct QR Scanner Dialog for child account linking
+    if (showChildScannerDialog) {
+        ChildQrScannerDialog(
+            onDismiss = { showChildScannerDialog = false },
+            onQrScanned = { payload ->
+                showChildScannerDialog = false
+                onProcessScannedQr(payload)
+                showChildSuccessDialog = true
+            }
+        )
+    }
+
+    // Direct Success Dialog
+    if (showChildSuccessDialog) {
+        ChildLinkSuccessDialog(
+            childInfo = linkedChild,
+            linkedTimestamp = java.text.SimpleDateFormat("dd/MM/yyyy à HH:mm", java.util.Locale.getDefault()).format(java.util.Date()),
+            onDismiss = { showChildSuccessDialog = false },
+            onConfigureRules = {
+                showChildSuccessDialog = false
+                showParentalControlDialog = true
+            }
+        )
+    }
+
+    // 1) Compose screen for the premium parental control features
+    if (activeSubSetting == SettingSection.PARENTAL_CONTROL_PREMIUM) {
+        ParentalControlPremiumScreen(
+            userProfile = userProfile,
+            linkedChild = linkedChild,
+            onBack = { activeSubSetting = null },
+            onOpenQrScanner = { showChildScannerDialog = true },
+            onOpenParentalSettings = {
+                activeSubSetting = null
+                showParentalControlDialog = true
+            },
+            onUpgradePlan = { planId, price ->
+                onUpgradeParentalPlan(planId, price)
+                onTogglePremium(true)
+            }
+        )
+        return
     }
 
     // Sub-Settings Dialogs
@@ -240,6 +315,7 @@ fun SettingsScreen(
         SettingSection.AI_TOOLS -> AiToolsSubSettingsDialog(onDismiss = { activeSubSetting = null })
         SettingSection.FIND_DEVICE -> FindMyDeviceSubSettingsDialog(onDismiss = { activeSubSetting = null })
         SettingSection.HELP_SUPPORT -> HelpSupportSubSettingsDialog(onDismiss = { activeSubSetting = null })
+        SettingSection.PARENTAL_CONTROL_PREMIUM -> {}
         null -> {}
     }
 
@@ -575,6 +651,13 @@ fun SettingsScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             com.loukatech.mbote.ui.components.UserBadgesRow(badges = userProfile.badges, compact = true)
+                            ParentalControlPremiumBadge(
+                                isPremium = userProfile.isPremium,
+                                isParentalActive = userProfile.parentalControlActive,
+                                isChildLinked = userProfile.isChildAccountLinkedByQrScan,
+                                onClick = { showParentalControlDialog = true },
+                                compact = true
+                            )
                         }
 
                         Row(
@@ -727,6 +810,17 @@ fun SettingsScreen(
                         }
 
                         Spacer(modifier = Modifier.height(12.dp))
+
+                        // 4) Premium User Status Visual Indicator (Parental Control Shield)
+                        ParentShieldProfileCard(
+                            userProfile = userProfile,
+                            linkedChild = linkedChild,
+                            onOpenSettings = { showParentalControlDialog = true },
+                            onOpenPremium = { activeSubSetting = SettingSection.PARENTAL_CONTROL_PREMIUM },
+                            onScanQr = { showChildScannerDialog = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
                         Spacer(modifier = Modifier.height(10.dp))
 
@@ -875,6 +969,17 @@ fun SettingsScreen(
                         subtitle = "Cadeaux reçus et envoyés, gains cumulés (${userGiftState.totalVirtualEarnedFcfa} FCFA)",
                         onClick = { showGiftHistoryDialog = true }
                     )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+
+                    // Bouclier Parental Pro 👑
+                    SettingsClickRow(
+                        icon = Icons.Default.Shield,
+                        title = "Bouclier Parental Pro 👑",
+                        subtitle = "Formules d'abonnement, gestion fratrie & scan QR",
+                        badge = if (userProfile.isPremium) "👑 Pro" else "⭐ Premium",
+                        badgeColor = Color(0xFFEAB308),
+                        onClick = { activeSubSetting = SettingSection.PARENTAL_CONTROL_PREMIUM }
+                    )
                 }
             }
         }
@@ -906,7 +1011,9 @@ fun SettingsScreen(
                     SettingsClickRow(
                         icon = Icons.Default.Shield,
                         title = "Contrôle Parental 🛡️",
-                        subtitle = if (userProfile.parentalControlActive) "Activé (${userProfile.parentEmail})" else "Désactivé (Protection des mineurs 🔞)",
+                        subtitle = if (userProfile.parentalControlActive) "Activé (${userProfile.parentEmail}) • Enfant lié ✓" else "Protection des mineurs 🔞 (Liaison QR)",
+                        badge = if (userProfile.parentalControlActive && userProfile.isChildAccountLinkedByQrScan) "✓ Protégé" else if (userProfile.isPremium) "👑 Pro" else "⭐ Premium",
+                        badgeColor = if (userProfile.parentalControlActive && userProfile.isChildAccountLinkedByQrScan) Color(0xFF10B981) else Color(0xFFEAB308),
                         onClick = { showParentalControlDialog = true }
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
