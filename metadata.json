@@ -1,0 +1,13 @@
+{
+  "name": "MBoté",
+  "description": "L'application de messagerie intelligente et sécurisée, maintenant disponible sur mobile et tablette.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "contacts",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

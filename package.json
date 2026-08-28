@@ -1,0 +1,9 @@
+{
+  "name": "mbote",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MBoté Android native application",
+  "scripts": {
+    "build": "echo 'Android project ready'"
+  }
+}

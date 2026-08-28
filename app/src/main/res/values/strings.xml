@@ -1,0 +1,21 @@
+<resources>
+    <string name="app_name">MBoté</string>
+    <string name="app_tagline">Messagerie intelligente et sécurisée</string>
+    <string name="tab_messages">Messages</string>
+    <string name="tab_calls">Appels</string>
+    <string name="tab_actus">Actus</string>
+    <string name="tab_meetings">Réunions</string>
+    <string name="tab_settings">Paramètres</string>
+    <string name="tab_jobs">Emplois</string>
+    <string name="search_placeholder">Rechercher des messages, contacts…</string>
+    <string name="new_chat">Nouvelle discussion</string>
+    <string name="new_group">Nouveau groupe</string>
+    <string name="new_channel">Créer un canal</string>
+    <string name="new_meeting">Nouvelle réunion</string>
+    <string name="join_meeting">Rejoindre réunion</string>
+    <string name="schedule_meeting">Planifier réunion</string>
+    <string name="send_message">Envoyer</string>
+    <string name="type_message">Écrivez un message…</string>
+    <string name="status_updates">Statuts récents</string>
+    <string name="add_status">Ajouter un statut</string>
+</resources>

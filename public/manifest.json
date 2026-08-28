@@ -1,0 +1,30 @@
+{
+  "name": "MBote",
+  "short_name": "MBote",
+  "description": "Messagerie, appels, statuts et videos courtes dans une experience mobile native.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090713",
+  "theme_color": "#8b5cf6",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

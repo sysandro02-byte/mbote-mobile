@@ -1,0 +1,23 @@
+{
+  "entities": {
+    "reminder": {
+      "title": "Reminder",
+      "description": "A scheduled task or reminder",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "reminderTime": { "type": "string", "format": "date-time" },
+        "isCompleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "reminderTime", "isCompleted", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/reminders/{reminderId}": {
+      "schema": "reminder",
+      "description": "Store for user reminders"
+    }
+  }
+}

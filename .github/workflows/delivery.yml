@@ -1,0 +1,179 @@
+name: Delivery
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: delivery-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERCEL_ORG_ID: team_pldethl7y6hhzXTpWPxA55Yu
+  VERCEL_PROJECT_ID: prj_AdTPpu6kvFZfZyPYOMiSl8RisR9h
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  deploy-web:
+    name: Deploy Vercel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Check Vercel secrets
+        id: vercel-secrets
+        shell: bash
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -n "$VERCEL_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Missing repository secret VERCEL_TOKEN; skipping Vercel deployment."
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pull Vercel configuration
+        if: steps.vercel-secrets.outputs.available == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build Vercel output
+        if: steps.vercel-secrets.outputs.available == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy production
+        if: steps.vercel-secrets.outputs.available == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+
+  android-release:
+    name: Build Android release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Check Android signing secrets
+        id: android-signing
+        shell: bash
+        env:
+          MBOTE_ANDROID_KEYSTORE_BASE64: ${{ secrets.MBOTE_ANDROID_KEYSTORE_BASE64 }}
+          MBOTE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MBOTE_ANDROID_KEYSTORE_PASSWORD }}
+          MBOTE_ANDROID_KEY_ALIAS: ${{ secrets.MBOTE_ANDROID_KEY_ALIAS }}
+          MBOTE_ANDROID_KEY_PASSWORD: ${{ secrets.MBOTE_ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$MBOTE_ANDROID_KEYSTORE_BASE64" ] \
+            && [ -n "$MBOTE_ANDROID_KEYSTORE_PASSWORD" ] \
+            && [ -n "$MBOTE_ANDROID_KEY_ALIAS" ] \
+            && [ -n "$MBOTE_ANDROID_KEY_PASSWORD" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Android signing secrets are incomplete; building unsigned debug APK instead of release APK/AAB."
+          fi
+
+      - name: Restore Android keystore
+        if: steps.android-signing.outputs.available == 'true'
+        shell: bash
+        env:
+          MBOTE_ANDROID_KEYSTORE_BASE64: ${{ secrets.MBOTE_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$MBOTE_ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/mbote-release.jks
+
+      - name: Write signing properties
+        if: steps.android-signing.outputs.available == 'true'
+        shell: bash
+        env:
+          MBOTE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MBOTE_ANDROID_KEYSTORE_PASSWORD }}
+          MBOTE_ANDROID_KEY_ALIAS: ${{ secrets.MBOTE_ANDROID_KEY_ALIAS }}
+          MBOTE_ANDROID_KEY_PASSWORD: ${{ secrets.MBOTE_ANDROID_KEY_PASSWORD }}
+        run: |
+          cat <<EOF > android/signing.properties
+          storeFile=mbote-release.jks
+          storePassword=${MBOTE_ANDROID_KEYSTORE_PASSWORD}
+          keyAlias=${MBOTE_ANDROID_KEY_ALIAS}
+          keyPassword=${MBOTE_ANDROID_KEY_PASSWORD}
+          EOF
+
+      - name: Build release APK and AAB
+        if: steps.android-signing.outputs.available == 'true'
+        working-directory: android
+        env:
+          MBOTE_VERSION_CODE: ${{ github.run_number }}
+          MBOTE_VERSION_NAME: 1.0.${{ github.run_number }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease bundleRelease
+
+      - name: Build debug APK without signing secrets
+        if: steps.android-signing.outputs.available != 'true'
+        working-directory: android
+        env:
+          MBOTE_VERSION_CODE: ${{ github.run_number }}
+          MBOTE_VERSION_NAME: 1.0.${{ github.run_number }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mbote-android-release
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/outputs/bundle/release/app-release.aab
+            android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publish rolling mobile release
+        if: steps.android-signing.outputs.available == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mobile-latest
+          name: MBote Mobile Latest
+          prerelease: true
+          make_latest: true
+          files: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/outputs/bundle/release/app-release.aab

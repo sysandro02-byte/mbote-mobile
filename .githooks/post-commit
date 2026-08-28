@@ -1,0 +1,14 @@
+#!/bin/sh
+
+if [ "$MBOTE_SKIP_AUTO_PUSH" = "1" ]; then
+  exit 0
+fi
+
+branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null)"
+
+if [ -z "$branch" ] || [ "$branch" = "HEAD" ]; then
+  exit 0
+fi
+
+printf '%s\n' "[mbote] auto-push $branch"
+git push origin "HEAD:$branch"

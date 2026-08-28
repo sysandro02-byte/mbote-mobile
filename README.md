@@ -1,11 +1,42 @@
-<div align="center">
+# MBoté (Android Native)
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Application mobile native de messagerie intelligente, appels sécurisés et visioconférences développée avec **Kotlin** et **Jetpack Compose**.
 
-  <h1>Built with AI Studio</h2>
+## ✨ Fonctionnalités Principales
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+- 💬 **Discussions & Messagerie Instantanée** :
+  - Échanges de messages textes chiffrés de bout en bout (AES-256)
+  - Assistant d'Intelligence Artificielle **Luna AI** intégré
+  - Messages vocaux, citations/réponses rapides, réactions emoji
+  - Filtres par conversations non lues, groupes et canaux officiels
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+- 📞 **Appels Audio & Vidéo** :
+  - Journal complet des appels (entrants, sortants, manqués)
+  - Interface d'appel en direct avec contrôle du micro, haut-parleur et flux caméra
 
-</div>
+- 📹 **Visioconférences & Réunions (WebRTC)** :
+  - Démarrage instantané ou planification de réunions
+  - Rejoindre par code de conférence
+  - Vue multiflux des participants avec grille vidéo
+
+- 📰 **Actus & Statuts (Moments)** :
+  - Statuts éphémères en carrousel avec prévisualisation plein écran
+  - Fil d'actualités technologiques et innovations
+  - Système d'interactions (J'aime, commentaires en direct, partages)
+
+- 💼 **Offres d'emploi Tech** :
+  - Espace de recrutement et opportunités professionnelles
+  - Filtres par domaine d'expertise et formulaire de candidature simplifié
+
+- ⚙️ **Profil & Paramètres** :
+  - Gestion du profil utilisateur et badge vérifié
+  - Partage de profil par code QR
+  - Thème sombre / clair, notifications et sécurité
+
+## 🛠️ Stack Technique
+
+- **Langage** : Kotlin 2.0+
+- **UI Framework** : Jetpack Compose (Material 3)
+- **Architecture** : MVVM (Model-View-ViewModel) avec Kotlin Coroutines & StateFlow
+- **Design System** : Material You avec palette dynamique violette / améthyste
+- **Images** : Coil Compose
