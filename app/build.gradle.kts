@@ -16,6 +16,9 @@ if (envFile.exists()) {
         envProps.load(stream)
     }
 }
+val mboteApiBaseUrl = envProps.getProperty("MBOTE_API_BASE_URL")
+    ?: System.getenv("MBOTE_API_BASE_URL")
+    ?: ""
 val viteSocketUrl = envProps.getProperty("VITE_SOCKET_URL")
     ?: System.getenv("VITE_SOCKET_URL")
     ?: "wss://mbote-socket.loukatech.com/ws"
@@ -61,6 +64,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "VITE_SOCKET_URL", "\"$viteSocketUrl\"")
+        buildConfigField("String", "MBOTE_API_BASE_URL", "\"$mboteApiBaseUrl\"")
         buildConfigField("String", "VITE_SUPABASE_URL", "\"$viteSupabaseUrl\"")
         buildConfigField("String", "VITE_SUPABASE_ANON_KEY", "\"$viteSupabaseAnonKey\"")
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")

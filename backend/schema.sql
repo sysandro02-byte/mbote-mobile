@@ -62,6 +62,14 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Per-user message bookmarks.  The unique key makes the API toggle atomic.
+CREATE TABLE IF NOT EXISTS message_stars (
+    message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (message_id, user_id)
+);
+
 -- 5. SHORT VIDEOS (ShortMBoté)
 CREATE TABLE IF NOT EXISTS short_videos (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -97,10 +105,46 @@ CREATE TABLE IF NOT EXISTS news_posts (
     title VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
     image_url TEXT,
+    media_type VARCHAR(50) DEFAULT 'TEXT',
     likes_count INT DEFAULT 0,
     comments_count INT DEFAULT 0,
+    shares_count INT DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Safe upgrades for databases created by versions prior to 1.5.0.
+ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS media_type VARCHAR(50) DEFAULT 'TEXT';
+ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS shares_count INT DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS news_post_likes (
+    news_post_id UUID REFERENCES news_posts(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (news_post_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS news_post_comments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    news_post_id UUID REFERENCES news_posts(id) ON DELETE CASCADE,
+    author_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS short_video_comments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    short_video_id UUID REFERENCES short_videos(id) ON DELETE CASCADE,
+    author_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_participants_user ON chat_participants(user_id, chat_id);
+CREATE INDEX IF NOT EXISTS idx_messages_chat_created ON messages(chat_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_news_posts_created ON news_posts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_short_videos_created ON short_videos(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_post_comments_post ON news_post_comments(news_post_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_short_video_comments_video ON short_video_comments(short_video_id, created_at);
 
 -- 8. JOB OFFERS (MBoté Emploi)
 CREATE TABLE IF NOT EXISTS job_offers (

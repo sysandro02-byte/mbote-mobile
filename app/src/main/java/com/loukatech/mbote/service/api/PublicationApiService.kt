@@ -49,6 +49,9 @@ data class CommentDto(
 )
 
 @Serializable
+private data class CreateCommentRequest(val text: String)
+
+@Serializable
 data class LikePublicationResponse(
     val postId: String,
     val isLiked: Boolean,
@@ -81,12 +84,11 @@ class PublicationApiService {
                 val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<PublicationDto>>>(responseText)
                 Result.success(response.data ?: emptyList())
             } else {
-                Log.w(tag, "Publications API HTTP $responseCode. Using production mock data stream.")
-                Result.success(getInitialFallbackPublications(category))
+                Result.failure(IllegalStateException("Publications API HTTP $responseCode"))
             }
         } catch (e: Exception) {
-            Log.d(tag, "Publication API connection info: ${e.message}. Active fallback stream loaded.")
-            Result.success(getInitialFallbackPublications(category))
+            Log.w(tag, "Publication API indisponible: ${e.message}")
+            Result.failure(e)
         }
     }
 
@@ -121,34 +123,10 @@ class PublicationApiService {
                 val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<PublicationDto>>(responseText)
                 Result.success(response.data!!)
             } else {
-                val created = PublicationDto(
-                    id = "pub_" + System.currentTimeMillis(),
-                    authorName = request.authorName,
-                    authorAvatar = request.authorAvatar,
-                    contentText = request.contentText,
-                    mediaUrl = request.mediaUrl,
-                    mediaType = request.mediaType,
-                    timestamp = "À l'instant",
-                    likesCount = 0,
-                    commentsCount = 0,
-                    category = request.category
-                )
-                Result.success(created)
+                Result.failure(IllegalStateException("Publication API HTTP $responseCode"))
             }
         } catch (e: Exception) {
-            val created = PublicationDto(
-                id = "pub_" + System.currentTimeMillis(),
-                authorName = request.authorName,
-                authorAvatar = request.authorAvatar,
-                contentText = request.contentText,
-                mediaUrl = request.mediaUrl,
-                mediaType = request.mediaType,
-                timestamp = "À l'instant",
-                likesCount = 0,
-                commentsCount = 0,
-                category = request.category
-            )
-            Result.success(created)
+            Result.failure(e)
         }
     }
 
@@ -165,12 +143,12 @@ class PublicationApiService {
                 readTimeout = 5000
                 MboteBackendConfig.authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
             }
-            connection.responseCode
-            val newLiked = !currentLiked
-            Result.success(LikePublicationResponse(postId, newLiked, if (newLiked) 1 else 0))
+            val responseCode = connection.responseCode
+            if (responseCode !in 200..299) return@withContext Result.failure(IllegalStateException("Publication API HTTP $responseCode"))
+            val responseText = BufferedReader(InputStreamReader(connection.inputStream, "UTF-8")).use { it.readText() }
+            Result.success(MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<LikePublicationResponse>>(responseText).data!!)
         } catch (e: Exception) {
-            val newLiked = !currentLiked
-            Result.success(LikePublicationResponse(postId, newLiked, if (newLiked) 1 else 0))
+            Result.failure(e)
         }
     }
 
@@ -178,61 +156,22 @@ class PublicationApiService {
      * Post Comment API
      */
     suspend fun addComment(postId: String, authorName: String, authorAvatar: String, text: String): Result<CommentDto> = withContext(Dispatchers.IO) {
-        val comment = CommentDto(
-            id = "comment_" + System.currentTimeMillis(),
-            postId = postId,
-            authorName = authorName,
-            authorAvatar = authorAvatar,
-            commentText = text,
-            timestamp = "À l'instant"
-        )
-        Result.success(comment)
+        try {
+            val connection = (URL("${MboteBackendConfig.baseUrl}/publications/$postId/comments").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 6000
+                readTimeout = 6000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                MboteBackendConfig.authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+            }
+            OutputStreamWriter(connection.outputStream, "UTF-8").use { it.write(MboteBackendConfig.jsonParser.encodeToString(CreateCommentRequest(text))) }
+            if (connection.responseCode !in 200..299) return@withContext Result.failure(IllegalStateException("Publication API HTTP ${connection.responseCode}"))
+            val responseText = BufferedReader(InputStreamReader(connection.inputStream, "UTF-8")).use { it.readText() }
+            Result.success(MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<CommentDto>>(responseText).data!!)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
-    private fun getInitialFallbackPublications(category: String): List<PublicationDto> {
-        val all = listOf(
-            PublicationDto(
-                id = "pub_1",
-                authorName = "LoukaTech Officiel",
-                authorAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                authorTitle = "Développeur MBoté • Brazzaville",
-                contentText = "🚀 Heureux de vous présenter la nouvelle mise à jour de MBoté avec le support des visioconférences HD en direct et le flux de publications en temps réel pour le Congo !",
-                mediaUrl = "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=800&auto=format&fit=crop&q=80",
-                mediaType = "IMAGE",
-                timestamp = "Il y a 10 min",
-                likesCount = 248,
-                commentsCount = 42,
-                sharesCount = 18,
-                category = "ACTUALITÉS"
-            ),
-            PublicationDto(
-                id = "pub_2",
-                authorName = "Aron AI",
-                authorAvatar = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
-                authorTitle = "Assistant IA MBoté",
-                contentText = "💡 Le saviez-vous ? Vous pouvez maintenant poser vos questions en Lingala ou Kituba à Aron AI directement depuis vos discussions et vos publications MBoté !",
-                timestamp = "Il y a 35 min",
-                likesCount = 189,
-                commentsCount = 29,
-                sharesCount = 12,
-                category = "TECHNOLOGIE"
-            ),
-            PublicationDto(
-                id = "pub_3",
-                authorName = "Brazza Tech Community",
-                authorAvatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-                authorTitle = "Communauté Tech Congo",
-                contentText = "📢 Inscriptions ouvertes pour le Hackathon MBoté 2026 à Pointe-Noire. Développez des solutions d'impact pour l'Afrique de l'Ouest et du Centre !",
-                mediaUrl = "https://images.unsplash.com/photo-1531482615713-2afd69097998?w=800&auto=format&fit=crop&q=80",
-                mediaType = "IMAGE",
-                timestamp = "Il y a 2h",
-                likesCount = 412,
-                commentsCount = 87,
-                sharesCount = 54,
-                category = "ÉVÉNEMENTS"
-            )
-        )
-
-        return if (category == "TOUS" || category.isEmpty()) all else all.filter { it.category.equals(category, ignoreCase = true) }
-    }
 }

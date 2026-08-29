@@ -165,7 +165,7 @@ class MboteViewModel(
         return res
     }
 
-    suspend fun loginWithGoogle(email: String = "m.loutala@gmail.com", displayName: String = "Marc Loutala", avatarUrl: String? = null): Result<Unit> {
+    suspend fun loginWithGoogle(email: String = "", displayName: String = "", avatarUrl: String? = null): Result<Unit> {
         val res = repository.loginWithGoogle(email, displayName, avatarUrl)
         if (res.isSuccess) {
             _showLoginScreen.value = false
@@ -174,7 +174,7 @@ class MboteViewModel(
         return res
     }
 
-    suspend fun loginWithGitHub(email: String = "m.loutala@github.com", displayName: String = "Marc Loutala (GitHub)", avatarUrl: String? = null): Result<Unit> {
+    suspend fun loginWithGitHub(email: String = "", displayName: String = "", avatarUrl: String? = null): Result<Unit> {
         val res = repository.loginWithGitHub(email, displayName, avatarUrl)
         if (res.isSuccess) {
             _showLoginScreen.value = false

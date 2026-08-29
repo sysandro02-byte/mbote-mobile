@@ -1,6 +1,7 @@
 package com.loukatech.mbote.service.api
 
 import android.util.Log
+import com.loukatech.mbote.BuildConfig
 import com.loukatech.mbote.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,16 +16,17 @@ import java.net.URL
 
 /**
  * Global Configuration for MBoté Backend Server & API Endpoints.
- * Allows switching between Production Server, Cloud API, Local Dev, and Offline/Mock Mode.
+ * The server address is injected at build time.  It is intentionally blank until
+ * MBOTE_API_BASE_URL is configured; authentication must never fall back to a fake account.
  */
 object MboteBackendConfig {
-    var baseUrl: String = "https://api.mbote.app/v1"
+    var baseUrl: String = BuildConfig.MBOTE_API_BASE_URL.trimEnd('/')
     var authToken: String? = null
     var refreshToken: String? = null
     var adminToken: String? = null
-    var isServerConnected: Boolean = true
-    var lastPingMs: Long = 42L
-    var serverEnvironment: String = "Production Cloud (LoukaTech Core)"
+    var isServerConnected: Boolean = false
+    var lastPingMs: Long = 0L
+    var serverEnvironment: String = "Non configuré"
 
     val jsonParser = Json {
         ignoreUnknownKeys = true
@@ -224,6 +226,10 @@ class MboteApiService {
      * Ping Server Health & measure Latency
      */
     suspend fun pingServer(): Result<Long> = withContext(Dispatchers.IO) {
+        if (MboteBackendConfig.baseUrl.isBlank()) {
+            MboteBackendConfig.isServerConnected = false
+            return@withContext Result.failure(IllegalStateException("MBOTE_API_BASE_URL n'est pas configurée"))
+        }
         val start = System.currentTimeMillis()
         try {
             val url = URL("${MboteBackendConfig.baseUrl}/health")
@@ -239,10 +245,8 @@ class MboteApiService {
             MboteBackendConfig.isServerConnected = true
             Result.success(latency)
         } catch (e: Exception) {
-            // Local fallback simulation latency
-            MboteBackendConfig.lastPingMs = 38L
-            MboteBackendConfig.isServerConnected = true
-            Result.success(38L)
+            MboteBackendConfig.isServerConnected = false
+            Result.failure(e)
         }
     }
 
@@ -255,42 +259,15 @@ class MboteApiService {
             method = "POST",
             requestBody = request
         ) { json ->
-            // Parse response
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AuthResponseData>>(json).data!!
-            } catch (e: Exception) {
-                // If offline / local fallback, return valid authenticated profile
-                AuthResponseData(
-                    token = "mbt_jwt_" + System.currentTimeMillis(),
-                    refreshToken = "mbt_rf_" + System.currentTimeMillis(),
-                    userId = "user_me",
-                    name = if (request.email.contains("@")) request.email.substringBefore("@").replace(".", " ").capitalizeWords() else "Utilisateur MBoté",
-                    email = request.email,
-                    phone = "+242 06 123 4567",
-                    avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                    role = "USER",
-                    isVerified = true
-                )
-            }
+            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AuthResponseData>>(json).data
+                ?: throw IllegalStateException("Réponse d'authentification incomplète")
         }
 
         return if (response.isSuccess) {
             val authData = response.getOrNull()!!
             MboteBackendConfig.authToken = authData.token
             Result.success(authData)
-        } else {
-            // Fallback for seamless demo/production transition
-            val fallbackData = AuthResponseData(
-                token = "mbt_jwt_live_" + System.currentTimeMillis(),
-                userId = "user_me",
-                name = request.email.substringBefore("@").replace(".", " ").capitalizeWords(),
-                email = request.email,
-                phone = "+242 06 888 9900",
-                avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
-            )
-            MboteBackendConfig.authToken = fallbackData.token
-            Result.success(fallbackData)
-        }
+        } else Result.failure(response.exceptionOrNull() ?: Exception("Échec de la connexion"))
     }
 
     /**
@@ -302,35 +279,15 @@ class MboteApiService {
             method = "POST",
             requestBody = request
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AuthResponseData>>(json).data!!
-            } catch (e: Exception) {
-                AuthResponseData(
-                    token = "mbt_jwt_reg_" + System.currentTimeMillis(),
-                    userId = "user_reg_" + System.currentTimeMillis(),
-                    name = request.fullName,
-                    email = request.email,
-                    phone = request.phone,
-                    avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
-                )
-            }
+            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AuthResponseData>>(json).data
+                ?: throw IllegalStateException("Réponse d'inscription incomplète")
         }
 
         return if (response.isSuccess) {
             val authData = response.getOrNull()!!
             MboteBackendConfig.authToken = authData.token
             Result.success(authData)
-        } else {
-            val fallbackData = AuthResponseData(
-                token = "mbt_jwt_reg_" + System.currentTimeMillis(),
-                userId = "user_reg_" + System.currentTimeMillis(),
-                name = request.fullName,
-                email = request.email,
-                phone = request.phone
-            )
-            MboteBackendConfig.authToken = fallbackData.token
-            Result.success(fallbackData)
-        }
+        } else Result.failure(response.exceptionOrNull() ?: Exception("Échec de l'inscription"))
     }
 
     /**
@@ -342,34 +299,15 @@ class MboteApiService {
             method = "POST",
             requestBody = request
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AuthResponseData>>(json).data!!
-            } catch (e: Exception) {
-                AuthResponseData(
-                    token = "mbt_jwt_google_" + System.currentTimeMillis(),
-                    userId = "user_google_" + System.currentTimeMillis(),
-                    name = request.displayName,
-                    email = request.email,
-                    avatar = request.avatarUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
-                )
-            }
+            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AuthResponseData>>(json).data
+                ?: throw IllegalStateException("Réponse Google incomplète")
         }
 
         return if (response.isSuccess) {
             val authData = response.getOrNull()!!
             MboteBackendConfig.authToken = authData.token
             Result.success(authData)
-        } else {
-            val fallbackData = AuthResponseData(
-                token = "mbt_jwt_google_" + System.currentTimeMillis(),
-                userId = "user_google_" + System.currentTimeMillis(),
-                name = request.displayName,
-                email = request.email,
-                avatar = request.avatarUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
-            )
-            MboteBackendConfig.authToken = fallbackData.token
-            Result.success(fallbackData)
-        }
+        } else Result.failure(response.exceptionOrNull() ?: Exception("Échec de connexion Google"))
     }
 
     /**
@@ -377,64 +315,39 @@ class MboteApiService {
      */
     suspend fun requestForgotPassword(email: String): Result<String> {
         val request = ForgotPasswordRequest(email)
-        return try {
-            executeHttpRequest(
+        return executeHttpRequest(
                 endpoint = "/auth/forgot-password",
                 method = "POST",
                 requestBody = request
-            ) { json ->
-                "Un code de réinitialisation à 6 chiffres a été envoyé par email/SMS à $email."
-            }
-        } catch (e: Exception) {
-            Result.success("Un code de réinitialisation sécurisé a été envoyé à $email.")
-        }
+            ) { json -> MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<String>>(json).message ?: "Demande enregistrée" }
     }
 
     /**
      * Reset Password Confirmation
      */
     suspend fun confirmResetPassword(request: ResetPasswordConfirmRequest): Result<Boolean> {
-        return try {
-            executeHttpRequest(
+        return executeHttpRequest(
                 endpoint = "/auth/reset-password-confirm",
                 method = "POST",
                 requestBody = request
             ) { true }
-        } catch (e: Exception) {
-            Result.success(true)
-        }
     }
 
     /**
      * Admin Portal Login API
      */
     suspend fun loginAdmin(request: AdminLoginRequest): Result<AdminStatsData> {
-        // Check admin key & master auth
-        val isValid = request.adminKey == "MBOTE-ADMIN-2026" || request.adminKey.isNotEmpty()
-        if (!isValid) {
-            return Result.failure(Exception("Clé d'administration invalide."))
-        }
-
-        MboteBackendConfig.adminToken = "mbt_admin_secret_token_" + System.currentTimeMillis()
-        return Result.success(AdminStatsData())
+        return Result.failure(UnsupportedOperationException("Connectez-vous avec un compte administrateur réel."))
     }
 
     /**
      * Fetch Live Admin Statistics
      */
     suspend fun getAdminStats(): Result<AdminStatsData> {
-        return Result.success(
-            AdminStatsData(
-                activeUsersCount = 14320,
-                onlineNowCount = 4210,
-                totalMessagesToday = 128450L,
-                activeCallsCount = 186,
-                shortVideosTotal = 1540,
-                totalMobileMoneyTipsFcfa = 5420000L,
-                cpuUsagePercent = 16.4f,
-                ramUsageMb = 580
-            )
-        )
+        return executeHttpRequest<Unit, AdminStatsData>(endpoint = "/admin/stats") { json ->
+            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AdminStatsData>>(json).data
+                ?: throw IllegalStateException("Statistiques administrateur indisponibles")
+        }
     }
 
     /**
@@ -478,21 +391,8 @@ class MboteApiService {
             method = "POST",
             requestBody = dto
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<MessageDto>>(json).data!!
-            } catch (e: Exception) {
-                MessageDto(
-                    id = "msg_server_" + System.currentTimeMillis(),
-                    chatId = dto.chatId,
-                    senderId = "user_me",
-                    senderName = "Moi",
-                    text = dto.text,
-                    timestamp = "À l'instant",
-                    mediaType = dto.mediaType,
-                    mediaUrl = dto.mediaUrl,
-                    isMine = true
-                )
-            }
+            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<MessageDto>>(json).data
+                ?: throw IllegalStateException("Réponse de message incomplète")
         }
     }
 
@@ -590,11 +490,8 @@ class MboteApiService {
             method = "POST",
             requestBody = video
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<ShortVideo>>(json).data!!
-            } catch (e: Exception) {
-                video
-            }
+            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<ShortVideo>>(json).data
+                ?: throw IllegalStateException("Réponse vidéo incomplète")
         }
     }
 
@@ -606,11 +503,8 @@ class MboteApiService {
             endpoint = "/shorts/$videoId/like?isLiked=$isLiked",
             method = "POST"
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<Boolean>>(json).data ?: isLiked
-            } catch (e: Exception) {
-                isLiked
-            }
+            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<Boolean>>(json).data
+                ?: throw IllegalStateException("Réponse de réaction incomplète")
         }
     }
 
@@ -623,11 +517,8 @@ class MboteApiService {
             method = "POST",
             requestBody = comment
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<ShortVideoComment>>(json).data!!
-            } catch (e: Exception) {
-                comment
-            }
+            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<ShortVideoComment>>(json).data
+                ?: throw IllegalStateException("Réponse de commentaire incomplète")
         }
     }
 

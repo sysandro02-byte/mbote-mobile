@@ -35,7 +35,7 @@ class MboteRepository(
     private val _userGiftState = MutableStateFlow(UserGiftState())
     val userGiftState: StateFlow<UserGiftState> = _userGiftState.asStateFlow()
 
-    private val _isAuthenticated = MutableStateFlow(true)
+    private val _isAuthenticated = MutableStateFlow(false)
     val isAuthenticated: StateFlow<Boolean> = _isAuthenticated.asStateFlow()
 
     private val _isOffline = MutableStateFlow(false)
@@ -90,47 +90,22 @@ class MboteRepository(
         }
     }
 
-    suspend fun loginWithGoogle(email: String = "m.loutala@gmail.com", displayName: String = "Marc Loutala", avatarUrl: String? = null): Result<Unit> {
-        val supabaseProvider = com.loukatech.mbote.data.supabase.SupabaseServiceProvider()
-        val supabaseResult = supabaseProvider.signInWithOAuth("google")
-        val result = apiService.loginWithGoogle(
-            GoogleAuthRequest(
-                email = email,
-                displayName = displayName,
-                avatarUrl = avatarUrl
-            )
-        )
-        return if (result.isSuccess || supabaseResult.isSuccess) {
-            val data = result.getOrNull()
-            _userProfile.update {
-                it.copy(
-                    id = data?.userId ?: "user_google_me",
-                    name = data?.name ?: displayName,
-                    email = data?.email ?: email,
-                    avatar = data?.avatar?.ifBlank { avatarUrl } ?: avatarUrl ?: it.avatar
-                )
-            }
-            _isAuthenticated.value = true
-            Result.success(Unit)
-        } else {
-            Result.failure(result.exceptionOrNull() ?: Exception("Échec de connexion Google"))
+    suspend fun loginWithGoogle(email: String = "", displayName: String = "", avatarUrl: String? = null): Result<Unit> {
+        if (email.isBlank() || displayName.isBlank()) {
+            return Result.failure(IllegalStateException("Google OAuth doit fournir un jeton d'identité vérifié."))
         }
+        return loginFromAuthResponse(apiService.loginWithGoogle(GoogleAuthRequest(email = email, displayName = displayName, avatarUrl = avatarUrl)))
     }
 
-    suspend fun loginWithGitHub(email: String = "m.loutala@github.com", displayName: String = "Marc Loutala (GitHub)", avatarUrl: String? = "https://images.unsplash.com/photo-1618401471353-b98afee0b2eb?w=150&auto=format&fit=crop&q=80"): Result<Unit> {
-        val supabaseProvider = com.loukatech.mbote.data.supabase.SupabaseServiceProvider()
-        val supabaseResult = supabaseProvider.signInWithOAuth("github")
-        _userProfile.update {
-            it.copy(
-                id = "user_github_" + System.currentTimeMillis(),
-                name = displayName,
-                email = email,
-                avatar = avatarUrl ?: it.avatar
-            )
-        }
+    suspend fun loginWithGitHub(email: String = "", displayName: String = "", avatarUrl: String? = null): Result<Unit> =
+        Result.failure(UnsupportedOperationException("GitHub OAuth doit être configuré côté serveur."))
+
+    private fun loginFromAuthResponse(result: Result<AuthResponseData>): Result<Unit> = if (result.isSuccess) {
+        val data = result.getOrNull()!!
+        _userProfile.update { it.copy(id = data.userId, name = data.name, email = data.email, phone = data.phone, avatar = data.avatar, role = data.role, isVerified = data.isVerified) }
         _isAuthenticated.value = true
-        return Result.success(Unit)
-    }
+        Result.success(Unit)
+    } else Result.failure(result.exceptionOrNull() ?: Exception("Échec de l'authentification"))
 
     suspend fun requestPasswordReset(email: String): Result<String> {
         val supabaseProvider = com.loukatech.mbote.data.supabase.SupabaseServiceProvider()
@@ -160,59 +135,31 @@ class MboteRepository(
         _isAuthenticated.value = false
     }
 
-    private val _notifications = MutableStateFlow<List<MboteNotification>>(createInitialNotifications())
+    private val _notifications = MutableStateFlow<List<MboteNotification>>(emptyList())
     val notifications: StateFlow<List<MboteNotification>> = _notifications.asStateFlow()
 
-    private val _chats = MutableStateFlow<List<Chat>>(createInitialChats())
+    private val _chats = MutableStateFlow<List<Chat>>(emptyList())
     val chats: StateFlow<List<Chat>> = _chats.asStateFlow()
 
     private val _calls = MutableStateFlow<List<CallItem>>(emptyList())
     val calls: StateFlow<List<CallItem>> = _calls.asStateFlow()
 
-    private val _statuses = MutableStateFlow<List<StatusItem>>(createInitialStatuses())
+    private val _statuses = MutableStateFlow<List<StatusItem>>(emptyList())
     val statuses: StateFlow<List<StatusItem>> = _statuses.asStateFlow()
 
-    private val _newsPosts = MutableStateFlow<List<NewsPost>>(createInitialNews())
+    private val _newsPosts = MutableStateFlow<List<NewsPost>>(emptyList())
     val newsPosts: StateFlow<List<NewsPost>> = _newsPosts.asStateFlow()
 
-    private val _meetings = MutableStateFlow<List<MeetingItem>>(createInitialMeetings())
+    private val _meetings = MutableStateFlow<List<MeetingItem>>(emptyList())
     val meetings: StateFlow<List<MeetingItem>> = _meetings.asStateFlow()
 
-    private val _jobs = MutableStateFlow<List<JobOffer>>(createInitialJobs())
+    private val _jobs = MutableStateFlow<List<JobOffer>>(emptyList())
     val jobs: StateFlow<List<JobOffer>> = _jobs.asStateFlow()
 
-    private val _discoverProfiles = MutableStateFlow<List<DiscoverProfile>>(DiscoveryProfilesData.initialProfiles)
+    private val _discoverProfiles = MutableStateFlow<List<DiscoverProfile>>(emptyList())
     val discoverProfiles: StateFlow<List<DiscoverProfile>> = _discoverProfiles.asStateFlow()
 
-    private val _reports = MutableStateFlow<List<com.loukatech.mbote.model.ReportItem>>(listOf(
-        com.loukatech.mbote.model.ReportItem(
-            id = "rep_1",
-            type = "Actualité",
-            targetName = "Fausse annonce recrutement",
-            reporterName = "Jean-Pierre",
-            reason = "Désinformation et phishing",
-            status = "Envoyé à l'Admin",
-            timestamp = "Il y a 1h"
-        ),
-        com.loukatech.mbote.model.ReportItem(
-            id = "rep_2",
-            type = "Profil",
-            targetName = "Utilisateur Indésirable #284",
-            reporterName = "Divine",
-            reason = "Spam massif par messages chiffrés",
-            status = "Transmis aux Co-Admins",
-            timestamp = "Il y a 3h"
-        ),
-        com.loukatech.mbote.model.ReportItem(
-            id = "rep_3",
-            type = "Offre Emploi",
-            targetName = "Directeur Marketing fictif",
-            reporterName = "Grâce",
-            reason = "Arnaque financière",
-            status = "Transmis aux Modérateurs",
-            timestamp = "Hier"
-        )
-    ))
+    private val _reports = MutableStateFlow<List<com.loukatech.mbote.model.ReportItem>>(emptyList())
     val reports: StateFlow<List<com.loukatech.mbote.model.ReportItem>> = _reports.asStateFlow()
 
     fun submitReport(type: String, targetName: String) {
@@ -236,13 +183,13 @@ class MboteRepository(
         }
     }
 
-    private val _shortVideos = MutableStateFlow<List<ShortVideo>>(ShortVideosData.initialShortVideos)
+    private val _shortVideos = MutableStateFlow<List<ShortVideo>>(emptyList())
     val shortVideos: StateFlow<List<ShortVideo>> = _shortVideos.asStateFlow()
 
     private val _blockedContactIds = MutableStateFlow<Set<String>>(emptySet())
     val blockedContactIds: StateFlow<Set<String>> = _blockedContactIds.asStateFlow()
 
-    private val _mastaUsers = MutableStateFlow<List<MastaUser>>(MastaData.getInitialMastaUsers())
+    private val _mastaUsers = MutableStateFlow<List<MastaUser>>(emptyList())
     val mastaUsers: StateFlow<List<MastaUser>> = _mastaUsers.asStateFlow()
 
     fun updateMastaUsers(users: List<MastaUser>) {
@@ -464,9 +411,7 @@ class MboteRepository(
             val mastaResult = apiService.fetchMastaUsers()
             if (mastaResult.isSuccess) {
                 val remoteMasta = mastaResult.getOrNull() ?: emptyList()
-                if (remoteMasta.isNotEmpty()) {
-                    _mastaUsers.value = remoteMasta
-                }
+                _mastaUsers.value = remoteMasta
             }
         } catch (e: Exception) {
             // Keep existing Masta if offline
@@ -477,9 +422,7 @@ class MboteRepository(
             val shortsResult = apiService.fetchShortVideos()
             if (shortsResult.isSuccess) {
                 val remoteShorts = shortsResult.getOrNull() ?: emptyList()
-                if (remoteShorts.isNotEmpty()) {
-                    _shortVideos.value = remoteShorts
-                }
+                _shortVideos.value = remoteShorts
             }
         } catch (e: Exception) {
             // Keep existing Short videos if offline

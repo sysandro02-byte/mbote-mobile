@@ -285,19 +285,19 @@ fun formatAppCurrency(amountFcfa: Long, currency: AppCurrency = AppCurrency.FCFA
 
 @Serializable
 data class UserProfile(
-    val id: String = "user_me",
-    val name: String = "Marc Loutala",
-    val username: String = "@marcloutala",
-    val email: String = "m.loutala@gmail.com",
-    val phone: String = "+242 06 123 4567",
-    val bio: String = "Passionné de technologies africaines et de communication instantanée 🚀",
-    val avatar: String = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-    val coverUrl: String = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80",
+    val id: String = "",
+    val name: String = "",
+    val username: String = "",
+    val email: String = "",
+    val phone: String = "",
+    val bio: String = "",
+    val avatar: String = "",
+    val coverUrl: String = "",
     val country: String = "Congo",
     val city: String = "Brazzaville",
-    val isVerified: Boolean = true,
-    val role: String = "Fondateur / Tech Lead",
-    val status: String = "En ligne",
+    val isVerified: Boolean = false,
+    val role: String = "USER",
+    val status: String = "",
     val e2eEncryptionEnabled: Boolean = true,
     val notificationsEnabled: Boolean = true,
     val themeMode: AppThemeMode = AppThemeMode.SYSTEM,
@@ -305,30 +305,26 @@ data class UserProfile(
     val language: AppLanguage = AppLanguage.FRENCH,
     val currency: AppCurrency = AppCurrency.FCFA,
     val autoTranslateTo: String = "Français",
-    val walletBalanceFcfa: Long = 45000L,
-    val isPremium: Boolean = true,
-    val badges: List<BadgeType> = listOf(BadgeType.VIP, BadgeType.CERTIFIED_CREATOR),
-    val totalGiftsSentFcfa: Long = 65000L,
-    val channelName: String = "Ma Chaîne MBoté",
-    val channelAvatar: String = "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&auto=format&fit=crop&q=80",
-    val channelBanner: String = "https://images.unsplash.com/photo-1557683316-973673baf926?w=600&auto=format&fit=crop&q=80",
+    val walletBalanceFcfa: Long = 0L,
+    val isPremium: Boolean = false,
+    val badges: List<BadgeType> = emptyList(),
+    val totalGiftsSentFcfa: Long = 0L,
+    val channelName: String = "",
+    val channelAvatar: String = "",
+    val channelBanner: String = "",
     // Parental Control & Child Protection (Protection des mineurs 🔞)
-    val dateOfBirth: String = "15/05/2010",
+    val dateOfBirth: String = "",
     val isMinor: Boolean = false,
     val parentalControlActive: Boolean = false,
     val isChildAccountLinkedByQrScan: Boolean = false, // 1) Must scan child account QR code to link accounts
     val parentEmail: String = "",
-    val nightLockdownEnabled: Boolean = true, // 1) 00:00 to 06:00 lockdown & reduced notifications
-    val maxDailyScreenTimeMinutes: Int = 120, // 2) Max 2 hours per day
-    val currentScreenTimeMinutes: Int = 45,
+    val nightLockdownEnabled: Boolean = false, // 1) 00:00 to 06:00 lockdown & reduced notifications
+    val maxDailyScreenTimeMinutes: Int = 0, // 2) Max 2 hours per day
+    val currentScreenTimeMinutes: Int = 0,
     val commentCurfewHour: Int = 20, // 3) Evening comment reaction curfew (e.g. 20:00)
-    val schoolHoursRestrictionEnabled: Boolean = true, // 4) School hours (08:00 - 16:00) & night notification limits
+    val schoolHoursRestrictionEnabled: Boolean = false, // 4) School hours (08:00 - 16:00) & night notification limits
     val isLoggedOutDueToQuota: Boolean = false,
-    val atRiskActions: List<AtRiskAction> = listOf(
-        AtRiskAction("21:45", "Tentative de commentaire en soirée", "Essai de publication pendant le couvre-feu (20h-06h). Bloqué.", RiskSeverity.MEDIUM),
-        AtRiskAction("14:15", "Accès hors horaires autorisés", "Tentative d'ouverture des shorts pendant les heures scolaires. Restreint.", RiskSeverity.LOW),
-        AtRiskAction("23:10", "Alerte Verrouillage Nocturne", "Activité détectée en période de sommeil (00h-06h). Notification réduite.", RiskSeverity.HIGH)
-    )
+    val atRiskActions: List<AtRiskAction> = emptyList()
 )
 
 @Serializable
