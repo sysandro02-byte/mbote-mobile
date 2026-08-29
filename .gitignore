@@ -5,6 +5,10 @@ dist/
 .vite-cache/
 .npm-cache/
 .gradle-home/
+.gradle/
+local.properties
+**/build/
+*.apk
 .vercel/
 .playwright-mcp/
 .tools/
