@@ -1,10 +1,16 @@
 package com.loukatech.mbote.service
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import com.loukatech.mbote.R
 import com.loukatech.mbote.model.MboteNotification
 import com.loukatech.mbote.model.NotificationType
 import kotlinx.coroutines.*
@@ -18,7 +24,33 @@ class AppUsageTrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "AppUsageTrackingService créé")
+        startForegroundTrackingNotification()
         startTracking()
+    }
+
+    private fun startForegroundTrackingNotification() {
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notificationManager.createNotificationChannel(
+                NotificationChannel(
+                    TRACKING_CHANNEL_ID,
+                    "Suivi du temps d’utilisation",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Mesure localement le temps passé dans MBoté"
+                    setShowBadge(false)
+                }
+            )
+        }
+        val notification = NotificationCompat.Builder(this, TRACKING_CHANNEL_ID)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("MBoté")
+            .setContentText("Suivi du temps d’utilisation actif")
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+        startForeground(TRACKING_NOTIFICATION_ID, notification)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -88,6 +120,8 @@ class AppUsageTrackingService : Service() {
     companion object {
         private const val TAG = "UsageTrackingService"
         private const val PREFS_NAME = "mbote_prefs"
+        private const val TRACKING_CHANNEL_ID = "mbote_usage_tracking"
+        private const val TRACKING_NOTIFICATION_ID = 1042
 
         const val ACTION_START = "com.loukatech.mbote.action.START_USAGE_TRACKING"
         const val ACTION_STOP = "com.loukatech.mbote.action.STOP_USAGE_TRACKING"
@@ -105,7 +139,7 @@ class AppUsageTrackingService : Service() {
                 val intent = Intent(context, AppUsageTrackingService::class.java).apply {
                     action = ACTION_START
                 }
-                context.startService(intent)
+                ContextCompat.startForegroundService(context, intent)
             } catch (e: Exception) {
                 Log.e(TAG, "Erreur lors du démarrage du service", e)
             }
@@ -123,44 +157,29 @@ class AppUsageTrackingService : Service() {
         }
 
         fun recordScroll(context: Context) {
-            try {
-                val intent = Intent(context, AppUsageTrackingService::class.java).apply {
-                    action = ACTION_RECORD_SCROLL
-                    putExtra(EXTRA_SCROLL_COUNT, 1)
-                }
-                context.startService(intent)
-            } catch (e: Exception) {
-                Log.e(TAG, "Erreur lors de l'enregistrement du scroll", e)
-            }
+            incrementScrollTime(context, 1)
         }
 
         fun triggerRecap(context: Context) {
-            try {
-                val intent = Intent(context, AppUsageTrackingService::class.java).apply {
-                    action = ACTION_TRIGGER_WEEKLY_RECAP
-                }
-                context.startService(intent)
-            } catch (e: Exception) {
-                Log.e(TAG, "Erreur lors du déclenchement du récapitulatif", e)
-            }
+            triggerWeeklyRecapNotification(context)
         }
 
         fun getStats(context: Context): Pair<Long, Long> {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val usageSec = prefs.getLong(KEY_TOTAL_USAGE_SECONDS, 14400L) // Default 4 hours
-            val scrollSec = prefs.getLong(KEY_TOTAL_SCROLL_SECONDS, 6300L)  // Default 1.75 hours
+            val usageSec = prefs.getLong(KEY_TOTAL_USAGE_SECONDS, 0L)
+            val scrollSec = prefs.getLong(KEY_TOTAL_SCROLL_SECONDS, 0L)
             return Pair(usageSec, scrollSec)
         }
 
         private fun incrementUsageTime(context: Context, seconds: Long) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val current = prefs.getLong(KEY_TOTAL_USAGE_SECONDS, 14400L)
+            val current = prefs.getLong(KEY_TOTAL_USAGE_SECONDS, 0L)
             prefs.edit().putLong(KEY_TOTAL_USAGE_SECONDS, current + seconds).apply()
         }
 
         private fun incrementScrollTime(context: Context, seconds: Int) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val current = prefs.getLong(KEY_TOTAL_SCROLL_SECONDS, 6300L)
+            val current = prefs.getLong(KEY_TOTAL_SCROLL_SECONDS, 0L)
             prefs.edit().putLong(KEY_TOTAL_SCROLL_SECONDS, current + seconds).apply()
         }
 
@@ -185,7 +204,7 @@ class AppUsageTrackingService : Service() {
 
             MboteNotificationManager.dispatchSystemNotification(context, notification)
 
-            // Reset timers for the next week, keeping some base simulated values so stats never look 0
+            // Reset timers for the next week after reporting the measured values.
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit()
                 .putLong(KEY_TOTAL_USAGE_SECONDS, 0L)

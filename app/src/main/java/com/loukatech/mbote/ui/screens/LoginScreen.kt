@@ -413,7 +413,7 @@ fun LoginScreen(
                 OutlinedTextField(
                     value = birthDate,
                     onValueChange = { birthDate = it; errorMessage = null },
-                    label = { Text("Date de naissance (JJ/MM/AAAA) • Âge 🔞") },
+                    label = { Text("Date de naissance") },
                     placeholder = { Text("15/05/2010") },
                     leadingIcon = {
                         Icon(Icons.Outlined.Cake, contentDescription = null, tint = MbotePurpleLight)
@@ -431,6 +431,13 @@ fun LoginScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("register_dob_input")
+                )
+
+                Text(
+                    text = "Format JJ/MM/AAAA • vérification automatique de l’âge",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(start = 16.dp, top = 5.dp)
                 )
 
                 if (isUserMinor) {

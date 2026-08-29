@@ -167,12 +167,12 @@ class MboteApiService {
     /**
      * Executes HTTP Request safely on IO Coroutine Dispatcher
      */
-    private suspend fun <Req, Res> executeHttpRequest(
+    private suspend inline fun <reified Req, Res> executeHttpRequest(
         endpoint: String,
         method: String = "GET",
         requestBody: Req? = null,
         token: String? = MboteBackendConfig.authToken,
-        deserialize: (String) -> Res
+        crossinline deserialize: (String) -> Res
     ): Result<Res> = withContext(Dispatchers.IO) {
         var connection: HttpURLConnection? = null
         try {
