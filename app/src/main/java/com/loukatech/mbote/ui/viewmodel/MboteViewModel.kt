@@ -511,6 +511,18 @@ class MboteViewModel(
         }
     }
 
+    fun refreshMasta() {
+        viewModelScope.launch {
+            repository.refreshMastaFromBackend()
+        }
+    }
+
+    fun refreshShorts() {
+        viewModelScope.launch {
+            repository.refreshShortsFromBackend()
+        }
+    }
+
     fun startMeeting(meeting: MeetingItem) {
         _activeMeetingRoom.value = meeting
     }

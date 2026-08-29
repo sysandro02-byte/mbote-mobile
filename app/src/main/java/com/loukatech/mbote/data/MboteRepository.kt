@@ -459,6 +459,32 @@ class MboteRepository(
             // Keep existing calls if offline
         }
 
+        // Asynchronously fetch Masta users from real REST API
+        try {
+            val mastaResult = apiService.fetchMastaUsers()
+            if (mastaResult.isSuccess) {
+                val remoteMasta = mastaResult.getOrNull() ?: emptyList()
+                if (remoteMasta.isNotEmpty()) {
+                    _mastaUsers.value = remoteMasta
+                }
+            }
+        } catch (e: Exception) {
+            // Keep existing Masta if offline
+        }
+
+        // Asynchronously fetch Short videos from real REST API
+        try {
+            val shortsResult = apiService.fetchShortVideos()
+            if (shortsResult.isSuccess) {
+                val remoteShorts = shortsResult.getOrNull() ?: emptyList()
+                if (remoteShorts.isNotEmpty()) {
+                    _shortVideos.value = remoteShorts
+                }
+            }
+        } catch (e: Exception) {
+            // Keep existing Short videos if offline
+        }
+
         val chatsResult = apiService.fetchUserChats()
         if (chatsResult.isSuccess) {
             val remoteChats = chatsResult.getOrNull() ?: emptyList()
@@ -508,6 +534,26 @@ class MboteRepository(
             val remoteCalls = result.getOrNull()
             if (remoteCalls != null) {
                 _calls.value = remoteCalls
+            }
+        }
+    }
+
+    suspend fun refreshMastaFromBackend() {
+        val result = apiService.fetchMastaUsers()
+        if (result.isSuccess) {
+            val remoteMasta = result.getOrNull()
+            if (remoteMasta != null && remoteMasta.isNotEmpty()) {
+                _mastaUsers.value = remoteMasta
+            }
+        }
+    }
+
+    suspend fun refreshShortsFromBackend() {
+        val result = apiService.fetchShortVideos()
+        if (result.isSuccess) {
+            val remoteShorts = result.getOrNull()
+            if (remoteShorts != null && remoteShorts.isNotEmpty()) {
+                _shortVideos.value = remoteShorts
             }
         }
     }
@@ -886,6 +932,7 @@ class MboteRepository(
     }
 
     fun reactToShortVideo(videoId: String, emoji: String) {
+        var isCurrentlyLikedNow = false
         _shortVideos.update { list ->
             list.map { v ->
                 if (v.id == videoId) {
@@ -909,6 +956,8 @@ class MboteRepository(
                         Pair(emoji, emoji == "❤️" || currentReaction != null)
                     }
 
+                    isCurrentlyLikedNow = newUserReaction != null
+
                     // Calculate total likes count based on reactions
                     val totalReactions = updatedReactionsMap.values.sum()
                     v.copy(
@@ -918,6 +967,15 @@ class MboteRepository(
                         reactionsCount = updatedReactionsMap
                     )
                 } else v
+            }
+        }
+
+        // Trigger real API call asynchronously
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                apiService.toggleLikeShortVideoApi(videoId, isCurrentlyLikedNow)
+            } catch (e: Exception) {
+                // Ignore failure (offline local success)
             }
         }
     }
@@ -1001,6 +1059,15 @@ class MboteRepository(
                 } else v
             }
         }
+
+        // Send to real backend API asynchronously
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                apiService.addShortVideoCommentApi(videoId, newComment)
+            } catch (e: Exception) {
+                // Offline fallback (local success)
+            }
+        }
     }
 
     fun toggleLikeShortComment(videoId: String, commentId: String) {
@@ -1054,6 +1121,15 @@ class MboteRepository(
             comments = emptyList()
         )
         _shortVideos.update { listOf(newShort) + it }
+
+        // Send to real backend API asynchronously
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                apiService.createShortVideoApi(newShort)
+            } catch (e: Exception) {
+                // Offline fallback (local success)
+            }
+        }
     }
 
     fun shareShortVideoToChat(chatId: String, shortVideo: ShortVideo) {

@@ -549,6 +549,88 @@ class MboteApiService {
         }
     }
 
+    /**
+     * Fetch Masta users from the backend REST API
+     */
+    suspend fun fetchMastaUsers(): Result<List<MastaUser>> {
+        return executeHttpRequest<Unit, List<MastaUser>>(
+            endpoint = "/masta/users",
+            method = "GET"
+        ) { json ->
+            try {
+                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<MastaUser>>>(json).data ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    /**
+     * Fetch all Short videos from backend REST API
+     */
+    suspend fun fetchShortVideos(): Result<List<ShortVideo>> {
+        return executeHttpRequest<Unit, List<ShortVideo>>(
+            endpoint = "/shorts/videos",
+            method = "GET"
+        ) { json ->
+            try {
+                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<ShortVideo>>>(json).data ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    /**
+     * Create a new Short video on backend server
+     */
+    suspend fun createShortVideoApi(video: ShortVideo): Result<ShortVideo> {
+        return executeHttpRequest<ShortVideo, ShortVideo>(
+            endpoint = "/shorts/create",
+            method = "POST",
+            requestBody = video
+        ) { json ->
+            try {
+                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<ShortVideo>>(json).data!!
+            } catch (e: Exception) {
+                video
+            }
+        }
+    }
+
+    /**
+     * Toggle like for a Short video on backend server
+     */
+    suspend fun toggleLikeShortVideoApi(videoId: String, isLiked: Boolean): Result<Boolean> {
+        return executeHttpRequest<Unit, Boolean>(
+            endpoint = "/shorts/$videoId/like?isLiked=$isLiked",
+            method = "POST"
+        ) { json ->
+            try {
+                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<Boolean>>(json).data ?: isLiked
+            } catch (e: Exception) {
+                isLiked
+            }
+        }
+    }
+
+    /**
+     * Add a comment to a Short video on backend server
+     */
+    suspend fun addShortVideoCommentApi(videoId: String, comment: ShortVideoComment): Result<ShortVideoComment> {
+        return executeHttpRequest<ShortVideoComment, ShortVideoComment>(
+            endpoint = "/shorts/$videoId/comment",
+            method = "POST",
+            requestBody = comment
+        ) { json ->
+            try {
+                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<ShortVideoComment>>(json).data!!
+            } catch (e: Exception) {
+                comment
+            }
+        }
+    }
+
     private fun String.capitalizeWords(): String = split(" ")
         .joinToString(" ") { word ->
             word.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }

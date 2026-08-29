@@ -1,5 +1,8 @@
 package com.loukatech.mbote.model
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 enum class MastaSubOption(val displayName: String) {
     ONLINE("🟢 En ligne"),
     RECEIVED("Reçu"),
@@ -10,6 +13,7 @@ enum class MastaSubOption(val displayName: String) {
     CITIES("Villes")
 }
 
+@Serializable
 data class MastaUser(
     val id: String,
     val name: String,
@@ -22,3 +26,4 @@ data class MastaUser(
     val timeBadge: String? = null, // e.g. "10 h", "4 j", "3 sem"
     val subType: MastaSubOption = MastaSubOption.FRIENDS
 )
+
