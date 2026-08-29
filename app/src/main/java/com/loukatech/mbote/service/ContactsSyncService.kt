@@ -53,8 +53,7 @@ class ContactsSyncService(private val context: Context? = null) {
             // Load initial
             loadDeviceContacts()
         } else {
-            // Provide default demo contacts
-            _syncedContacts.value = getDefaultDemoContacts()
+            _syncedContacts.value = emptyList()
             _syncState.update {
                 it.copy(
                     totalSynced = _syncedContacts.value.size,
@@ -70,19 +69,19 @@ class ContactsSyncService(private val context: Context? = null) {
 
         val ctx = context
         if (ctx == null || !hasContactsPermission()) {
-            val fallback = getDefaultDemoContacts()
-            _syncedContacts.value = fallback
+            val contacts = emptyList<SyncedContact>()
+            _syncedContacts.value = contacts
             _syncState.update {
                 it.copy(
                     isSyncing = false,
                     isPermissionGranted = hasContactsPermission(),
-                    totalSynced = fallback.size,
-                    mboteUsersCount = fallback.count { c -> c.isMboteUser },
+                    totalSynced = 0,
+                    mboteUsersCount = 0,
                     lastSyncTime = timeFormat.format(Date()),
                     error = if (ctx == null) null else "Permission 'Contacts' non accordée. Veuillez l'activer pour synchroniser."
                 )
             }
-            return@withContext Result.success(fallback)
+            return@withContext Result.success(contacts)
         }
 
         try {
@@ -122,26 +121,20 @@ class ContactsSyncService(private val context: Context? = null) {
                     if (cleanNumber.isNotBlank() && !seenNumbers.contains(cleanNumber)) {
                         seenNumbers.add(cleanNumber)
 
-                        val isMboteUser = (cleanNumber.hashCode() % 3 != 0) // realistic match
                         contactsList.add(
                             SyncedContact(
                                 id = "contact_$contactId",
                                 name = name,
                                 phoneNumber = rawNumber,
                                 avatarUrl = photoUri,
-                                isMboteUser = isMboteUser,
-                                statusText = if (isMboteUser) "Disponible sur MBoté (Chiffré)" else "Inviter sur MBoté",
+                                isMboteUser = false,
+                                statusText = "Vérification serveur requise",
                                 isSynced = true,
                                 lastSyncedTimestamp = System.currentTimeMillis()
                             )
                         )
                     }
                 }
-            }
-
-            // If phonebook was empty (e.g. fresh emulator), augment with seed contacts
-            if (contactsList.isEmpty()) {
-                contactsList.addAll(getDefaultDemoContacts())
             }
 
             _syncedContacts.value = contactsList
@@ -160,14 +153,13 @@ class ContactsSyncService(private val context: Context? = null) {
             Result.success(contactsList)
         } catch (e: Exception) {
             Log.e("ContactsSyncService", "Error querying contacts", e)
-            val fallback = getDefaultDemoContacts()
-            _syncedContacts.value = fallback
+            _syncedContacts.value = emptyList()
             _syncState.update {
                 it.copy(
                     isSyncing = false,
                     error = "Erreur de lecture du carnet: ${e.localizedMessage}",
-                    totalSynced = fallback.size,
-                    mboteUsersCount = fallback.count { c -> c.isMboteUser }
+                    totalSynced = 0,
+                    mboteUsersCount = 0
                 )
             }
             Result.failure(e)
@@ -218,17 +210,13 @@ class ContactsSyncService(private val context: Context? = null) {
                                 name = name,
                                 phoneNumber = rawNumber,
                                 avatarUrl = photoUri,
-                                isMboteUser = (cleanNumber.hashCode() % 3 != 0),
-                                statusText = "Disponible sur MBoté",
+                                isMboteUser = false,
+                                statusText = "Vérification serveur requise",
                                 isSynced = true
                             )
                         )
                     }
                 }
-            }
-
-            if (list.isEmpty()) {
-                list.addAll(getDefaultDemoContacts())
             }
 
             _syncedContacts.value = list
@@ -240,70 +228,11 @@ class ContactsSyncService(private val context: Context? = null) {
                 )
             }
         } catch (e: Exception) {
-            _syncedContacts.value = getDefaultDemoContacts()
+            _syncedContacts.value = emptyList()
         }
     }
 
-    private fun getDefaultDemoContacts(): List<SyncedContact> = listOf(
-        SyncedContact(
-            id = "sc_1",
-            name = "Grace Makiese",
-            phoneNumber = "+242 06 654 3210",
-            avatarUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-            isMboteUser = true,
-            statusText = "Disponible • Chiffrement actif"
-        ),
-        SyncedContact(
-            id = "sc_2",
-            name = "Cédric Moundélé",
-            phoneNumber = "+242 05 512 8899",
-            avatarUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-            isMboteUser = true,
-            statusText = "En ligne sur MBoté"
-        ),
-        SyncedContact(
-            id = "sc_3",
-            name = "Dr. Aïssatou Diallo",
-            phoneNumber = "+242 06 887 7665",
-            avatarUrl = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
-            isMboteUser = true,
-            statusText = "En consultation • SMS/Vocal"
-        ),
-        SyncedContact(
-            id = "sc_4",
-            name = "Paul Mavoungou",
-            phoneNumber = "+242 06 911 2233",
-            avatarUrl = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
-            isMboteUser = false,
-            statusText = "Non inscrit sur MBoté"
-        ),
-        SyncedContact(
-            id = "sc_5",
-            name = "Clarisse Bongo",
-            phoneNumber = "+242 05 334 5566",
-            avatarUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80",
-            isMboteUser = true,
-            statusText = "Occupée • Réunion"
-        ),
-        SyncedContact(
-            id = "sc_6",
-            name = "Yannick Nguesso",
-            phoneNumber = "+242 06 445 7788",
-            avatarUrl = "https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80",
-            isMboteUser = false,
-            statusText = "Non inscrit sur MBoté"
-        ),
-        SyncedContact(
-            id = "sc_7",
-            name = "Élodie Mabiala",
-            phoneNumber = "+242 06 223 9900",
-            avatarUrl = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80",
-            isMboteUser = true,
-            statusText = "MBoté Web & Mobile"
-        )
-    )
-
-    fun addContact(name: String, phoneNumber: String, isMboteUser: Boolean = true): SyncedContact {
+    fun addContact(name: String, phoneNumber: String, isMboteUser: Boolean = false): SyncedContact {
         val newContact = SyncedContact(
             name = name,
             phoneNumber = phoneNumber,

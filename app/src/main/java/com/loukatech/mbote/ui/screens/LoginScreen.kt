@@ -56,11 +56,11 @@ fun LoginScreen(
     modifier: Modifier = Modifier
 ) {
     var authMode by remember { mutableStateOf(AuthMode.LOGIN) }
-    var email by remember { mutableStateOf("m.loutala@gmail.com") }
+    var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var fullName by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
-    var birthDate by remember { mutableStateOf("15/05/2010") }
+    var birthDate by remember { mutableStateOf("") }
     var parentEmailInput by remember { mutableStateOf("") }
     var countryPrefix by remember { mutableStateOf("+242") }
     var showPassword by remember { mutableStateOf(false) }

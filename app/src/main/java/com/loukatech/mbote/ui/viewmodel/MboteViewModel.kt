@@ -444,20 +444,7 @@ class MboteViewModel(
             repository.refreshMessagesForChat(chatId)
         }
 
-        // Simulate a natural stealth typing on loading the chat
-        typingJob?.cancel()
-        typingJob = viewModelScope.launch {
-            _isPartnerTyping.value = false
-            delay(1500)
-            val chat = repository.chats.value.find { it.id == chatId }
-            if (chat != null && !chat.isChannel) {
-                _isPartnerTyping.value = true
-                com.loukatech.mbote.service.MboteSocketManager.onRemotePartnerTypingReceived(chatId, chat.name, true)
-                delay(2000)
-                _isPartnerTyping.value = false
-                com.loukatech.mbote.service.MboteSocketManager.onRemotePartnerTypingReceived(chatId, chat.name, false)
-            }
-        }
+        // Typing and new messages are received only from the authenticated socket session.
     }
 
     fun openChatByName(name: String) {
@@ -542,7 +529,6 @@ class MboteViewModel(
     fun sendMessage(chatId: String, text: String, replyTo: Message? = null) {
         if (text.isNotBlank()) {
             repository.sendMessage(chatId, text.trim(), replyTo)
-            simulatePartnerResponse(chatId, text.trim())
         }
     }
 

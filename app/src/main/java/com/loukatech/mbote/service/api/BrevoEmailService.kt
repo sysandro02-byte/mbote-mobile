@@ -31,8 +31,7 @@ object BrevoEmailService {
         Log.i(TAG, "Initiating Brevo recovery email dispatch to: $recipientEmail")
 
         if (apiKey.isBlank() || apiKey == "xkeysib-brevo-api-key-placeholder") {
-            Log.w(TAG, "Brevo API key is not configured or placeholder used. Simulated email send successful.")
-            return@withContext Result.success(true)
+            return@withContext Result.failure(IllegalStateException("Brevo n'est pas configuré"))
         }
 
         var connection: HttpURLConnection? = null

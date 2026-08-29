@@ -188,13 +188,8 @@ class SupabaseServiceProvider(
             Log.i(tag, "OAuth2 ($provider) sign-in successful. Token set.")
             Result.success(token)
         } catch (e: Exception) {
-            Log.w(tag, "OAuth2 ($provider) sign-in fallback triggered: ${e.message}")
-            val fallbackToken = "oauth_jwt_${provider}_" + System.currentTimeMillis()
-            _currentUserToken.value = fallbackToken
-            _currentUserId.value = "user_${provider}_me"
-            _isAuthenticated.value = true
-            MboteSupabaseConfig.userAccessToken = fallbackToken
-            Result.success(fallbackToken)
+            Log.w(tag, "OAuth2 ($provider) sign-in failed: ${e.message}")
+            Result.failure(e)
         }
     }
 
