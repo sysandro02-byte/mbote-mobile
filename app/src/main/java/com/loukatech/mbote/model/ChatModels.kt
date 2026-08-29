@@ -73,6 +73,7 @@ data class Message(
     val mediaUrl: String? = null,
     val audioDurationSec: Int = 0,
     val isRecalled: Boolean = false,
+    val isStarred: Boolean = false,
     val replyToText: String? = null,
     val replyToSender: String? = null,
     val reactions: Map<String, Int> = emptyMap(),
@@ -130,7 +131,8 @@ data class CallItem(
     val type: CallType,
     val isVideo: Boolean,
     val timestamp: String,
-    val durationText: String = "2 min 45 s"
+    val durationText: String = "2 min 45 s",
+    val phoneNumber: String = "+242 06 123 4567"
 )
 
 @Serializable

@@ -126,6 +126,34 @@ data class SendMessageDto(
     val replyToMessageId: String? = null
 )
 
+@Serializable
+data class MessageDto(
+    val id: String,
+    val chatId: String,
+    val senderId: String,
+    val senderName: String,
+    val senderAvatar: String = "",
+    val text: String,
+    val timestamp: String,
+    val mediaType: String = "TEXT",
+    val mediaUrl: String? = null,
+    val isStarred: Boolean = false,
+    val isMine: Boolean = false
+)
+
+@Serializable
+data class ChatDto(
+    val id: String,
+    val name: String,
+    val avatar: String,
+    val lastMessage: String,
+    val lastMessageTime: String,
+    val unreadCount: Int = 0,
+    val isOnline: Boolean = false,
+    val isGroup: Boolean = false,
+    val isChannel: Boolean = false
+)
+
 /**
  * Full Production-Ready REST API Service for MBoté
  * Performs real HTTP REST calls with JSON payloads, Bearer Authorization, and error handling.
@@ -407,6 +435,118 @@ class MboteApiService {
                 ramUsageMb = 580
             )
         )
+    }
+
+    /**
+     * Fetch all user chat conversations from backend REST API
+     */
+    suspend fun fetchUserChats(): Result<List<ChatDto>> {
+        return executeHttpRequest<Unit, List<ChatDto>>(
+            endpoint = "/chats",
+            method = "GET"
+        ) { json ->
+            try {
+                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<ChatDto>>>(json).data ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    /**
+     * Fetch messages for a specific chat from backend REST API
+     */
+    suspend fun fetchMessagesForChat(chatId: String): Result<List<MessageDto>> {
+        return executeHttpRequest<Unit, List<MessageDto>>(
+            endpoint = "/chats/$chatId/messages",
+            method = "GET"
+        ) { json ->
+            try {
+                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<MessageDto>>>(json).data ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    /**
+     * Send message API call to backend server
+     */
+    suspend fun sendMessageApi(dto: SendMessageDto): Result<MessageDto> {
+        return executeHttpRequest<SendMessageDto, MessageDto>(
+            endpoint = "/messages/send",
+            method = "POST",
+            requestBody = dto
+        ) { json ->
+            try {
+                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<MessageDto>>(json).data!!
+            } catch (e: Exception) {
+                MessageDto(
+                    id = "msg_server_" + System.currentTimeMillis(),
+                    chatId = dto.chatId,
+                    senderId = "user_me",
+                    senderName = "Moi",
+                    text = dto.text,
+                    timestamp = "À l'instant",
+                    mediaType = dto.mediaType,
+                    mediaUrl = dto.mediaUrl,
+                    isMine = true
+                )
+            }
+        }
+    }
+
+    /**
+     * Delete message API endpoint
+     */
+    suspend fun deleteMessageApi(messageId: String): Result<Boolean> {
+        return executeHttpRequest<Unit, Boolean>(
+            endpoint = "/messages/$messageId",
+            method = "DELETE"
+        ) { true }
+    }
+
+    /**
+     * Star message API endpoint
+     */
+    suspend fun starMessageApi(messageId: String): Result<Boolean> {
+        return executeHttpRequest<Unit, Boolean>(
+            endpoint = "/messages/$messageId/star",
+            method = "POST"
+        ) { true }
+    }
+
+    /**
+     * Fetch call history from the backend server
+     */
+    suspend fun fetchCallHistory(): Result<List<CallItem>> {
+        return executeHttpRequest<Unit, List<CallItem>>(
+            endpoint = "/calls/history",
+            method = "GET"
+        ) { json ->
+            try {
+                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<CallItem>>>(json).data ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    /**
+     * Log a new call to the backend server
+     */
+    suspend fun logCallApi(callItem: CallItem): Result<CallItem> {
+        return executeHttpRequest<CallItem, CallItem>(
+            endpoint = "/calls/log",
+            method = "POST",
+            requestBody = callItem
+        ) { json ->
+            try {
+                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<CallItem>>(json).data!!
+            } catch (e: Exception) {
+                callItem
+            }
+        }
     }
 
     private fun String.capitalizeWords(): String = split(" ")

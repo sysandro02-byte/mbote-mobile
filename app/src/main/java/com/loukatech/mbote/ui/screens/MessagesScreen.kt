@@ -125,6 +125,9 @@ fun MessagesScreen(
     }
 
     if (showImportantMessagesDialog) {
+        val starredMessages = remember(chats) {
+            chats.flatMap { c -> c.messages.map { m -> c to m } }.filter { it.second.isStarred }
+        }
         AlertDialog(
             onDismissRequest = { showImportantMessagesDialog = false },
             title = {
@@ -137,14 +140,36 @@ fun MessagesScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Retrouvez ici tous les messages que vous avez marqués d'une étoile ⭐ :", fontSize = 13.sp)
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Aron AI • Hier à 14:20", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PurplePrimary)
-                            Text("« Bienvenue sur MBoté, la plateforme de messagerie moderne du Congo. »", fontSize = 13.sp, fontStyle = FontStyle.Italic)
+                    if (starredMessages.isEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "Aucun message marqué d'une étoile pour le moment.",
+                                fontSize = 13.sp,
+                                fontStyle = FontStyle.Italic,
+                                modifier = Modifier.padding(14.dp)
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.heightIn(max = 240.dp)
+                        ) {
+                            items(starredMessages) { (chatItem, msg) ->
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text("${chatItem.name} • ${msg.timestamp}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PurplePrimary)
+                                        Text("« ${msg.text} »", fontSize = 13.sp, fontStyle = FontStyle.Italic)
+                                    }
+                                }
+                            }
                         }
                     }
                 }

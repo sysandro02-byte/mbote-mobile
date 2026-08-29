@@ -166,7 +166,7 @@ class MboteRepository(
     private val _chats = MutableStateFlow<List<Chat>>(createInitialChats())
     val chats: StateFlow<List<Chat>> = _chats.asStateFlow()
 
-    private val _calls = MutableStateFlow<List<CallItem>>(createInitialCalls())
+    private val _calls = MutableStateFlow<List<CallItem>>(emptyList())
     val calls: StateFlow<List<CallItem>> = _calls.asStateFlow()
 
     private val _statuses = MutableStateFlow<List<StatusItem>>(createInitialStatuses())
@@ -300,6 +300,18 @@ class MboteRepository(
                 } else c
             }
         }
+
+        // Post message to backend REST API asynchronously
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.sendMessageApi(
+                SendMessageDto(
+                    chatId = chatId,
+                    text = previewText,
+                    mediaType = if (mediaType == MediaType.VIDEO) "VIDEO" else "IMAGE",
+                    mediaUrl = mediaUrl
+                )
+            )
+        }
     }
 
     fun sendMessage(chatId: String, text: String, replyTo: Message? = null) {
@@ -331,6 +343,17 @@ class MboteRepository(
                     )
                 } else c
             }
+        }
+
+        // Post message to backend REST API asynchronously
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.sendMessageApi(
+                SendMessageDto(
+                    chatId = chatId,
+                    text = text,
+                    mediaType = "TEXT"
+                )
+            )
         }
 
         // If chatting with AI, generate an instant response
@@ -379,9 +402,134 @@ class MboteRepository(
             }
         }
 
+        // Post message to backend REST API asynchronously
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.sendMessageApi(
+                SendMessageDto(
+                    chatId = chatId,
+                    text = "🎤 Message vocal ($formattedDuration)",
+                    mediaType = "AUDIO",
+                    mediaUrl = audioPath
+                )
+            )
+        }
+
         if (chat?.isAI == true) {
             triggerAiResponse(chatId, "Message vocal reçu")
         }
+    }
+
+    fun MessageDto.toMessage(): Message {
+        return Message(
+            id = this.id,
+            text = this.text,
+            senderId = this.senderId,
+            senderName = this.senderName,
+            senderAvatar = this.senderAvatar,
+            timestamp = this.timestamp,
+            status = MessageStatus.READ,
+            isMine = this.isMine,
+            isEncrypted = true,
+            mediaType = when (this.mediaType) {
+                "IMAGE" -> MediaType.IMAGE
+                "AUDIO" -> MediaType.AUDIO
+                "VIDEO" -> MediaType.VIDEO
+                "FILE" -> MediaType.FILE
+                "LOCATION" -> MediaType.LOCATION
+                "POLL" -> MediaType.POLL
+                "PAYMENT" -> MediaType.PAYMENT
+                "ARON_QUESTION" -> MediaType.ARON_QUESTION
+                else -> MediaType.NONE
+            },
+            mediaUrl = this.mediaUrl
+        )
+    }
+
+    suspend fun syncAllFromBackend(): Result<Unit> {
+        // Asynchronously fetch Call History from real REST API
+        try {
+            val callsResult = apiService.fetchCallHistory()
+            if (callsResult.isSuccess) {
+                val remoteCalls = callsResult.getOrNull()
+                if (remoteCalls != null) {
+                    _calls.value = remoteCalls
+                }
+            }
+        } catch (e: Exception) {
+            // Keep existing calls if offline
+        }
+
+        val chatsResult = apiService.fetchUserChats()
+        if (chatsResult.isSuccess) {
+            val remoteChats = chatsResult.getOrNull() ?: emptyList()
+            val mappedChats = remoteChats.map { chatDto ->
+                val messagesResult = apiService.fetchMessagesForChat(chatDto.id)
+                val messagesList = if (messagesResult.isSuccess) {
+                    messagesResult.getOrNull()?.map { it.toMessage() } ?: emptyList()
+                } else {
+                    emptyList()
+                }
+                
+                Chat(
+                    id = chatDto.id,
+                    name = chatDto.name,
+                    avatar = chatDto.avatar,
+                    lastMessage = chatDto.lastMessage,
+                    lastMessageTime = chatDto.lastMessageTime,
+                    unreadCount = chatDto.unreadCount,
+                    isOnline = chatDto.isOnline,
+                    isGroup = chatDto.isGroup,
+                    isChannel = chatDto.isChannel,
+                    isAI = false,
+                    isVerified = false,
+                    participants = emptyList(),
+                    messages = messagesList
+                )
+            }
+            _chats.value = mappedChats
+            return Result.success(Unit)
+        } else {
+            return Result.failure(chatsResult.exceptionOrNull() ?: Exception("Échec de synchronisation des chats"))
+        }
+    }
+
+    suspend fun addCallLog(call: CallItem) {
+        _calls.update { listOf(call) + it }
+        try {
+            apiService.logCallApi(call)
+        } catch (e: Exception) {
+            // Log local only if offline
+        }
+    }
+
+    suspend fun refreshCallsFromBackend() {
+        val result = apiService.fetchCallHistory()
+        if (result.isSuccess) {
+            val remoteCalls = result.getOrNull()
+            if (remoteCalls != null) {
+                _calls.value = remoteCalls
+            }
+        }
+    }
+
+    suspend fun refreshMessagesForChat(chatId: String) {
+        val result = apiService.fetchMessagesForChat(chatId)
+        if (result.isSuccess) {
+            val remoteMessages = result.getOrNull()?.map { it.toMessage() } ?: emptyList()
+            _chats.update { chatList ->
+                chatList.map { chat ->
+                    if (chat.id == chatId) {
+                        chat.copy(
+                            messages = remoteMessages
+                        )
+                    } else chat
+                }
+            }
+        }
+    }
+
+    suspend fun refreshChatsFromBackend() {
+        syncAllFromBackend()
     }
 
     fun sendAronQuestion(chatId: String, question: AronQuestion) {
@@ -1929,7 +2077,8 @@ class MboteRepository(
                 type = CallType.INCOMING,
                 isVideo = true,
                 timestamp = "Aujourd'hui à 14:10",
-                durationText = "12 min 30 s"
+                durationText = "12 min 30 s",
+                phoneNumber = "+242 06 555 4321"
             ),
             CallItem(
                 name = "Tech Hub Brazzaville",
@@ -1937,15 +2086,44 @@ class MboteRepository(
                 type = CallType.OUTGOING,
                 isVideo = false,
                 timestamp = "Hier à 18:45",
-                durationText = "34 min 12 s"
+                durationText = "34 min 12 s",
+                phoneNumber = "+242 05 777 8899"
+            ),
+            CallItem(
+                name = "Grace Makiese",
+                avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+                type = CallType.OUTGOING,
+                isVideo = true,
+                timestamp = "Hier à 11:20",
+                durationText = "5 min 45 s",
+                phoneNumber = "+242 06 555 4321"
+            ),
+            CallItem(
+                name = "Aron Loutala",
+                avatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+                type = CallType.INCOMING,
+                isVideo = false,
+                timestamp = "22 Août à 16:30",
+                durationText = "8 min 14 s",
+                phoneNumber = "+242 06 111 2233"
+            ),
+            CallItem(
+                name = "Audrey Matondo",
+                avatar = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80",
+                type = CallType.OUTGOING,
+                isVideo = true,
+                timestamp = "21 Août à 20:05",
+                durationText = "19 min 02 s",
+                phoneNumber = "+242 06 888 9900"
             ),
             CallItem(
                 name = "Yannick Nguesso",
-                avatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+                avatar = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
                 type = CallType.MISSED,
                 isVideo = true,
                 timestamp = "20 Août à 09:15",
-                durationText = "Manqué"
+                durationText = "Manqué",
+                phoneNumber = "+242 06 444 3322"
             )
         )
     }
@@ -2465,6 +2643,69 @@ class MboteRepository(
             videoFile.writeText(text)
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    suspend fun performCloudBackup(context: android.content.Context, isAuto: Boolean = false): Result<com.loukatech.mbote.service.BackupMetaData> {
+        val email = _userProfile.value.email.ifBlank { "m.loutala@gmail.com" }
+        return com.loukatech.mbote.service.MboteCloudBackupManager.performCloudBackup(
+            context = context,
+            userEmail = email,
+            chats = _chats.value,
+            calls = _calls.value,
+            isAuto = isAuto
+        )
+    }
+
+    suspend fun restoreCloudBackup(context: android.content.Context): Result<com.loukatech.mbote.service.BackupRestoreResult> {
+        val email = _userProfile.value.email.ifBlank { "m.loutala@gmail.com" }
+        val result = com.loukatech.mbote.service.MboteCloudBackupManager.restoreCloudBackup(context, email)
+        return if (result.isSuccess) {
+            val (restoredChats, restoredCalls) = result.getOrNull()!!
+            if (restoredChats.isNotEmpty()) {
+                _chats.update { currentList ->
+                    val restoredMap = restoredChats.associateBy { it.id }
+                    val merged = currentList.map { localChat ->
+                        restoredMap[localChat.id] ?: localChat
+                    }
+                    val newChats = restoredChats.filter { rc -> currentList.none { lc -> lc.id == rc.id } }
+                    merged + newChats
+                }
+            }
+            if (restoredCalls.isNotEmpty()) {
+                _calls.update { currentList ->
+                    val restoredMap = restoredCalls.associateBy { it.id }
+                    val merged = currentList.map { localCall ->
+                        restoredMap[localCall.id] ?: localCall
+                    }
+                    val newCalls = restoredCalls.filter { rc -> currentList.none { lc -> lc.id == rc.id } }
+                    merged + newCalls
+                }
+            }
+            val totalMessages = restoredChats.sumOf { it.messages.size }
+            val dateFormat = java.text.SimpleDateFormat("dd/MM/yyyy à HH:mm", java.util.Locale.getDefault())
+            Result.success(
+                com.loukatech.mbote.service.BackupRestoreResult(
+                    chatsCount = restoredChats.size,
+                    messagesCount = totalMessages,
+                    callsCount = restoredCalls.size,
+                    timestamp = dateFormat.format(java.util.Date()),
+                    backupId = "restore_" + System.currentTimeMillis()
+                )
+            )
+        } else {
+            Result.failure(result.exceptionOrNull() ?: Exception("Échec de la restauration cloud"))
+        }
+    }
+
+    fun checkAndRunAutoBackup(context: android.content.Context) {
+        if (com.loukatech.mbote.service.MboteCloudBackupManager.isAutoBackupDue(context)) {
+            val (enabled, _, wifiOnly) = com.loukatech.mbote.service.MboteCloudBackupManager.getAutoBackupPreferences(context)
+            if (enabled && com.loukatech.mbote.service.MboteCloudBackupManager.isNetworkSuitable(context, wifiOnly)) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    performCloudBackup(context, isAuto = true)
+                }
+            }
         }
     }
 

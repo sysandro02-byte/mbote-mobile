@@ -28,7 +28,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun CallViewScreen(
     call: CallItem,
-    onEndCall: () -> Unit,
+    onEndCall: (durationText: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var isMuted by remember { mutableStateOf(false) }
@@ -210,7 +210,14 @@ fun CallViewScreen(
 
                 // Big Red End Call Button
                 IconButton(
-                    onClick = onEndCall,
+                    onClick = {
+                        val durationStr = if (minutes > 0) {
+                            "$minutes min $seconds s"
+                        } else {
+                            "$seconds s"
+                        }
+                        onEndCall(durationStr)
+                    },
                     modifier = Modifier
                         .size(68.dp)
                         .clip(CircleShape)

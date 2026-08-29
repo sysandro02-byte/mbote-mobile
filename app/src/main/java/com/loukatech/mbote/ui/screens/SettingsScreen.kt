@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import kotlinx.coroutines.launch
 import coil.compose.AsyncImage
 import com.loukatech.mbote.model.AppThemeMode
 import com.loukatech.mbote.model.UserProfile
@@ -2185,10 +2186,99 @@ fun AudioVideoSubSettingsDialog(onDismiss: () -> Unit) {
 @Composable
 fun BackupSubSettingsDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
-    var frequency by remember { mutableStateOf("Quotidienne") }
-    var includeVideos by remember { mutableStateOf(true) }
-    var wifiOnly by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+    val repository = remember { com.loukatech.mbote.data.MboteRepository.getInstance() }
+
+    val (initialEnabled, initialFreq, initialWifi) = remember {
+        com.loukatech.mbote.service.MboteCloudBackupManager.getAutoBackupPreferences(context)
+    }
+
+    var autoBackupEnabled by remember { mutableStateOf(initialEnabled) }
+    var frequency by remember { mutableStateOf(initialFreq) }
+    var wifiOnly by remember { mutableStateOf(initialWifi) }
     var isBackingUp by remember { mutableStateOf(false) }
+    var isRestoring by remember { mutableStateOf(false) }
+    var showRestoreConfirmDialog by remember { mutableStateOf(false) }
+
+    var lastBackupMeta by remember {
+        mutableStateOf(com.loukatech.mbote.service.MboteCloudBackupManager.getLatestBackupMetadata(context))
+    }
+
+    fun savePrefs(newEnabled: Boolean = autoBackupEnabled, newFreq: String = frequency, newWifi: Boolean = wifiOnly) {
+        com.loukatech.mbote.service.MboteCloudBackupManager.saveAutoBackupPreferences(context, newEnabled, newFreq, newWifi)
+    }
+
+    if (showRestoreConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showRestoreConfirmDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.CloudDownload,
+                    contentDescription = null,
+                    tint = MbotePurplePrimary,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text("Restaurer la sauvegarde Supabase ?", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Cette action restaurera toutes vos discussions, messages et l'historique de vos appels stockés en toute sécurité dans Supabase Cloud.",
+                        fontSize = 13.sp
+                    )
+                    if (lastBackupMeta != null) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("📅 Date : ${lastBackupMeta?.timestamp}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text("💬 Messages : ${lastBackupMeta?.messagesCount} • 📞 Appels : ${lastBackupMeta?.callsCount}", fontSize = 11.5.sp)
+                                Text("📦 Taille : ${lastBackupMeta?.sizeFormatted}", fontSize = 11.sp, color = MbotePurplePrimary)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRestoreConfirmDialog = false
+                        isRestoring = true
+                        scope.launch {
+                            val result = repository.restoreCloudBackup(context)
+                            isRestoring = false
+                            if (result.isSuccess) {
+                                val info = result.getOrNull()!!
+                                Toast.makeText(
+                                    context,
+                                    "✅ Restauration réussie ! (${info.chatsCount} discussions, ${info.callsCount} appels restaurés)",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    "⚠️ Erreur de restauration: ${result.exceptionOrNull()?.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary)
+                ) {
+                    Text("Restaurer maintenant")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRestoreConfirmDialog = false }) {
+                    Text("Annuler")
+                }
+            }
+        )
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -2204,7 +2294,7 @@ fun BackupSubSettingsDialog(onDismiss: () -> Unit) {
                     .fillMaxWidth()
                     .padding(20.dp)
             ) {
-                SubSettingsDialogHeader(title = "Sauvegarde des données", icon = Icons.Outlined.CloudUpload, onDismiss = onDismiss)
+                SubSettingsDialogHeader(title = "Sauvegarde & Restauration Cloud", icon = Icons.Outlined.CloudUpload, onDismiss = onDismiss)
                 Spacer(modifier = Modifier.height(12.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
                 Spacer(modifier = Modifier.height(12.dp))
@@ -2216,42 +2306,81 @@ fun BackupSubSettingsDialog(onDismiss: () -> Unit) {
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    // Cloud Status Card
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = MbotePurpleSoft,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
-                            Text("Dernière sauvegarde", fontWeight = FontWeight.Bold, color = MbotePurplePrimary, fontSize = 13.sp)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("Aujourd'hui à 03:00 • 48.2 Mo", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                            Text("Emplacement : Stockage local chiffré LoukaTech", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Dernière sauvegarde cloud", fontWeight = FontWeight.Bold, color = MbotePurplePrimary, fontSize = 13.sp)
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color(0xFF10B981).copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        text = "Supabase Active 🟢",
+                                        color = Color(0xFF10B981),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            val dateText = lastBackupMeta?.timestamp ?: "Aucune sauvegarde effectuée"
+                            val infoText = if (lastBackupMeta != null) {
+                                "${lastBackupMeta?.sizeFormatted} • ${lastBackupMeta?.messagesCount} msgs • ${lastBackupMeta?.callsCount} appels"
+                            } else {
+                                "Sauvegardez pour protéger vos conversations"
+                            }
+                            Text(dateText, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                            Text(infoText, fontSize = 11.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text("Stockage : Supabase Cloud (bucket mbote-media)", fontSize = 10.5.sp, color = MbotePurplePrimary)
                         }
                     }
 
-                    SubSettingOptionChoice(
-                        title = "Fréquence de sauvegarde automatique",
-                        options = listOf("Quotidienne", "Hebdomadaire", "Mensuelle", "Désactivée"),
-                        selectedOption = frequency,
-                        onSelect = { frequency = it }
-                    )
-
                     SettingsToggleRow(
-                        icon = Icons.Outlined.VideoFile,
-                        title = "Inclure les vidéos",
-                        subtitle = "Sauvegarder également les fichiers vidéo reçus (+120 Mo)",
-                        isChecked = includeVideos,
-                        onToggle = { includeVideos = !includeVideos }
+                        icon = Icons.Outlined.CloudSync,
+                        title = "Sauvegarde automatique cloud",
+                        subtitle = "Sauvegarder les messages et l'historique d'appels dans Supabase",
+                        isChecked = autoBackupEnabled,
+                        onToggle = {
+                            autoBackupEnabled = !autoBackupEnabled
+                            savePrefs(newEnabled = autoBackupEnabled)
+                        }
                     )
 
-                    SettingsToggleRow(
-                        icon = Icons.Outlined.Wifi,
-                        title = "Sauvegarder uniquement en Wi-Fi",
-                        subtitle = "Ne pas utiliser le forfait de données cellulaires",
-                        isChecked = wifiOnly,
-                        onToggle = { wifiOnly = !wifiOnly }
-                    )
+                    if (autoBackupEnabled) {
+                        SubSettingOptionChoice(
+                            title = "Fréquence d'automatisation",
+                            options = listOf("Quotidienne", "Hebdomadaire", "Mensuelle", "À chaque modification"),
+                            selectedOption = frequency,
+                            onSelect = {
+                                frequency = it
+                                savePrefs(newFreq = it)
+                            }
+                        )
 
+                        SettingsToggleRow(
+                            icon = Icons.Outlined.Wifi,
+                            title = "Sauvegarder uniquement en Wi-Fi",
+                            subtitle = "Ne pas utiliser les données cellulaires mobile",
+                            isChecked = wifiOnly,
+                            onToggle = {
+                                wifiOnly = !wifiOnly
+                                savePrefs(newWifi = wifiOnly)
+                            }
+                        )
+                    }
+
+                    // Progress indicators
                     if (isBackingUp) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -2259,20 +2388,59 @@ fun BackupSubSettingsDialog(onDismiss: () -> Unit) {
                         ) {
                             LinearProgressIndicator(color = MbotePurplePrimary, modifier = Modifier.fillMaxWidth())
                             Spacer(modifier = Modifier.height(6.dp))
-                            Text("Sauvegarde chiffrée en cours...", fontSize = 12.sp, color = MbotePurplePrimary)
+                            Text("Envoi chiffré vers Supabase Storage en cours...", fontSize = 12.sp, color = MbotePurplePrimary, fontWeight = FontWeight.Medium)
+                        }
+                    } else if (isRestoring) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        ) {
+                            LinearProgressIndicator(color = Color(0xFF10B981), modifier = Modifier.fillMaxWidth())
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text("Téléchargement et restauration des données...", fontSize = 12.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Medium)
                         }
                     } else {
-                        OutlinedButton(
+                        // Backup Action Button
+                        Button(
                             onClick = {
                                 isBackingUp = true
-                                Toast.makeText(context, "Lancement de la sauvegarde...", Toast.LENGTH_SHORT).show()
+                                scope.launch {
+                                    val result = repository.performCloudBackup(context)
+                                    isBackingUp = false
+                                    if (result.isSuccess) {
+                                        lastBackupMeta = com.loukatech.mbote.service.MboteCloudBackupManager.getLatestBackupMetadata(context)
+                                        Toast.makeText(
+                                            context,
+                                            "☁️ Sauvegarde Supabase réussie ! (${lastBackupMeta?.messagesCount} msgs, ${lastBackupMeta?.callsCount} appels)",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            "⚠️ Erreur de sauvegarde: ${result.exceptionOrNull()?.message}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
                             },
+                            colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Outlined.Backup, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Outlined.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Sauvegarder maintenant", fontWeight = FontWeight.Bold)
+                            Text("Sauvegarder maintenant (Cloud Supabase)", fontWeight = FontWeight.Bold)
+                        }
+
+                        // Restore Action Button
+                        OutlinedButton(
+                            onClick = { showRestoreConfirmDialog = true },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp), tint = MbotePurplePrimary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Restaurer les données depuis Supabase", fontWeight = FontWeight.Bold, color = MbotePurplePrimary)
                         }
                     }
                 }
@@ -2280,11 +2448,11 @@ fun BackupSubSettingsDialog(onDismiss: () -> Unit) {
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
                     onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Fermer", fontWeight = FontWeight.Bold)
+                    Text("Fermer", color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 }
             }
         }

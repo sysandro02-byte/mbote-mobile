@@ -973,7 +973,7 @@ fun ChatDetailScreen(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(230.dp)
+                                    .height(240.dp)
                                     .background(MaterialTheme.colorScheme.surface)
                                     .padding(8.dp)
                             ) {
@@ -986,12 +986,12 @@ fun ChatDetailScreen(
                                     Tab(
                                         selected = emojiGifTab == 0,
                                         onClick = { emojiGifTab = 0 },
-                                        text = { Text("😊 Emojis", fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                                        text = { Text("😊 Emojis (Hors-Ligne)", fontWeight = FontWeight.Bold, fontSize = 12.5.sp) }
                                     )
                                     Tab(
                                         selected = emojiGifTab == 1,
                                         onClick = { emojiGifTab = 1 },
-                                        text = { Text("🖼️ GIFs & Stickers", fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+                                        text = { Text("🖼️ GIFs & Stickers Hors-Ligne", fontWeight = FontWeight.Bold, fontSize = 12.5.sp) }
                                     )
                                 }
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -999,12 +999,13 @@ fun ChatDetailScreen(
 
                                 if (emojiGifTab == 0) {
                                     val emojis = listOf(
-                                        "❤️", "🔥", "👍", "😂", "😍", "🇨🇬", "🇨🇩", "👏", "🎉", "💯",
-                                        "🚀", "✨", "🙏", "😎", "🤩", "🥰", "🥳", "😭", "😤", "🔥",
-                                        "💪", "👑", "💎", "⭐", "🎉", "💡", "🤝", "🙌", "💥", "💫"
+                                        "🇨🇬", "🇨🇩", "🇦🇴", "🇨🇲", "🇬🇦", "🇸🇳", "🌍", "🦁", "🐆", "🌴",
+                                        "❤️", "🔥", "👍", "😂", "😍", "👏", "🎉", "💯", "🚀", "✨",
+                                        "🙏", "😎", "🤩", "🥰", "🥳", "😭", "😤", "💪", "👑", "💎",
+                                        "⭐", "💡", "🤝", "🙌", "💥", "💫", "💬", "🎵", "☕", "🥁"
                                     )
                                     androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                                        columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(6),
+                                        columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(7),
                                         modifier = Modifier.fillMaxSize(),
                                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                                         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -1013,62 +1014,84 @@ fun ChatDetailScreen(
                                             val emoji = emojis[index]
                                             Box(
                                                 modifier = Modifier
-                                                    .size(40.dp)
+                                                    .size(38.dp)
                                                     .clip(CircleShape)
                                                     .clickable {
                                                         messageText += emoji
                                                     },
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Text(text = emoji, fontSize = 22.sp)
+                                                Text(text = emoji, fontSize = 21.sp)
                                             }
                                         }
                                     }
                                 } else {
-                                    val gifs = listOf(
-                                        Pair("https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=300", "Concert"),
-                                        Pair("https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=300", "Savanna"),
-                                        Pair("https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=300", "Party"),
-                                        Pair("https://images.unsplash.com/photo-1519741497674-611481863552?w=300", "River"),
-                                        Pair("https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=300", "Cyber"),
-                                        Pair("https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=300", "Avatar")
+                                    // Local Offline Vector/Gradient Stickers (100% visible without internet)
+                                    val offlineStickers = listOf(
+                                        Triple("Danse MBoté Chic", "🕺", Pair("🇨🇬", listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)))),
+                                        Triple("Congo Power", "🦁", Pair("🇨🇬", listOf(Color(0xFF059669), Color(0xFFEAB308), Color(0xFFDC2626)))),
+                                        Triple("Amour Kongo", "❤️", Pair("✨", listOf(Color(0xFFE11D48), Color(0xFFF43F5E)))),
+                                        Triple("C'est Chaud !", "🔥", Pair("⚡", listOf(Color(0xFFEA580C), Color(0xFFFACC15)))),
+                                        Triple("Ambiance Total", "🎉", Pair("🥳", listOf(Color(0xFF7C3AED), Color(0xFF06B6D4)))),
+                                        Triple("Bravo Sango", "👏", Pair("💯", listOf(Color(0xFF10B981), Color(0xFF3B82F6)))),
+                                        Triple("Causerie Café", "☕", Pair("💬", listOf(Color(0xFFD97706), Color(0xFFB45309)))),
+                                        Triple("Mort De Rire", "😂", Pair("🤣", listOf(Color(0xFFF59E0B), Color(0xFFFBBF24))))
                                     )
+
                                     androidx.compose.foundation.lazy.LazyRow(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                                         modifier = Modifier.fillMaxSize()
                                     ) {
-                                        items(gifs.size) { index ->
-                                            val (gifUrl, label) = gifs[index]
+                                        items(offlineStickers.size) { index ->
+                                            val (title, mainEmoji, meta) = offlineStickers[index]
+                                            val (badgeText, bgColors) = meta
                                             Card(
-                                                shape = RoundedCornerShape(12.dp),
+                                                shape = RoundedCornerShape(16.dp),
                                                 modifier = Modifier
-                                                    .width(110.dp)
+                                                    .width(125.dp)
                                                     .fillMaxHeight()
                                                     .clickable {
-                                                        onSendMediaMessage(gifUrl, false, "[GIF] $label")
+                                                        onSendMediaMessage("", false, "[GIF] $mainEmoji $title")
                                                         showEmojiGifPanel = false
                                                     }
                                             ) {
-                                                Box(modifier = Modifier.fillMaxSize()) {
-                                                    AsyncImage(
-                                                        model = gifUrl,
-                                                        contentDescription = label,
-                                                        contentScale = ContentScale.Crop,
-                                                        modifier = Modifier.fillMaxSize()
-                                                    )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .background(
+                                                            brush = androidx.compose.ui.graphics.Brush.linearGradient(bgColors)
+                                                        )
+                                                        .padding(8.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    // Badge top right
                                                     Surface(
-                                                        color = Color.Black.copy(alpha = 0.6f),
+                                                        shape = CircleShape,
+                                                        color = Color.Black.copy(alpha = 0.3f),
                                                         modifier = Modifier
-                                                            .align(Alignment.BottomCenter)
-                                                            .fillMaxWidth()
+                                                            .align(Alignment.TopEnd)
+                                                            .padding(2.dp)
                                                     ) {
                                                         Text(
-                                                            text = label,
-                                                            color = Color.White,
+                                                            text = badgeText,
                                                             fontSize = 11.sp,
+                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+
+                                                    // Center Big Emoji
+                                                    Column(
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        verticalArrangement = Arrangement.Center
+                                                    ) {
+                                                        Text(text = mainEmoji, fontSize = 38.sp)
+                                                        Spacer(modifier = Modifier.height(4.dp))
+                                                        Text(
+                                                            text = title,
+                                                            color = Color.White,
+                                                            fontSize = 11.5.sp,
                                                             fontWeight = FontWeight.Bold,
-                                                            textAlign = TextAlign.Center,
-                                                            modifier = Modifier.padding(2.dp)
+                                                            textAlign = TextAlign.Center
                                                         )
                                                     }
                                                 }

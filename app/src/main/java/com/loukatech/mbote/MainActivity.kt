@@ -100,6 +100,10 @@ class MainActivity : ComponentActivity() {
             val isBiometricEnabled = remember { sharedPrefs.getBoolean("biometric_enabled", false) }
             var isAppUnlocked by remember { mutableStateOf(!isBiometricEnabled) }
 
+            LaunchedEffect(Unit) {
+                viewModel.checkAndRunAutoBackup(context)
+            }
+
             if (isBiometricEnabled && !isAppUnlocked) {
                 BiometricLockOverlay(
                     isTestMode = false,
@@ -197,7 +201,9 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    when {
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val isWideScreen = maxWidth >= 720.dp
+                        when {
                         // 0. Login & Auth Screen (if logged out or explicitly opened)
                         !isAuthenticated || showLoginScreen -> {
                             LoginScreen(
@@ -217,7 +223,7 @@ class MainActivity : ComponentActivity() {
                         activeCall != null -> {
                             CallViewScreen(
                                 call = activeCall!!,
-                                onEndCall = { viewModel.endCall() }
+                                onEndCall = { duration -> viewModel.endCall(duration) }
                             )
                         }
 
@@ -234,7 +240,7 @@ class MainActivity : ComponentActivity() {
                         }
 
                         // 3. Chat Detail Screen
-                        activeChat != null -> {
+                        activeChat != null && !isWideScreen -> {
                             val partnerContactId = activeChat!!.participants.firstOrNull { it.id != "user_me" }?.id ?: activeChat!!.id
                             val isChatBlocked = blockedContactIds.contains(partnerContactId) || blockedContactIds.contains(activeChat!!.id)
                             val isFriend = viewModel.isFriend(activeChat!!.name)
@@ -434,7 +440,7 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 }
-                            ) { paddingValues ->
+                             ) { paddingValues ->
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -442,80 +448,191 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                     when (currentTab) {
                                         NavigationTab.MESSAGES -> {
-                                            MessagesScreen(
-                                                chats = chats,
-                                                statuses = statuses,
-                                                searchQuery = searchQuery,
-                                                selectedFilter = chatFilter,
-                                                isSyncing = isDataSyncing,
-                                                socketTypingMap = socketTypingMap,
-                                                onSearchChange = { viewModel.setSearchQuery(it) },
-                                                onFilterChange = { viewModel.setChatFilter(it) },
-                                                onChatClick = { chatId -> viewModel.openChat(chatId) },
-                                                onNewChatClick = { viewModel.setShowQuickActionsMenu(true) },
-                                                onOpenContactsSync = { viewModel.setShowContactsSyncSheet(true) },
-                                                onJoinByLinkClick = { viewModel.setShowJoinByInviteLinkDialog(true) },
-                                                onStatusClick = { status -> viewModel.setSelectedStatusStory(status) },
-                                                onAddStatusClick = { viewModel.setShowAddStatusDialog(true) },
-                                                onProfileClick = { name, avatar -> showProfileForUser(name, avatar) }
-                                            )
-                                        }
-
-                                        NavigationTab.DISCOVER -> {
-                                            DiscoverScreen(
-                                                profiles = discoverProfiles,
-                                                onOpenProfile = { profile ->
-                                                    viewModel.startChatWithProfile(profile)
-                                                },
-                                                onSendGreeting = { profile ->
-                                                    viewModel.sendMboteGreeting(profile)
-                                                },
-                                                onStartChat = { profile ->
-                                                    viewModel.startChatWithProfile(profile)
-                                                },
-                                                onOpenAronQuestions = {
-                                                    viewModel.setShowAronQuestionsSheet(true)
-                                                },
-                                                onStartEyeContact = {
-                                                    viewModel.startEyeContactTimer()
+                                            if (isWideScreen) {
+                                                Row(modifier = Modifier.fillMaxSize()) {
+                                                    Box(modifier = Modifier.width(360.dp).fillMaxHeight()) {
+                                                        MessagesScreen(
+                                                            chats = chats,
+                                                            statuses = statuses,
+                                                            searchQuery = searchQuery,
+                                                            selectedFilter = chatFilter,
+                                                            isSyncing = isDataSyncing,
+                                                            socketTypingMap = socketTypingMap,
+                                                            onSearchChange = { viewModel.setSearchQuery(it) },
+                                                            onFilterChange = { viewModel.setChatFilter(it) },
+                                                            onChatClick = { chatId -> viewModel.openChat(chatId) },
+                                                            onNewChatClick = { viewModel.setShowQuickActionsMenu(true) },
+                                                            onOpenContactsSync = { viewModel.setShowContactsSyncSheet(true) },
+                                                            onJoinByLinkClick = { viewModel.setShowJoinByInviteLinkDialog(true) },
+                                                            onStatusClick = { status -> viewModel.setSelectedStatusStory(status) },
+                                                            onAddStatusClick = { viewModel.setShowAddStatusDialog(true) },
+                                                            onProfileClick = { name, avatar -> showProfileForUser(name, avatar) }
+                                                        )
+                                                    }
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .fillMaxHeight()
+                                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                                    ) {
+                                                        if (activeChat != null) {
+                                                            val partnerContactId = activeChat!!.participants.firstOrNull { it.id != "user_me" }?.id ?: activeChat!!.id
+                                                            val isChatBlocked = blockedContactIds.contains(partnerContactId) || blockedContactIds.contains(activeChat!!.id)
+                                                            val isFriend = viewModel.isFriend(activeChat!!.name)
+                                                            ChatDetailScreen(
+                                                                chat = activeChat!!,
+                                                                currentUserAvatar = userProfile.avatar,
+                                                                isPartnerTyping = isPartnerTyping,
+                                                                isBlocked = isChatBlocked,
+                                                                isFriend = isFriend,
+                                                                onBackClick = { viewModel.closeChat() },
+                                                                onAudioCallClick = { viewModel.startCall(activeChat!!.name, activeChat!!.avatar, false) },
+                                                                onVideoCallClick = { viewModel.startCall(activeChat!!.name, activeChat!!.avatar, true) },
+                                                                onSendMessage = { text, replyTo -> viewModel.sendMessage(activeChat!!.id, text, replyTo) },
+                                                                onSendVoiceMessage = { audioPath, durationSec, replyTo -> viewModel.sendVoiceMessage(activeChat!!.id, audioPath, durationSec, replyTo) },
+                                                                onSendMediaMessage = { mediaUrl, isVideo, caption -> viewModel.sendMediaAttachment(activeChat!!.id, mediaUrl, isVideo, caption) },
+                                                                onToggleBlock = { shouldBlock ->
+                                                                    if (shouldBlock) {
+                                                                        viewModel.blockContact(partnerContactId)
+                                                                    } else {
+                                                                        viewModel.unblockContact(partnerContactId)
+                                                                        viewModel.unblockContact(activeChat!!.id)
+                                                                    }
+                                                                },
+                                                                onReaction = { msgId, emoji -> viewModel.addReaction(activeChat!!.id, msgId, emoji) },
+                                                                onDeleteMessage = { msgId -> viewModel.deleteMessage(activeChat!!.id, msgId) },
+                                                                onOpenAronQuestions = { viewModel.setShowAronQuestionsSheet(true) },
+                                                                onOpenPollDialog = { viewModel.setShowPollDialog(true) },
+                                                                onOpenLocationPicker = { viewModel.setShowLocationSheet(true) },
+                                                                onOpenPaymentSheet = { viewModel.setShowPaymentSheet(true) },
+                                                                onVotePoll = { msgId, optionId -> viewModel.votePoll(activeChat!!.id, msgId, optionId) },
+                                                                onTranslateMessage = { msgId, lang -> viewModel.translateMessage(activeChat!!.id, msgId, lang) },
+                                                                onSetDisappearingTimer = { sec -> viewModel.setChatDisappearingTimer(activeChat!!.id, sec) },
+                                                                onUpdateWallpaper = { colorHex, imgUrl -> viewModel.setChatWallpaper(activeChat!!.id, colorHex, imgUrl) },
+                                                                onUserComposing = { isComposing -> viewModel.onUserTypingChanged(activeChat!!.id, isComposing) },
+                                                                onProfileClick = { showProfileForUser(activeChat!!.name, activeChat!!.avatar) }
+                                                            )
+                                                        } else {
+                                                            Column(
+                                                                modifier = Modifier
+                                                                    .fillMaxSize()
+                                                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
+                                                                    .padding(32.dp),
+                                                                verticalArrangement = Arrangement.Center,
+                                                                horizontalAlignment = Alignment.CenterHorizontally
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.Favorite,
+                                                                    contentDescription = null,
+                                                                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                                                    modifier = Modifier.size(72.dp)
+                                                                )
+                                                                Spacer(modifier = Modifier.height(16.dp))
+                                                                Text(
+                                                                    text = "Bienvenue sur MBoté",
+                                                                    fontSize = 20.sp,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    color = MaterialTheme.colorScheme.onSurface
+                                                                )
+                                                                Spacer(modifier = Modifier.height(8.dp))
+                                                                Text(
+                                                                    text = "Sélectionnez une discussion à gauche pour commencer à échanger en toute sécurité.",
+                                                                    fontSize = 14.sp,
+                                                                    textAlign = TextAlign.Center,
+                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                                )
+                                                            }
+                                                        }
+                                                    }
                                                 }
-                                            )
+                                            } else {
+                                                MessagesScreen(
+                                                    chats = chats,
+                                                    statuses = statuses,
+                                                    searchQuery = searchQuery,
+                                                    selectedFilter = chatFilter,
+                                                    isSyncing = isDataSyncing,
+                                                    socketTypingMap = socketTypingMap,
+                                                    onSearchChange = { viewModel.setSearchQuery(it) },
+                                                    onFilterChange = { viewModel.setChatFilter(it) },
+                                                    onChatClick = { chatId -> viewModel.openChat(chatId) },
+                                                    onNewChatClick = { viewModel.setShowQuickActionsMenu(true) },
+                                                    onOpenContactsSync = { viewModel.setShowContactsSyncSheet(true) },
+                                                    onJoinByLinkClick = { viewModel.setShowJoinByInviteLinkDialog(true) },
+                                                    onStatusClick = { status -> viewModel.setSelectedStatusStory(status) },
+                                                    onAddStatusClick = { viewModel.setShowAddStatusDialog(true) },
+                                                    onProfileClick = { name, avatar -> showProfileForUser(name, avatar) }
+                                                )
+                                            }
                                         }
-
+ 
+                                        NavigationTab.DISCOVER -> {
+                                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                                                Box(modifier = Modifier.widthIn(max = 680.dp).fillMaxHeight()) {
+                                                    DiscoverScreen(
+                                                        profiles = discoverProfiles,
+                                                        onOpenProfile = { profile ->
+                                                            viewModel.startChatWithProfile(profile)
+                                                        },
+                                                        onSendGreeting = { profile ->
+                                                            viewModel.sendMboteGreeting(profile)
+                                                        },
+                                                        onStartChat = { profile ->
+                                                            viewModel.startChatWithProfile(profile)
+                                                        },
+                                                        onOpenAronQuestions = {
+                                                            viewModel.setShowAronQuestionsSheet(true)
+                                                        },
+                                                        onStartEyeContact = {
+                                                            viewModel.startEyeContactTimer()
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+ 
                                         NavigationTab.CALLS -> {
-                                            CallsScreen(
-                                                calls = calls,
-                                                onStartCall = { name, avatar, isVideo ->
-                                                    viewModel.startCall(name, avatar, isVideo)
-                                                },
-                                                onOpenChat = { name ->
-                                                    viewModel.openChatByName(name)
-                                                },
-                                                syncedContacts = syncedContacts
-                                            )
+                                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                                                Box(modifier = Modifier.widthIn(max = 680.dp).fillMaxHeight()) {
+                                                    CallsScreen(
+                                                        calls = calls,
+                                                        onStartCall = { name, avatar, isVideo ->
+                                                            viewModel.startCall(name, avatar, isVideo)
+                                                        },
+                                                        onOpenChat = { name ->
+                                                            viewModel.openChatByName(name)
+                                                        },
+                                                        syncedContacts = syncedContacts
+                                                    )
+                                                }
+                                            }
                                         }
-
+ 
                                         NavigationTab.ACTUS -> {
-                                            ActusScreen(
-                                                newsPosts = newsPosts,
-                                                statuses = statuses,
-                                                shortVideos = shortVideos,
-                                                isSyncing = isDataSyncing,
-                                                onLikeClick = { postId -> viewModel.toggleNewsLike(postId) },
-                                                onCommentClick = { post -> viewModel.setSelectedPostForComments(post) },
-                                                onStatusClick = { status -> viewModel.setSelectedStatusStory(status) },
-                                                onAddStatusClick = { viewModel.setShowAddStatusDialog(true) },
-                                                onOpenShortVideos = { viewModel.openShortVideos("/app?tab=actus") },
-                                                onOpenCreatorProfile = { video -> viewModel.setSelectedCreatorProfile(video) },
-                                                onCreateShortVideoClick = { viewModel.setShowCreateShortVideoDialog(true) },
-                                                onPublishNews = { title, content, imageUrl, category ->
-                                                    viewModel.addNewsPost(title, content, imageUrl, category)
-                                                },
-                                                onAuthorProfileClick = { name, avatar -> showProfileForUser(name, avatar) },
-                                                onReportContent = { type, target -> viewModel.submitReport(type, target) }
-                                            )
+                                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                                                Box(modifier = Modifier.widthIn(max = 680.dp).fillMaxHeight()) {
+                                                    ActusScreen(
+                                                        newsPosts = newsPosts,
+                                                        statuses = statuses,
+                                                        shortVideos = shortVideos,
+                                                        isSyncing = isDataSyncing,
+                                                        onLikeClick = { postId -> viewModel.toggleNewsLike(postId) },
+                                                        onCommentClick = { post -> viewModel.setSelectedPostForComments(post) },
+                                                        onStatusClick = { status -> viewModel.setSelectedStatusStory(status) },
+                                                        onAddStatusClick = { viewModel.setShowAddStatusDialog(true) },
+                                                        onOpenShortVideos = { viewModel.openShortVideos("/app?tab=actus") },
+                                                        onOpenCreatorProfile = { video -> viewModel.setSelectedCreatorProfile(video) },
+                                                        onCreateShortVideoClick = { viewModel.setShowCreateShortVideoDialog(true) },
+                                                        onPublishNews = { title, content, imageUrl, category ->
+                                                            viewModel.addNewsPost(title, content, imageUrl, category)
+                                                        },
+                                                        onAuthorProfileClick = { name, avatar -> showProfileForUser(name, avatar) },
+                                                        onReportContent = { type, target -> viewModel.submitReport(type, target) }
+                                                    )
+                                                }
+                                            }
                                         }
-
+ 
                                         NavigationTab.SHORTS -> {
                                             ShortVideosScreen(
                                                 viewModel = viewModel,
@@ -523,94 +640,106 @@ class MainActivity : ComponentActivity() {
                                                 onBack = { viewModel.setTab(NavigationTab.ACTUS) }
                                             )
                                         }
-
+ 
                                         NavigationTab.MASTA -> {
-                                            MastaScreen(
-                                                viewModel = viewModel,
-                                                onOpenChat = { name -> viewModel.openChatByName(name) },
-                                                onStartCall = { name, avatar, isVideo -> viewModel.startCall(name, avatar, isVideo) },
-                                                onOpenSettings = { viewModel.setTab(NavigationTab.SETTINGS) },
-                                                onOpenProfile = { mastaUser -> showProfileForUser(mastaUser.name, mastaUser.avatar) }
-                                            )
-                                        }
-
-                                        NavigationTab.MEETINGS -> {
-                                            MeetingsScreen(
-                                                meetings = meetings,
-                                                onNewMeetingClick = { viewModel.setShowNewMeetingDialog(true) },
-                                                onJoinMeetingClick = { meeting -> viewModel.startMeeting(meeting) }
-                                            )
-                                        }
-
-                                        NavigationTab.SETTINGS -> {
-                                            SettingsScreen(
-                                                userProfile = userProfile,
-                                                onEditProfileClick = { viewModel.setShowEditProfileDialog(true) },
-                                                onToggleDarkMode = { viewModel.toggleDarkMode() },
-                                                onThemeModeChange = { viewModel.setThemeMode(it) },
-                                                onToggleNotifications = { viewModel.toggleNotifications() },
-                                                onJobsClick = { viewModel.setShowJobsScreen(true) },
-                                                onSyncContactsClick = { viewModel.setShowContactsSyncSheet(true) },
-                                                onAronQuestionsClick = { viewModel.setShowAronQuestionsSheet(true) },
-                                                onEyeContactClick = { viewModel.startEyeContactTimer() },
-                                                onStorageClick = { viewModel.setShowStorageDialog(true) },
-                                                onShortVideosClick = { viewModel.openShortVideos("/app?tab=settings") },
-                                                onLoginClick = { viewModel.setShowLoginScreen(true) },
-                                                onAdminClick = { viewModel.setShowAdminLoginDialog(true) },
-                                                onLogoutClick = { viewModel.logout() },
-                                                onUpdateBio = { newBio -> viewModel.updateBio(newBio) },
-                                                onAccessRequestClick = { viewModel.setShowAccessRequestDialog(true) },
-                                                userGiftState = userGiftState,
-                                                onCashout = { amount, provider, phone ->
-                                                    viewModel.cashoutVirtualGifts(amount, provider, phone)
-                                                },
-                                                onBuyBundle = { bundle, provider ->
-                                                    viewModel.buyGiftBundle(bundle, provider)
-                                                },
-                                                onBuySingleGift = { gift, count, provider ->
-                                                    viewModel.buySingleGift(gift, count, provider)
-                                                },
-                                                onLanguageChange = { lang ->
-                                                    viewModel.updateLanguage(lang)
-                                                },
-                                                onCurrencyChange = { curr ->
-                                                    viewModel.updateCurrency(curr)
-                                                },
-                                                onSaveParentalControl = { active, email, night, time, curfew, school, isChildLinked ->
-                                                    viewModel.updateParentalControl(active, email, night, time, curfew, school, isChildLinked)
-                                                },
-                                                onSendSosAlert = { email, reason ->
-                                                    viewModel.sendSosAlert(email, reason)
-                                                },
-                                                onTogglePremium = { isPremium ->
-                                                    viewModel.togglePremiumStatus(isPremium)
-                                                },
-                                                linkedChild = linkedChild,
-                                                onUpgradeParentalPlan = { planId, _ ->
-                                                    viewModel.updateParentalSubscriptionPlan(planId, planId)
-                                                },
-                                                onProcessScannedQr = { payload ->
-                                                    viewModel.processParentChildQrCode(payload)
-                                                },
-                                                childApps = childApps,
-                                                onToggleAppBlocked = { pkg, blocked ->
-                                                    viewModel.toggleChildAppBlocked(pkg, blocked)
-                                                },
-                                                onToggleAllApps = { blocked, category ->
-                                                    viewModel.toggleAllChildApps(blocked, category)
-                                                },
-                                                onToggleAppSchoolRestriction = { pkg, restricted ->
-                                                    viewModel.setChildAppSchoolRestriction(pkg, restricted)
-                                                },
-                                                panicAlerts = panicAlerts,
-                                                activePanicAlert = activePanicAlert,
-                                                onTriggerPanicAlert = { lat, lng, addr, type, msg ->
-                                                    viewModel.triggerChildPanicAlert(lat, lng, addr, type, msg)
-                                                },
-                                                onResolvePanicAlert = { alertId ->
-                                                    viewModel.resolvePanicAlert(alertId)
+                                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                                                Box(modifier = Modifier.widthIn(max = 680.dp).fillMaxHeight()) {
+                                                    MastaScreen(
+                                                        viewModel = viewModel,
+                                                        onOpenChat = { name -> viewModel.openChatByName(name) },
+                                                        onStartCall = { name, avatar, isVideo -> viewModel.startCall(name, avatar, isVideo) },
+                                                        onOpenSettings = { viewModel.setTab(NavigationTab.SETTINGS) },
+                                                        onOpenProfile = { mastaUser -> showProfileForUser(mastaUser.name, mastaUser.avatar) }
+                                                    )
                                                 }
-                                            )
+                                            }
+                                        }
+ 
+                                        NavigationTab.MEETINGS -> {
+                                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                                                Box(modifier = Modifier.widthIn(max = 680.dp).fillMaxHeight()) {
+                                                    MeetingsScreen(
+                                                        meetings = meetings,
+                                                        onNewMeetingClick = { viewModel.setShowNewMeetingDialog(true) },
+                                                        onJoinMeetingClick = { meeting -> viewModel.startMeeting(meeting) }
+                                                    )
+                                                }
+                                            }
+                                        }
+ 
+                                        NavigationTab.SETTINGS -> {
+                                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                                                Box(modifier = Modifier.widthIn(max = 680.dp).fillMaxHeight()) {
+                                                    SettingsScreen(
+                                                        userProfile = userProfile,
+                                                        onEditProfileClick = { viewModel.setShowEditProfileDialog(true) },
+                                                        onToggleDarkMode = { viewModel.toggleDarkMode() },
+                                                        onThemeModeChange = { viewModel.setThemeMode(it) },
+                                                        onToggleNotifications = { viewModel.toggleNotifications() },
+                                                        onJobsClick = { viewModel.setShowJobsScreen(true) },
+                                                        onSyncContactsClick = { viewModel.setShowContactsSyncSheet(true) },
+                                                        onAronQuestionsClick = { viewModel.setShowAronQuestionsSheet(true) },
+                                                        onEyeContactClick = { viewModel.startEyeContactTimer() },
+                                                        onStorageClick = { viewModel.setShowStorageDialog(true) },
+                                                        onShortVideosClick = { viewModel.openShortVideos("/app?tab=settings") },
+                                                        onLoginClick = { viewModel.setShowLoginScreen(true) },
+                                                        onAdminClick = { viewModel.setShowAdminLoginDialog(true) },
+                                                        onLogoutClick = { viewModel.logout() },
+                                                        onUpdateBio = { newBio -> viewModel.updateBio(newBio) },
+                                                        onAccessRequestClick = { viewModel.setShowAccessRequestDialog(true) },
+                                                        userGiftState = userGiftState,
+                                                        onCashout = { amount, provider, phone ->
+                                                            viewModel.cashoutVirtualGifts(amount, provider, phone)
+                                                        },
+                                                        onBuyBundle = { bundle, provider ->
+                                                            viewModel.buyGiftBundle(bundle, provider)
+                                                        },
+                                                        onBuySingleGift = { gift, count, provider ->
+                                                            viewModel.buySingleGift(gift, count, provider)
+                                                        },
+                                                        onLanguageChange = { lang ->
+                                                            viewModel.updateLanguage(lang)
+                                                        },
+                                                        onCurrencyChange = { curr ->
+                                                            viewModel.updateCurrency(curr)
+                                                        },
+                                                        onSaveParentalControl = { active, email, night, time, curfew, school, isChildLinked ->
+                                                            viewModel.updateParentalControl(active, email, night, time, curfew, school, isChildLinked)
+                                                        },
+                                                        onSendSosAlert = { email, reason ->
+                                                            viewModel.sendSosAlert(email, reason)
+                                                        },
+                                                        onTogglePremium = { isPremium ->
+                                                            viewModel.togglePremiumStatus(isPremium)
+                                                        },
+                                                        linkedChild = linkedChild,
+                                                        onUpgradeParentalPlan = { planId, _ ->
+                                                            viewModel.updateParentalSubscriptionPlan(planId, planId)
+                                                        },
+                                                        onProcessScannedQr = { payload ->
+                                                            viewModel.processParentChildQrCode(payload)
+                                                        },
+                                                        childApps = childApps,
+                                                        onToggleAppBlocked = { pkg, blocked ->
+                                                            viewModel.toggleChildAppBlocked(pkg, blocked)
+                                                        },
+                                                        onToggleAllApps = { blocked, category ->
+                                                            viewModel.toggleAllChildApps(blocked, category)
+                                                        },
+                                                        onToggleAppSchoolRestriction = { pkg, restricted ->
+                                                            viewModel.setChildAppSchoolRestriction(pkg, restricted)
+                                                        },
+                                                        panicAlerts = panicAlerts,
+                                                        activePanicAlert = activePanicAlert,
+                                                        onTriggerPanicAlert = { lat, lng, addr, type, msg ->
+                                                            viewModel.triggerChildPanicAlert(lat, lng, addr, type, msg)
+                                                        },
+                                                        onResolvePanicAlert = { alertId ->
+                                                            viewModel.resolvePanicAlert(alertId)
+                                                        }
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -959,6 +1088,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
 }
 
 @Composable

@@ -74,19 +74,19 @@ fun CallSettingsDialog(
                     title = {
                         Text(
                             text = when (currentSubPage) {
-                                CallSettingsSubPage.MAIN -> "Settings"
-                                CallSettingsSubPage.CALLER_ID_SPAM -> "Caller ID & spam"
-                                CallSettingsSubPage.ACCESSIBILITY -> "Accessibility"
-                                CallSettingsSubPage.ASSISTED_DIALING -> "Assisted dialing"
-                                CallSettingsSubPage.BLOCKED_NUMBERS -> "Blocked numbers"
-                                CallSettingsSubPage.CALLS_ACCOUNTS -> "Calls"
-                                CallSettingsSubPage.DISPLAY_OPTIONS -> "Display options"
-                                CallSettingsSubPage.QUICK_RESPONSES -> "Quick responses"
-                                CallSettingsSubPage.SOUNDS_VIBRATION -> "Sounds and vibration"
-                                CallSettingsSubPage.VOICEMAIL_CONFIG -> "Voicemail"
-                                CallSettingsSubPage.CONTACT_RINGTONES -> "Contact ringtones"
-                                CallSettingsSubPage.CALLER_ID_ANNOUNCEMENT -> "Caller ID announcement"
-                                CallSettingsSubPage.FLIP_TO_SILENCE -> "Flip To Silence"
+                                CallSettingsSubPage.MAIN -> "Paramètres d'appel"
+                                CallSettingsSubPage.CALLER_ID_SPAM -> "ID appelant et anti-spam"
+                                CallSettingsSubPage.ACCESSIBILITY -> "Accessibilité"
+                                CallSettingsSubPage.ASSISTED_DIALING -> "Composition assistée"
+                                CallSettingsSubPage.BLOCKED_NUMBERS -> "Numéros bloqués"
+                                CallSettingsSubPage.CALLS_ACCOUNTS -> "Comptes et réseau d'appel"
+                                CallSettingsSubPage.DISPLAY_OPTIONS -> "Options d'affichage"
+                                CallSettingsSubPage.QUICK_RESPONSES -> "Réponses rapides (SMS)"
+                                CallSettingsSubPage.SOUNDS_VIBRATION -> "Sons et vibrations"
+                                CallSettingsSubPage.VOICEMAIL_CONFIG -> "Messagerie et répondeur"
+                                CallSettingsSubPage.CONTACT_RINGTONES -> "Sonneries des contacts"
+                                CallSettingsSubPage.CALLER_ID_ANNOUNCEMENT -> "Annonce vocale de l'appelant"
+                                CallSettingsSubPage.FLIP_TO_SILENCE -> "Retourner pour couper le son"
                             },
                             fontWeight = FontWeight.Bold
                         )
@@ -179,76 +179,76 @@ fun CallSettingsMainList(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        // Section: Call Assist
+        // Section: Assistance d'appel
         item {
-            CallSettingsSectionHeader("Call Assist")
+            CallSettingsSectionHeader("Assistance d'appel")
         }
         item {
             CallSettingsItemRow(
                 icon = Icons.Outlined.Info,
-                title = "Caller ID & spam",
-                subtitle = if (settings.callerIdAndSpamEnabled) "On" else "Off",
+                title = "ID appelant et anti-spam",
+                subtitle = if (settings.callerIdAndSpamEnabled) "Activé" else "Désactivé",
                 onClick = { onNavigateTo(CallSettingsSubPage.CALLER_ID_SPAM) }
             )
         }
 
         item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)) }
 
-        // Section: General
+        // Section: Général
         item {
-            CallSettingsSectionHeader("General")
+            CallSettingsSectionHeader("Général")
         }
         item {
             CallSettingsItemRow(
                 icon = Icons.Default.Accessibility,
-                title = "Accessibility",
+                title = "Accessibilité",
                 onClick = { onNavigateTo(CallSettingsSubPage.ACCESSIBILITY) }
             )
         }
         item {
             CallSettingsItemRow(
                 icon = Icons.Outlined.TravelExplore,
-                title = "Assisted dialing",
-                subtitle = "Automatic country code (${settings.defaultCountryCode})",
+                title = "Composition assistée",
+                subtitle = "Indicatif pays automatique (${settings.defaultCountryCode})",
                 onClick = { onNavigateTo(CallSettingsSubPage.ASSISTED_DIALING) }
             )
         }
         item {
             CallSettingsItemRow(
                 icon = Icons.Outlined.Block,
-                title = "Blocked numbers",
-                subtitle = "${settings.blockedNumbers.size} blocked numbers",
+                title = "Numéros bloqués",
+                subtitle = "${settings.blockedNumbers.size} numéro(s) bloqué(s)",
                 onClick = { onNavigateTo(CallSettingsSubPage.BLOCKED_NUMBERS) }
             )
         }
         item {
             CallSettingsItemRow(
                 icon = Icons.Outlined.Call,
-                title = "Calls",
-                subtitle = "Calling accounts, Call waiting & Wi-Fi calling",
+                title = "Comptes & Réseau d'appel",
+                subtitle = "Comptes d'appel, Double appel & Appels Wi-Fi",
                 onClick = { onNavigateTo(CallSettingsSubPage.CALLS_ACCOUNTS) }
             )
         }
         item {
             CallSettingsItemRow(
                 icon = Icons.Outlined.FormatListBulleted,
-                title = "Display options",
-                subtitle = "Sort by: ${if (settings.sortByNameFirst) "First name" else "Last name"}",
+                title = "Options d'affichage",
+                subtitle = "Trier par : ${if (settings.sortByNameFirst) "Prénom" else "Nom"}",
                 onClick = { onNavigateTo(CallSettingsSubPage.DISPLAY_OPTIONS) }
             )
         }
         item {
             CallSettingsItemRow(
                 icon = Icons.Outlined.ChatBubbleOutline,
-                title = "Quick responses",
-                subtitle = "Edit SMS responses for rejected calls",
+                title = "Réponses rapides (SMS)",
+                subtitle = "Modifier les SMS de rejet d'appel",
                 onClick = { onNavigateTo(CallSettingsSubPage.QUICK_RESPONSES) }
             )
         }
         item {
             CallSettingsItemRow(
                 icon = Icons.Outlined.VolumeUp,
-                title = "Sounds and vibration",
+                title = "Sons et vibrations",
                 subtitle = settings.callRingtone,
                 onClick = { onNavigateTo(CallSettingsSubPage.SOUNDS_VIBRATION) }
             )
@@ -256,30 +256,30 @@ fun CallSettingsMainList(
         item {
             CallSettingsItemRow(
                 icon = Icons.Default.Voicemail,
-                title = "Voicemail",
-                subtitle = "Notifications and number (${settings.voicemailNumber})",
+                title = "Messagerie & Répondeur",
+                subtitle = "Notifications et numéro (${settings.voicemailNumber})",
                 onClick = { onNavigateTo(CallSettingsSubPage.VOICEMAIL_CONFIG) }
             )
         }
         item {
             CallSettingsItemRow(
                 icon = Icons.Outlined.MusicNote,
-                title = "Contact ringtones",
-                subtitle = "Set custom tunes for specific contacts",
+                title = "Sonneries des contacts",
+                subtitle = "Attribuer des sonneries personnalisées",
                 onClick = { onNavigateTo(CallSettingsSubPage.CONTACT_RINGTONES) }
             )
         }
 
         item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)) }
 
-        // Section: Advanced
+        // Section: Avancé
         item {
-            CallSettingsSectionHeader("Advanced")
+            CallSettingsSectionHeader("Avancé")
         }
         item {
             CallSettingsItemRow(
                 icon = Icons.Outlined.Campaign,
-                title = "Caller ID announcement",
+                title = "Annonce vocale de l'appelant",
                 subtitle = settings.callerIdAnnouncement,
                 onClick = { onNavigateTo(CallSettingsSubPage.CALLER_ID_ANNOUNCEMENT) }
             )
@@ -287,8 +287,8 @@ fun CallSettingsMainList(
         item {
             CallSettingsItemRow(
                 icon = Icons.Outlined.SyncProblem,
-                title = "Flip To Silence",
-                subtitle = if (settings.flipToSilence) "On" else "Off",
+                title = "Retourner pour couper le son",
+                subtitle = if (settings.flipToSilence) "Activé" else "Désactivé",
                 onClick = { onNavigateTo(CallSettingsSubPage.FLIP_TO_SILENCE) }
             )
         }
@@ -373,28 +373,28 @@ fun CallerIdAndSpamSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "Identify business and caller info, and warn you about potential spam calls automatically.",
+            text = "Identifiez les entreprises et les appelants, et soyez averti automatiquement contre les numéros suspects ou spams.",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         SettingToggleCard(
-            title = "See caller and spam ID",
-            description = "Identify business and spam numbers when you make or receive calls.",
+            title = "Afficher l'ID d'appelant et spam",
+            description = "Identifier les numéros d'entreprises et spams lors de la réception ou émission d'appels.",
             checked = settings.callerIdAndSpamEnabled,
             onCheckedChange = { onUpdate(settings.copy(callerIdAndSpamEnabled = it)) }
         )
 
         SettingToggleCard(
-            title = "Filter spam calls",
-            description = "Prevent suspected spam calls from disturbing you. Calls won't ring.",
+            title = "Filtrer les appels indésirables",
+            description = "Empêcher les numéros spams suspectés de faire sonner votre téléphone.",
             checked = settings.filterSpamCalls,
             onCheckedChange = { onUpdate(settings.copy(filterSpamCalls = it)) }
         )
 
         SettingToggleCard(
-            title = "Verified calls badge",
-            description = "Show verification checkmarks for verified businesses and contacts.",
+            title = "Badge d'appels certifiés",
+            description = "Afficher une coche de vérification pour les organisations vérifiées.",
             checked = settings.verifiedCallsBadge,
             onCheckedChange = { onUpdate(settings.copy(verifiedCallsBadge = it)) }
         )
@@ -413,22 +413,22 @@ fun AccessibilitySubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         SettingToggleCard(
-            title = "Hearing aid compatibility (HAC)",
-            description = "Turn on acoustic coupling mode for hearing aids.",
+            title = "Compatibilité appareils auditifs (HAC)",
+            description = "Activer le mode couplage acoustique pour aides auditives.",
             checked = settings.hearingAidCompatibility,
             onCheckedChange = { onUpdate(settings.copy(hearingAidCompatibility = it)) }
         )
 
         SettingToggleCard(
-            title = "Real-time text (RTT) calls",
-            description = "Allows sending real-time text during an active voice call.",
+            title = "Texte en temps réel (RTT)",
+            description = "Permet l'envoi de messages texte en direct pendant un appel vocal.",
             checked = settings.realTimeTextRtt,
             onCheckedChange = { onUpdate(settings.copy(realTimeTextRtt = it)) }
         )
 
         SettingToggleCard(
-            title = "Live Call Captions & Transcriptions",
-            description = "Transcribe speech automatically in real-time on screen.",
+            title = "Sous-titres & Transcriptions en direct",
+            description = "Transcrire la parole en direct sur l'écran pendant vos conversations.",
             checked = settings.liveTranscribeCalls,
             onCheckedChange = { onUpdate(settings.copy(liveTranscribeCalls = it)) }
         )
@@ -449,14 +449,14 @@ fun AssistedDialingSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         SettingToggleCard(
-            title = "Assisted dialing",
-            description = "Predicts and adds a country code when you make international calls.",
+            title = "Composition assistée",
+            description = "Prédit et ajoute automatiquement l'indicatif international lors des appels.",
             checked = settings.assistedDialingEnabled,
             onCheckedChange = { onUpdate(settings.copy(assistedDialingEnabled = it)) }
         )
 
         Text(
-            text = "Default home country:",
+            text = "Pays par défaut :",
             fontWeight = FontWeight.Bold,
             fontSize = 15.sp,
             modifier = Modifier.padding(top = 8.dp)
@@ -503,14 +503,14 @@ fun BlockedNumbersSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         SettingToggleCard(
-            title = "Unknown callers",
-            description = "Block calls from unidentified or private numbers.",
+            title = "Appels masqués et inconnus",
+            description = "Bloquer automatiquement les appels provenant de numéros non identifiés.",
             checked = settings.blockUnknownCallers,
             onCheckedChange = { onUpdate(settings.copy(blockUnknownCallers = it)) }
         )
 
         Text(
-            text = "Add a blocked number:",
+            text = "Ajouter un numéro à bloquer :",
             fontWeight = FontWeight.Bold,
             fontSize = 15.sp,
             modifier = Modifier.padding(top = 8.dp)
@@ -540,12 +540,12 @@ fun BlockedNumbersSubPage(
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = PurplePrimary)
             ) {
-                Text("Block")
+                Text("Bloquer")
             }
         }
 
         Text(
-            text = "Blocked numbers list (${settings.blockedNumbers.size}):",
+            text = "Liste des numéros bloqués (${settings.blockedNumbers.size}) :",
             fontWeight = FontWeight.SemiBold,
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -591,22 +591,22 @@ fun CallsAccountsSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         SettingToggleCard(
-            title = "Wi-Fi Calling HD",
-            description = "Make and receive high fidelity calls over Wi-Fi when cellular signal is weak.",
+            title = "Appels Wi-Fi HD (VoWiFi)",
+            description = "Passer et recevoir des appels en haute définition via le réseau Wi-Fi.",
             checked = settings.wifiCallingHd,
             onCheckedChange = { onUpdate(settings.copy(wifiCallingHd = it)) }
         )
 
         SettingToggleCard(
-            title = "Call waiting (Double appel)",
-            description = "During a call, notify me of incoming calls.",
+            title = "Double appel (Signal d'appel)",
+            description = "Pendant un appel, recevoir les notifications de nouveaux appels entrants.",
             checked = settings.callWaitingEnabled,
             onCheckedChange = { onUpdate(settings.copy(callWaitingEnabled = it)) }
         )
 
         SettingToggleCard(
-            title = "Call forwarding (Renvoi d'appel)",
-            description = "Forward incoming calls to another number when busy or unreachable.",
+            title = "Renvoi d'appel",
+            description = "Rediriger les appels entrants vers un autre numéro en cas d'indisponibilité.",
             checked = settings.callForwardingEnabled,
             onCheckedChange = { onUpdate(settings.copy(callForwardingEnabled = it)) }
         )
@@ -625,14 +625,14 @@ fun DisplayOptionsSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         SettingToggleCard(
-            title = "Sort by First Name",
-            description = if (settings.sortByNameFirst) "Sorted by first name first" else "Sorted by last name first",
+            title = "Trier par prénom",
+            description = if (settings.sortByNameFirst) "Trié par prénom en premier" else "Trié par nom en premier",
             checked = settings.sortByNameFirst,
             onCheckedChange = { onUpdate(settings.copy(sortByNameFirst = it)) }
         )
 
         Text(
-            text = "Name format:",
+            text = "Format d'affichage des noms :",
             fontWeight = FontWeight.Bold,
             fontSize = 15.sp,
             modifier = Modifier.padding(top = 8.dp)
@@ -677,7 +677,7 @@ fun QuickResponsesSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "Edit quick SMS responses sent when rejecting a call with a message:",
+            text = "Modifier les réponses SMS rapides envoyées lors du rejet d'un appel avec message :",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -760,28 +760,28 @@ fun SoundsVibrationSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         SettingToggleCard(
-            title = "Vibrate for calls",
-            description = "Device vibrates continuously on incoming calls.",
+            title = "Vibrer pour les appels",
+            description = "Le téléphone vibre en continu lors de la réception d'appels.",
             checked = settings.vibrateForCalls,
             onCheckedChange = { onUpdate(settings.copy(vibrateForCalls = it)) }
         )
 
         SettingToggleCard(
-            title = "Dialpad tones (DTMF)",
-            description = "Play audible acoustic feedback while typing numbers.",
+            title = "Tons du clavier (DTMF)",
+            description = "Émettre une rétroaction acoustique lors de la saisie de numéros.",
             checked = settings.dialpadTones,
             onCheckedChange = { onUpdate(settings.copy(dialpadTones = it)) }
         )
 
         SettingToggleCard(
-            title = "Vibrate on answer",
-            description = "Short haptic bump when the other party answers the call.",
+            title = "Vibrer à la réponse",
+            description = "Légère vibration lorsque le correspondant décroche l'appel.",
             checked = settings.vibrateOnAnswer,
             onCheckedChange = { onUpdate(settings.copy(vibrateOnAnswer = it)) }
         )
 
         Text(
-            text = "Select Phone Ringtone:",
+            text = "Sélectionner la sonnerie :",
             fontWeight = FontWeight.Bold,
             fontSize = 15.sp,
             modifier = Modifier.padding(top = 8.dp)
@@ -825,21 +825,21 @@ fun VoicemailConfigSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         SettingToggleCard(
-            title = "Voicemail notifications",
-            description = "Show status bar alerts for new voicemail messages.",
+            title = "Notifications de répondeur",
+            description = "Afficher les alertes dans la barre d'état pour les nouveaux messages.",
             checked = settings.voicemailNotifications,
             onCheckedChange = { onUpdate(settings.copy(voicemailNotifications = it)) }
         )
 
         SettingToggleCard(
-            title = "Vibrate for voicemail",
-            description = "Vibrate when a new voicemail is recorded.",
+            title = "Vibrer pour le répondeur",
+            description = "Vibrer lorsqu'un nouveau message vocal est reçu.",
             checked = settings.voicemailVibration,
             onCheckedChange = { onUpdate(settings.copy(voicemailVibration = it)) }
         )
 
         Text(
-            text = "Voicemail service number:",
+            text = "Numéro du service répondeur :",
             fontWeight = FontWeight.Bold,
             fontSize = 15.sp,
             modifier = Modifier.padding(top = 8.dp)
@@ -856,7 +856,7 @@ fun VoicemailConfigSubPage(
                     onUpdate(settings.copy(voicemailNumber = vmNumber))
                     Toast.makeText(context, "Numéro du répondeur mis à jour", Toast.LENGTH_SHORT).show()
                 }) {
-                    Text("Save", fontWeight = FontWeight.Bold, color = PurplePrimary)
+                    Text("Enregistrer", fontWeight = FontWeight.Bold, color = PurplePrimary)
                 }
             }
         )
@@ -875,7 +875,7 @@ fun ContactRingtonesSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "Assigned VIP contact melodies:",
+            text = "Mélodies attribuées aux contacts VIP :",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -921,7 +921,7 @@ fun CallerIdAnnouncementSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "The caller's name and number will be read out aloud using text-to-speech for incoming calls.",
+            text = "Le nom et le numéro de l'appelant seront énoncés à haute voix par synthèse vocale lors d'un appel entrant.",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -961,14 +961,14 @@ fun FlipToSilenceSubPage(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text(
-            text = "To silence an incoming call, place your phone face down on a flat surface.",
+            text = "Pour couper le son d'un appel entrant, retournez votre téléphone écran vers le bas sur une surface plate.",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         SettingToggleCard(
-            title = "Flip To Silence",
-            description = "Sensor turns off incoming call ringer when device is placed face down.",
+            title = "Retourner pour couper le son",
+            description = "Le capteur désactive la sonnerie dès que l'appareil est placé face vers le bas.",
             checked = settings.flipToSilence,
             onCheckedChange = { onUpdate(settings.copy(flipToSilence = it)) }
         )

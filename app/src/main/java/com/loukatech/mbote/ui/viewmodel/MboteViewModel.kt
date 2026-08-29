@@ -41,6 +41,16 @@ class MboteViewModel(
     fun updateReportStatus(reportId: String, newStatus: String) {
         repository.updateReportStatus(reportId, newStatus)
     }
+
+    fun checkAndRunAutoBackup(context: android.content.Context) {
+        repository.checkAndRunAutoBackup(context)
+    }
+
+    suspend fun performCloudBackup(context: android.content.Context, isAuto: Boolean = false) =
+        repository.performCloudBackup(context, isAuto)
+
+    suspend fun restoreCloudBackup(context: android.content.Context) =
+        repository.restoreCloudBackup(context)
     val shortVideos = repository.shortVideos
     val isOffline = repository.isOffline
     val isAuthenticated = repository.isAuthenticated
@@ -89,6 +99,10 @@ class MboteViewModel(
         com.loukatech.mbote.service.MboteSocketManager.connect()
 
         viewModelScope.launch {
+            repository.syncAllFromBackend()
+        }
+
+        viewModelScope.launch {
             com.loukatech.mbote.service.MboteSocketManager.incomingMessages.collect { msg ->
                 if (msg.chatId.isNotBlank() && msg.text.isNotBlank()) {
                     repository.sendMessage(msg.chatId, msg.text)
@@ -107,7 +121,7 @@ class MboteViewModel(
     fun triggerDataSync() {
         viewModelScope.launch {
             _isDataSyncing.value = true
-            kotlinx.coroutines.delay(1200)
+            repository.syncAllFromBackend()
             _isDataSyncing.value = false
         }
     }
@@ -425,6 +439,11 @@ class MboteViewModel(
         _activeChatId.value = chatId
         repository.markChatAsRead(chatId)
 
+        // Asynchronously fetch fresh messages for this chat from the real REST API
+        viewModelScope.launch {
+            repository.refreshMessagesForChat(chatId)
+        }
+
         // Simulate a natural stealth typing on loading the chat
         typingJob?.cancel()
         typingJob = viewModelScope.launch {
@@ -472,8 +491,24 @@ class MboteViewModel(
         )
     }
 
-    fun endCall() {
+    fun endCall(durationText: String? = null) {
+        val active = _activeCall.value
+        if (active != null) {
+            val finalCall = active.copy(
+                timestamp = "À l'instant",
+                durationText = durationText ?: "0 s"
+            )
+            viewModelScope.launch {
+                repository.addCallLog(finalCall)
+            }
+        }
         _activeCall.value = null
+    }
+
+    fun refreshCalls() {
+        viewModelScope.launch {
+            repository.refreshCallsFromBackend()
+        }
     }
 
     fun startMeeting(meeting: MeetingItem) {
