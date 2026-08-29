@@ -18,7 +18,7 @@ if (envFile.exists()) {
 }
 val mboteApiBaseUrl = envProps.getProperty("MBOTE_API_BASE_URL")
     ?: System.getenv("MBOTE_API_BASE_URL")
-    ?: ""
+    ?: "https://mbote-backend.onrender.com/api"
 val viteSocketUrl = envProps.getProperty("VITE_SOCKET_URL")
     ?: System.getenv("VITE_SOCKET_URL")
     ?: "wss://mbote-socket.loukatech.com/ws"

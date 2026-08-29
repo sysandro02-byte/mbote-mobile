@@ -387,7 +387,7 @@ class MboteApiService {
      */
     suspend fun sendMessageApi(dto: SendMessageDto): Result<MessageDto> {
         return executeHttpRequest<SendMessageDto, MessageDto>(
-            endpoint = "/messages/send",
+            endpoint = "/chats/${dto.chatId}/messages",
             method = "POST",
             requestBody = dto
         ) { json ->
