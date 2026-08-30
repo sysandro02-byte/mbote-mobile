@@ -147,8 +147,11 @@ class MboteViewModel(
         _showForgotPasswordDialog.value = show
     }
 
-    suspend fun login(email: String, pass: String): Result<Unit> {
-        val res = repository.login(email, pass)
+    suspend fun login(email: String, pass: String): Result<com.loukatech.mbote.service.api.PendingOtpChallenge> =
+        repository.login(email, pass)
+
+    suspend fun verifyLoginOtp(pendingUserId: String, otp: String): Result<Unit> {
+        val res = repository.verifyLoginOtp(pendingUserId, otp)
         if (res.isSuccess) {
             _showLoginScreen.value = false
             triggerDataSync()
@@ -156,8 +159,15 @@ class MboteViewModel(
         return res
     }
 
-    suspend fun register(name: String, email: String, pass: String, phone: String): Result<Unit> {
-        val res = repository.register(name, email, pass, phone)
+    suspend fun register(request: com.loukatech.mbote.service.api.RegisterRequest): Result<com.loukatech.mbote.service.api.PendingOtpChallenge> {
+        return repository.register(request)
+    }
+
+    suspend fun getRegistrationPublicConfig(): Result<com.loukatech.mbote.service.api.RegistrationPublicConfig> =
+        repository.getRegistrationPublicConfig()
+
+    suspend fun verifyRegistrationOtp(pendingUserId: String, otp: String): Result<Unit> {
+        val res = repository.verifyRegistrationOtp(pendingUserId, otp)
         if (res.isSuccess) {
             _showLoginScreen.value = false
             triggerDataSync()

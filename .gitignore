@@ -6,6 +6,7 @@ dist/
 .npm-cache/
 .gradle-home/
 .gradle/
+.kotlin/
 local.properties
 **/build/
 *.apk

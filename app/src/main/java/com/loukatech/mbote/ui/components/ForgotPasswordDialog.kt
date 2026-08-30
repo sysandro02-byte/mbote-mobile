@@ -114,7 +114,7 @@ fun ForgotPasswordDialog(
                 Text(
                     text = when (step) {
                         1 -> "Mot de passe oublié ?"
-                        2 -> "Vérification du code"
+                        2 -> "Vérification"
                         else -> "Mot de passe réinitialisé !"
                     },
                     style = MaterialTheme.typography.titleLarge,
@@ -126,9 +126,9 @@ fun ForgotPasswordDialog(
 
                 Text(
                     text = when (step) {
-                        1 -> "Saisissez l'adresse email associée à votre compte MBoté pour recevoir votre code sécurisé."
-                        2 -> "Un code à 6 chiffres a été envoyé à $email. Entrez-le avec votre nouveau mot de passe."
-                        else -> "Votre nouveau mot de passe a été configuré avec succès. Vous pouvez maintenant vous connecter."
+                        1 -> "Saisissez l'adresse email associée à votre compte MBoté pour recevoir un lien sécurisé."
+                        2 -> "Consultez votre boîte email pour continuer la réinitialisation sécurisée."
+                        else -> successMessage ?: "Si ce compte existe, un lien de réinitialisation a été envoyé."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -224,7 +224,7 @@ fun ForgotPasswordDialog(
                                 isLoading = false
                                 if (result.isSuccess) {
                                     successMessage = result.getOrNull()
-                                    step = 2
+                                    step = 3
                                 } else {
                                     errorMessage = result.exceptionOrNull()?.message ?: "Erreur d'envoi"
                                 }
@@ -241,7 +241,7 @@ fun ForgotPasswordDialog(
                         if (isLoading) {
                             CircularProgressIndicator(color = Color.White, modifier = Modifier.size(22.dp))
                         } else {
-                            Text("Envoyer le code", fontWeight = FontWeight.Bold)
+                            Text("Envoyer le lien", fontWeight = FontWeight.Bold)
                         }
                     }
                 }

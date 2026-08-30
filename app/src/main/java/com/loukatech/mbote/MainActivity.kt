@@ -209,7 +209,10 @@ class MainActivity : ComponentActivity() {
                             LoginScreen(
                                 onLoginSuccess = { viewModel.setShowLoginScreen(false) },
                                 onLoginSubmit = { email, pass -> viewModel.login(email, pass) },
-                                onRegisterSubmit = { name, email, pass, phone -> viewModel.register(name, email, pass, phone) },
+                                onRegisterSubmit = { request -> viewModel.register(request) },
+                                onVerifyRegistrationOtp = { pendingUserId, otp -> viewModel.verifyRegistrationOtp(pendingUserId, otp) },
+                                onVerifyLoginOtp = { pendingUserId, otp -> viewModel.verifyLoginOtp(pendingUserId, otp) },
+                                onLoadRegistrationConfig = { viewModel.getRegistrationPublicConfig() },
                                 onGoogleLoginSubmit = { viewModel.loginWithGoogle() },
                                 onGitHubLoginSubmit = { viewModel.loginWithGitHub() },
                                 onRequestResetCode = { email -> viewModel.requestPasswordReset(email) },

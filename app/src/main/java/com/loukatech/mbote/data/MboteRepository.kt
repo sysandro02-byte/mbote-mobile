@@ -48,45 +48,40 @@ class MboteRepository(
         _isOffline.value = !_isOffline.value
     }
 
-    suspend fun login(email: String, pass: String): Result<Unit> {
-        val result = apiService.login(LoginRequest(email = email, password = pass))
-        return if (result.isSuccess) {
-            val data = result.getOrNull()!!
-            _userProfile.update {
-                it.copy(
-                    id = data.userId,
-                    name = data.name,
-                    email = data.email,
-                    phone = if (data.phone.isNotBlank()) data.phone else it.phone,
-                    avatar = if (data.avatar.isNotBlank()) data.avatar else it.avatar,
-                    role = data.role,
-                    isVerified = data.isVerified
-                )
-            }
-            _isAuthenticated.value = true
-            Result.success(Unit)
-        } else {
-            Result.failure(result.exceptionOrNull() ?: Exception("Échec de la connexion"))
-        }
+    suspend fun login(email: String, pass: String): Result<PendingOtpChallenge> =
+        apiService.login(LoginRequest(email = email, password = pass))
+
+    suspend fun verifyLoginOtp(pendingUserId: String, otp: String): Result<Unit> =
+        applyVerifiedSession(apiService.verifyLoginOtp(pendingUserId, otp))
+
+    suspend fun register(request: RegisterRequest): Result<PendingOtpChallenge> = apiService.register(request)
+
+    suspend fun getRegistrationPublicConfig(): Result<RegistrationPublicConfig> = apiService.getRegistrationPublicConfig()
+
+    suspend fun verifyRegistrationOtp(pendingUserId: String, otp: String): Result<Unit> {
+        return applyVerifiedSession(apiService.verifyRegistrationOtp(pendingUserId, otp))
     }
 
-    suspend fun register(name: String, email: String, pass: String, phone: String): Result<Unit> {
-        val result = apiService.register(RegisterRequest(fullName = name, email = email, password = pass, phone = phone))
+    private fun applyVerifiedSession(result: Result<VerifiedAuthResponse>): Result<Unit> {
         return if (result.isSuccess) {
             val data = result.getOrNull()!!
             _userProfile.update {
                 it.copy(
-                    id = data.userId,
-                    name = data.name,
-                    email = data.email,
-                    phone = data.phone,
-                    avatar = if (data.avatar.isNotBlank()) data.avatar else it.avatar
+                    id = data.user.id.toString().trim('"'),
+                    name = data.user.name,
+                    username = data.user.username,
+                    email = data.user.email,
+                    phone = data.user.phoneNumber,
+                    avatar = if (data.user.avatar.isNotBlank()) data.user.avatar else it.avatar,
+                    country = data.user.country,
+                    city = data.user.city,
+                    isVerified = true
                 )
             }
             _isAuthenticated.value = true
             Result.success(Unit)
         } else {
-            Result.failure(result.exceptionOrNull() ?: Exception("Échec de l'inscription"))
+            Result.failure(result.exceptionOrNull() ?: Exception("Code OTP invalide"))
         }
     }
 
@@ -108,8 +103,7 @@ class MboteRepository(
     } else Result.failure(result.exceptionOrNull() ?: Exception("Échec de l'authentification"))
 
     suspend fun requestPasswordReset(email: String): Result<String> {
-        val supabaseProvider = com.loukatech.mbote.data.supabase.SupabaseServiceProvider()
-        return supabaseProvider.sendPasswordResetEmail(email)
+        return apiService.requestForgotPassword(email)
     }
 
     suspend fun confirmPasswordReset(email: String, code: String, newPass: String): Result<Boolean> {

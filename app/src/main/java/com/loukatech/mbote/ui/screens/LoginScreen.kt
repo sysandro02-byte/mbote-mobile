@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -30,12 +31,18 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.loukatech.mbote.service.api.AdminStatsData
+import com.loukatech.mbote.service.api.BusinessRegistrationRequest
+import com.loukatech.mbote.service.api.PendingOtpChallenge
+import com.loukatech.mbote.service.api.RegisterRequest
+import com.loukatech.mbote.service.api.RegistrationPublicConfig
 import com.loukatech.mbote.ui.components.AdminLoginDialog
 import com.loukatech.mbote.ui.components.ForgotPasswordDialog
 import com.loukatech.mbote.ui.theme.MbotePurpleLight
 import com.loukatech.mbote.ui.theme.MbotePurplePrimary
 import com.loukatech.mbote.ui.theme.MbotePurpleSoft
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.Period
 
 enum class AuthMode {
     LOGIN, REGISTER
@@ -43,10 +50,47 @@ enum class AuthMode {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun MboteRegisterField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier.fillMaxWidth()
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        placeholder = { Text(placeholder) },
+        leadingIcon = { Icon(icon, null, tint = MbotePurpleLight) },
+        singleLine = true,
+        shape = RoundedCornerShape(16.dp),
+        colors = mboteRegistrationFieldColors(),
+        modifier = modifier
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun mboteRegistrationFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White,
+    focusedBorderColor = MbotePurplePrimary,
+    unfocusedBorderColor = Color(0xFF3B2268),
+    focusedLabelColor = MbotePurpleLight,
+    unfocusedLabelColor = Color(0xFF94A3B8)
+)
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
 fun LoginScreen(
     onLoginSuccess: () -> Unit,
-    onLoginSubmit: suspend (email: String, password: String) -> Result<Unit>,
-    onRegisterSubmit: suspend (name: String, email: String, password: String, phone: String) -> Result<Unit>,
+    onLoginSubmit: suspend (email: String, password: String) -> Result<PendingOtpChallenge>,
+    onRegisterSubmit: suspend (RegisterRequest) -> Result<PendingOtpChallenge>,
+    onVerifyRegistrationOtp: suspend (pendingUserId: String, otp: String) -> Result<Unit>,
+    onVerifyLoginOtp: suspend (pendingUserId: String, otp: String) -> Result<Unit>,
+    onLoadRegistrationConfig: suspend () -> Result<RegistrationPublicConfig>,
     onGoogleLoginSubmit: suspend () -> Result<Unit>,
     onGitHubLoginSubmit: suspend () -> Result<Unit> = { Result.success(Unit) },
     onRequestResetCode: suspend (String) -> Result<String>,
@@ -59,9 +103,28 @@ fun LoginScreen(
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var fullName by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var birthDate by remember { mutableStateOf("") }
-    var parentEmailInput by remember { mutableStateOf("") }
+    var accountType by remember { mutableStateOf("personal") }
+    var accountVisibility by remember { mutableStateOf("public") }
+    var country by remember { mutableStateOf("Congo") }
+    var city by remember { mutableStateOf("Brazzaville") }
+    var address by remember { mutableStateOf("") }
+    var gender by remember { mutableStateOf("autre") }
+    var bio by remember { mutableStateOf("") }
+    var businessCategory by remember { mutableStateOf("") }
+    var businessRegistrationNumber by remember { mutableStateOf("") }
+    var businessTaxId by remember { mutableStateOf("") }
+    var businessWebsite by remember { mutableStateOf("") }
+    var representativeName by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var acceptTerms by remember { mutableStateOf(false) }
+    var hasReadTerms by remember { mutableStateOf(false) }
+    var showTermsDialog by remember { mutableStateOf(false) }
+    var registrationConfig by remember { mutableStateOf(RegistrationPublicConfig()) }
+    var pendingChallenge by remember { mutableStateOf<PendingOtpChallenge?>(null) }
+    var otpCode by remember { mutableStateOf("") }
     var countryPrefix by remember { mutableStateOf("+242") }
     var showPassword by remember { mutableStateOf(false) }
     var rememberMe by remember { mutableStateOf(true) }
@@ -69,9 +132,12 @@ fun LoginScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var successToast by remember { mutableStateOf<String?>(null) }
 
-    val isUserMinor = remember(birthDate) {
-        val yearPart = birthDate.substringAfterLast("/").toIntOrNull() ?: 2010
-        (2026 - yearPart) < 18
+    val birthDateIso = remember(birthDate) {
+        val parts = birthDate.trim().split("/")
+        if (parts.size == 3) "${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}" else birthDate.trim()
+    }
+    val isAdult = remember(birthDateIso) {
+        runCatching { Period.between(LocalDate.parse(birthDateIso), LocalDate.now()).years >= 18 }.getOrDefault(false)
     }
 
     // REAL-TIME FORM VALIDATION STATES
@@ -105,6 +171,10 @@ fun LoginScreen(
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
+    LaunchedEffect(Unit) {
+        onLoadRegistrationConfig().getOrNull()?.let { registrationConfig = it }
+    }
+
     // Forgot Password Modal Dialog
     if (showForgotPasswordDialog) {
         ForgotPasswordDialog(
@@ -124,6 +194,71 @@ fun LoginScreen(
             onDismiss = { showAdminLoginDialog = false },
             onAdminLogin = onAdminLoginSubmit,
             onSaveServerConfig = onSaveServerConfig
+        )
+    }
+
+    pendingChallenge?.let { challenge ->
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("Vérification du compte") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Saisissez le code à 6 chiffres envoyé à ${challenge.target}.")
+                    OutlinedTextField(
+                        value = otpCode,
+                        onValueChange = { otpCode = it.filter(Char::isDigit).take(6) },
+                        label = { Text("Code OTP") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("registration_otp_input")
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = otpCode.length == 6 && !isLoading,
+                    onClick = {
+                        isLoading = true
+                        coroutineScope.launch {
+                            val userId = challenge.pendingUserId.toString().trim('"')
+                            val result = if (challenge.flow == "login") {
+                                onVerifyLoginOtp(userId, otpCode)
+                            } else {
+                                onVerifyRegistrationOtp(userId, otpCode)
+                            }
+                            isLoading = false
+                            if (result.isSuccess) {
+                                pendingChallenge = null
+                                onLoginSuccess()
+                            } else {
+                                errorMessage = result.exceptionOrNull()?.message ?: "Code OTP invalide"
+                            }
+                        }
+                    }
+                ) { Text("Valider") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingChallenge = null; otpCode = "" }) { Text("Annuler") }
+            }
+        )
+    }
+
+    if (showTermsDialog) {
+        AlertDialog(
+            onDismissRequest = { showTermsDialog = false },
+            title = { Text("Conditions et confidentialité") },
+            text = {
+                Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+                    Text(registrationConfig.termsOfService.ifBlank { "Conditions indisponibles. Réessayez avec une connexion réseau." })
+                    Spacer(Modifier.height(16.dp))
+                    Text("Politique de confidentialité", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text(registrationConfig.privacyPolicy)
+                }
+            },
+            confirmButton = {
+                Button(onClick = { hasReadTerms = true; showTermsDialog = false }) { Text("J’ai lu") }
+            }
         )
     }
 
@@ -316,12 +451,45 @@ fun LoginScreen(
 
             // FORM FIELDS
             if (authMode == AuthMode.REGISTER) {
+                Text("Type de compte", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = accountType == "personal",
+                        onClick = { accountType = "personal" },
+                        label = { Text("Particulier") },
+                        leadingIcon = { Icon(Icons.Outlined.Person, null) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = accountType == "business",
+                        onClick = { accountType = "business" },
+                        label = { Text("Entreprise") },
+                        leadingIcon = { Icon(Icons.Outlined.Business, null) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        accountVisibility = if (accountVisibility == "public") "private" else "public"
+                    }.padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(if (accountVisibility == "public") Icons.Outlined.Public else Icons.Outlined.Lock, null, tint = MbotePurpleLight)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Visibilité du compte", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(if (accountVisibility == "public") "Public — visible dans l’annuaire" else "Privé — accès autorisé", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                    }
+                    Switch(checked = accountVisibility == "public", onCheckedChange = { accountVisibility = if (it) "public" else "private" })
+                }
+
                 // Full Name Input
                 OutlinedTextField(
                     value = fullName,
                     onValueChange = { fullName = it; errorMessage = null },
-                    label = { Text("Nom complet") },
-                    placeholder = { Text("ex: Marc Loutala") },
+                    label = { Text(if (accountType == "business") "Nom entreprise" else "Nom complet") },
+                    placeholder = { Text(if (accountType == "business") "MBoté Market SARL" else "ex: Marc Loutala") },
                     leadingIcon = {
                         Icon(Icons.Outlined.Person, contentDescription = null, tint = MbotePurpleLight)
                     },
@@ -341,6 +509,14 @@ fun LoginScreen(
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
+
+                MboteRegisterField(username, { username = it }, if (accountType == "business") "Identifiant page" else "Nom d’utilisateur", "@identifiant", Icons.Outlined.AlternateEmail)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                if (accountType == "business") {
+                    MboteRegisterField(representativeName, { representativeName = it }, "Représentant légal", "Nom du responsable", Icons.Outlined.Badge)
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
 
                 // Phone Input with Country Selector
                 Row(
@@ -409,8 +585,8 @@ fun LoginScreen(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Date of Birth & Age Verification for Minors (Point 5 & 7)
-                OutlinedTextField(
+                // Date of birth is required for personal accounts by the shared backend.
+                if (accountType == "personal") OutlinedTextField(
                     value = birthDate,
                     onValueChange = { birthDate = it; errorMessage = null },
                     label = { Text("Date de naissance") },
@@ -433,57 +609,57 @@ fun LoginScreen(
                         .testTag("register_dob_input")
                 )
 
-                Text(
+                if (accountType == "personal") Text(
                     text = "Format JJ/MM/AAAA • vérification automatique de l’âge",
                     color = Color(0xFF94A3B8),
                     fontSize = 11.sp,
                     modifier = Modifier.padding(start = 16.dp, top = 5.dp)
                 )
 
-                if (isUserMinor) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = Color(0xFFF59E0B).copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = "⚠️ Compte Mineur détecté (Moins de 18 ans)",
-                                color = Color(0xFFFCD34D),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = "Protection des mineurs : Veuillez renseigner l'email de votre parent pour activer automatiquement le contrôle parental.",
-                                color = Color(0xFFFEF3C7),
-                                fontSize = 11.sp
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = parentEmailInput,
-                                onValueChange = { parentEmailInput = it },
-                                label = { Text("Email du Parent Associé") },
-                                placeholder = { Text("parent@exemple.com") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(12.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedBorderColor = Color(0xFFF59E0B),
-                                    unfocusedBorderColor = Color(0xFF3B2268),
-                                    focusedLabelColor = Color(0xFFFCD34D),
-                                    unfocusedLabelColor = Color(0xFF94A3B8)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MboteRegisterField(country, { country = it }, "Pays", "Congo", Icons.Outlined.Public, Modifier.weight(1f))
+                    MboteRegisterField(city, { city = it }, "Ville", "Brazzaville", Icons.Outlined.LocationCity, Modifier.weight(1f))
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                MboteRegisterField(address, { address = it }, "Adresse", "Avenue, quartier, ville", Icons.Outlined.LocationOn)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                if (accountType == "personal") {
+                    Text("Genre", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth())
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("homme", "femme", "autre").forEach { option ->
+                            FilterChip(selected = gender == option, onClick = { gender = option }, label = { Text(option.replaceFirstChar(Char::uppercase)) }, modifier = Modifier.weight(1f))
                         }
                     }
+                    Spacer(modifier = Modifier.height(14.dp))
                 }
 
+                MboteRegisterField(bio, { bio = it }, if (accountType == "business") "Description entreprise (optionnel)" else "Bio (optionnel)", "Présentez-vous", Icons.Outlined.Info)
                 Spacer(modifier = Modifier.height(14.dp))
+
+                if (accountType == "business") {
+                    MboteRegisterField(businessCategory, { businessCategory = it }, "Secteur d’activité", "Commerce, technologie…", Icons.Outlined.Category)
+                    if (registrationConfig.businessCategories.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            registrationConfig.businessCategories.forEach { category ->
+                                SuggestionChip(
+                                    onClick = { businessCategory = category },
+                                    label = { Text(category, fontSize = 11.sp) }
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    MboteRegisterField(businessRegistrationNumber, { businessRegistrationNumber = it }, "Numéro d’enregistrement", "RCCM / registre officiel", Icons.Outlined.Numbers)
+                    Spacer(modifier = Modifier.height(14.dp))
+                    MboteRegisterField(businessTaxId, { businessTaxId = it }, "NIF / identifiant fiscal (optionnel)", "NIF", Icons.Outlined.ReceiptLong)
+                    Spacer(modifier = Modifier.height(14.dp))
+                    MboteRegisterField(businessWebsite, { businessWebsite = it }, "Site web (optionnel)", "https://entreprise.com", Icons.Outlined.Link)
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
             }
 
             // Email Field with Real-Time Validation
@@ -654,6 +830,34 @@ fun LoginScreen(
                 }
             }
 
+            if (authMode == AuthMode.REGISTER) {
+                Spacer(modifier = Modifier.height(14.dp))
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { confirmPassword = it; errorMessage = null },
+                    label = { Text("Confirmer le mot de passe") },
+                    leadingIcon = { Icon(Icons.Outlined.LockReset, null, tint = MbotePurpleLight) },
+                    visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = mboteRegistrationFieldColors(),
+                    modifier = Modifier.fillMaxWidth().testTag("register_confirm_password_input")
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(checked = acceptTerms, enabled = hasReadTerms, onCheckedChange = { acceptTerms = it })
+                    Column(Modifier.weight(1f)) {
+                        Text("J’accepte les conditions d’utilisation et la politique de confidentialité.", color = Color(0xFFCBD5E1), fontSize = 12.sp)
+                        TextButton(onClick = { showTermsDialog = true }, contentPadding = PaddingValues(0.dp)) {
+                            Text(if (hasReadTerms) "Relire les conditions" else "Lire les conditions obligatoires")
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             // Remember Me & Forgot Password Row (In Login mode)
@@ -713,28 +917,76 @@ fun LoginScreen(
                             val result = onLoginSubmit(email.trim(), password)
                             isLoading = false
                             if (result.isSuccess) {
-                                onLoginSuccess()
+                                pendingChallenge = result.getOrNull()
+                                otpCode = result.getOrNull()?.devOtp.orEmpty()
+                                successToast = "Code de connexion envoyé."
                             } else {
                                 errorMessage = result.exceptionOrNull()?.message ?: "Identifiants incorrects"
                             }
                         } else {
-                            if (fullName.isBlank()) {
+                            if (fullName.isBlank() || username.isBlank() || phone.isBlank() || country.isBlank() || city.isBlank() || address.isBlank()) {
                                 isLoading = false
-                                errorMessage = "Veuillez renseigner votre nom complet."
+                                errorMessage = "Complétez le nom, l’identifiant, le téléphone, le pays, la ville et l’adresse."
+                                return@launch
+                            }
+                            if (accountType == "personal" && (!isAdult || birthDateIso.isBlank())) {
+                                isLoading = false
+                                errorMessage = "Vous devez avoir au moins 18 ans et saisir la date au format JJ/MM/AAAA."
+                                return@launch
+                            }
+                            if (accountType == "business" && (representativeName.isBlank() || businessCategory.isBlank() || businessRegistrationNumber.isBlank())) {
+                                isLoading = false
+                                errorMessage = "Complétez le représentant légal, le secteur et le numéro d’enregistrement."
+                                return@launch
+                            }
+                            if (!(passHasMinLength && passHasUpper && passHasDigit && passHasSpecial) || password != confirmPassword) {
+                                isLoading = false
+                                errorMessage = "Utilisez un mot de passe fort et une confirmation identique."
+                                return@launch
+                            }
+                            if (!acceptTerms) {
+                                isLoading = false
+                                errorMessage = "Vous devez accepter les conditions d’utilisation."
                                 return@launch
                             }
                             val fullPhone = "$countryPrefix ${phone.trim()}".trim()
-                            val result = onRegisterSubmit(fullName.trim(), email.trim(), password, fullPhone)
+                            val result = onRegisterSubmit(
+                                RegisterRequest(
+                                    accountType = accountType,
+                                    accountVisibility = accountVisibility,
+                                    name = fullName.trim(),
+                                    username = username.trim().removePrefix("@"),
+                                    email = email.trim(),
+                                    password = password,
+                                    phoneNumber = fullPhone,
+                                    birthDate = if (accountType == "personal") birthDateIso else null,
+                                    country = country.trim(),
+                                    city = city.trim(),
+                                    address = address.trim(),
+                                    gender = if (accountType == "personal") gender else null,
+                                    bio = bio.trim(),
+                                    business = if (accountType == "business") BusinessRegistrationRequest(
+                                        name = fullName.trim(),
+                                        category = businessCategory.trim(),
+                                        registrationNumber = businessRegistrationNumber.trim(),
+                                        taxId = businessTaxId.trim(),
+                                        website = businessWebsite.trim(),
+                                        representativeName = representativeName.trim()
+                                    ) else null
+                                )
+                            )
                             isLoading = false
                             if (result.isSuccess) {
-                                onLoginSuccess()
+                                pendingChallenge = result.getOrNull()
+                                otpCode = result.getOrNull()?.devOtp.orEmpty()
+                                successToast = "Compte créé. Vérifiez le code OTP envoyé."
                             } else {
                                 errorMessage = result.exceptionOrNull()?.message ?: "Erreur d'inscription"
                             }
                         }
                     }
                 },
-                enabled = !isLoading && isEmailValid && (authMode == AuthMode.LOGIN || password.length >= 6),
+                enabled = !isLoading && isEmailValid && (authMode == AuthMode.LOGIN || passwordStrengthScore == 4),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MbotePurplePrimary,

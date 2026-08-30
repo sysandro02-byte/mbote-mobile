@@ -6,8 +6,10 @@ import com.loukatech.mbote.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
@@ -48,12 +50,67 @@ data class LoginRequest(
 
 @Serializable
 data class RegisterRequest(
-    val fullName: String,
+    val accountType: String,
+    val accountVisibility: String,
+    val name: String,
+    val username: String,
     val email: String,
     val password: String,
-    val phone: String,
-    val country: String = "Congo",
-    val city: String = "Brazzaville"
+    val phoneNumber: String,
+    val birthDate: String? = null,
+    val country: String,
+    val city: String,
+    val address: String,
+    val gender: String? = null,
+    val bio: String = "",
+    val business: BusinessRegistrationRequest? = null
+)
+
+@Serializable
+data class BusinessRegistrationRequest(
+    val name: String,
+    val category: String,
+    val registrationNumber: String,
+    val taxId: String = "",
+    val website: String = "",
+    val representativeName: String
+)
+
+@Serializable
+data class PendingOtpChallenge(
+    val requiresOtpVerification: Boolean = true,
+    val pendingUserId: JsonElement,
+    val deliveryChannel: String,
+    val target: String,
+    val flow: String,
+    val devOtp: String? = null
+)
+
+@Serializable
+data class VerifyOtpRequest(val pendingUserId: String, val otp: String)
+
+@Serializable
+data class AuthUserData(
+    val id: JsonElement,
+    val name: String = "",
+    val username: String = "",
+    val email: String = "",
+    @SerialName("phone_number") val phoneNumber: String = "",
+    val avatar: String = "",
+    val country: String = "",
+    val city: String = "",
+    @SerialName("account_type") val accountType: String = "personal",
+    @SerialName("account_visibility") val accountVisibility: String = "public"
+)
+
+@Serializable
+data class VerifiedAuthResponse(val token: String, val user: AuthUserData)
+
+@Serializable
+data class RegistrationPublicConfig(
+    val termsOfService: String = "",
+    val privacyPolicy: String = "",
+    val businessCategories: List<String> = emptyList()
 )
 
 @Serializable
@@ -68,6 +125,9 @@ data class GoogleAuthRequest(
 data class ForgotPasswordRequest(
     val email: String
 )
+
+@Serializable
+private data class ForgotPasswordResponse(val success: Boolean = false, val message: String? = null, val resetUrl: String? = null)
 
 @Serializable
 data class ResetPasswordConfirmRequest(
@@ -156,6 +216,61 @@ data class ChatDto(
     val isChannel: Boolean = false
 )
 
+@Serializable
+private data class ApiErrorResponse(val error: String? = null, val message: String? = null, val code: String? = null)
+
+@Serializable
+private data class PublicMastaUserDto(
+    val id: JsonElement,
+    val name: String = "",
+    val username: String = "",
+    val avatar: String? = null,
+    val bio: String? = null,
+    val country: String? = null,
+    val city: String? = null,
+    @SerialName("relationship_status") val relationshipStatus: String = "none",
+    @SerialName("suggestion_reason") val suggestionReason: String = "Compte public MBoté"
+)
+
+@Serializable
+private data class BackendShortVideoDto(
+    val id: JsonElement,
+    @SerialName("user_id") val userId: JsonElement,
+    @SerialName("user_name") val userName: String = "",
+    @SerialName("user_username") val userUsername: String = "",
+    @SerialName("user_avatar") val userAvatar: String? = null,
+    val caption: String = "",
+    @SerialName("video_url") val videoUrl: String = "",
+    @SerialName("thumbnail_url") val thumbnailUrl: String? = null,
+    @SerialName("music_name") val musicName: String? = null,
+    @SerialName("duration_seconds") val durationSeconds: Int = 0,
+    @SerialName("like_count") val likeCount: Int = 0,
+    @SerialName("liked_by_me") val likedByMe: Boolean = false,
+    @SerialName("comment_count") val commentCount: Int = 0,
+    @SerialName("share_count") val shareCount: Int = 0,
+    @SerialName("bookmark_count") val bookmarkCount: Int = 0,
+    @SerialName("saved_by_me") val savedByMe: Boolean = false,
+    @SerialName("followed_by_me") val followedByMe: Boolean = false,
+    @SerialName("view_count") val viewCount: Int = 0,
+    @SerialName("created_at") val createdAt: String = ""
+)
+
+@Serializable
+private data class CreateShortVideoRequest(
+    val caption: String,
+    val videoUrl: String,
+    val durationSeconds: Int,
+    val musicName: String? = null,
+    val thumbnailUrl: String? = null,
+    val visibility: String = "public"
+)
+
+@Serializable
+private data class ShortLikeResponse(val likeCount: Int = 0, val likedByMe: Boolean = false)
+
+@Serializable
+private data class CreateShortCommentRequest(val content: String)
+
 /**
  * Full Production-Ready REST API Service for MBoté
  * Performs real HTTP REST calls with JSON payloads, Bearer Authorization, and error handling.
@@ -212,7 +327,10 @@ class MboteApiService {
                 val result = deserialize(responseText)
                 Result.success(result)
             } else {
-                Result.failure(Exception("Erreur serveur ($responseCode): $responseText"))
+                val serverError = runCatching {
+                    MboteBackendConfig.jsonParser.decodeFromString<ApiErrorResponse>(responseText).let { it.error ?: it.message }
+                }.getOrNull()
+                Result.failure(Exception(serverError ?: "Erreur serveur ($responseCode)"))
             }
         } catch (e: Exception) {
             Log.w(tag, "HTTP request failed for $endpoint: ${e.message}")
@@ -253,41 +371,52 @@ class MboteApiService {
     /**
      * User Login API
      */
-    suspend fun login(request: LoginRequest): Result<AuthResponseData> {
-        val response = executeHttpRequest(
+    suspend fun login(request: LoginRequest): Result<PendingOtpChallenge> {
+        return executeHttpRequest(
             endpoint = "/auth/login",
             method = "POST",
             requestBody = request
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AuthResponseData>>(json).data
-                ?: throw IllegalStateException("Réponse d'authentification incomplète")
+            MboteBackendConfig.jsonParser.decodeFromString<PendingOtpChallenge>(json)
+        }
+    }
+
+    suspend fun getRegistrationPublicConfig(): Result<RegistrationPublicConfig> =
+        executeHttpRequest<Unit, RegistrationPublicConfig>(endpoint = "/public-settings") { json ->
+            MboteBackendConfig.jsonParser.decodeFromString<RegistrationPublicConfig>(json)
         }
 
-        return if (response.isSuccess) {
-            val authData = response.getOrNull()!!
-            MboteBackendConfig.authToken = authData.token
-            Result.success(authData)
-        } else Result.failure(response.exceptionOrNull() ?: Exception("Échec de la connexion"))
+    suspend fun verifyLoginOtp(pendingUserId: String, otp: String): Result<VerifiedAuthResponse> {
+        val response = executeHttpRequest(
+            endpoint = "/auth/verify-login-otp",
+            method = "POST",
+            requestBody = VerifyOtpRequest(pendingUserId, otp)
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<VerifiedAuthResponse>(json) }
+        response.getOrNull()?.let { MboteBackendConfig.authToken = it.token }
+        return response
     }
 
     /**
      * User Registration API
      */
-    suspend fun register(request: RegisterRequest): Result<AuthResponseData> {
-        val response = executeHttpRequest(
+    suspend fun register(request: RegisterRequest): Result<PendingOtpChallenge> {
+        return executeHttpRequest(
             endpoint = "/auth/register",
             method = "POST",
             requestBody = request
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AuthResponseData>>(json).data
-                ?: throw IllegalStateException("Réponse d'inscription incomplète")
+            MboteBackendConfig.jsonParser.decodeFromString<PendingOtpChallenge>(json)
         }
+    }
 
-        return if (response.isSuccess) {
-            val authData = response.getOrNull()!!
-            MboteBackendConfig.authToken = authData.token
-            Result.success(authData)
-        } else Result.failure(response.exceptionOrNull() ?: Exception("Échec de l'inscription"))
+    suspend fun verifyRegistrationOtp(pendingUserId: String, otp: String): Result<VerifiedAuthResponse> {
+        val response = executeHttpRequest(
+            endpoint = "/auth/verify-registration-otp",
+            method = "POST",
+            requestBody = VerifyOtpRequest(pendingUserId, otp)
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<VerifiedAuthResponse>(json) }
+        response.getOrNull()?.let { MboteBackendConfig.authToken = it.token }
+        return response
     }
 
     /**
@@ -319,7 +448,10 @@ class MboteApiService {
                 endpoint = "/auth/forgot-password",
                 method = "POST",
                 requestBody = request
-            ) { json -> MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<String>>(json).message ?: "Demande enregistrée" }
+            ) { json ->
+                MboteBackendConfig.jsonParser.decodeFromString<ForgotPasswordResponse>(json).message
+                    ?: "Si ce compte existe, un lien de réinitialisation a été envoyé."
+            }
     }
 
     /**
@@ -454,13 +586,18 @@ class MboteApiService {
      */
     suspend fun fetchMastaUsers(): Result<List<MastaUser>> {
         return executeHttpRequest<Unit, List<MastaUser>>(
-            endpoint = "/masta/users",
+            endpoint = "/users/public?limit=100",
             method = "GET"
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<MastaUser>>>(json).data ?: emptyList()
-            } catch (e: Exception) {
-                emptyList()
+            MboteBackendConfig.jsonParser.decodeFromString<List<PublicMastaUserDto>>(json).map { user ->
+                MastaUser(
+                    id = user.id.toString().trim('"'),
+                    name = user.name.ifBlank { user.username },
+                    avatar = user.avatar.orEmpty(),
+                    infoSubtitle = user.bio?.takeIf(String::isNotBlank) ?: user.suggestionReason,
+                    city = user.city.orEmpty(),
+                    subType = if (user.relationshipStatus == "accepted") MastaSubOption.FRIENDS else MastaSubOption.SUGGESTIONS
+                )
             }
         }
     }
@@ -470,13 +607,33 @@ class MboteApiService {
      */
     suspend fun fetchShortVideos(): Result<List<ShortVideo>> {
         return executeHttpRequest<Unit, List<ShortVideo>>(
-            endpoint = "/shorts/videos",
+            endpoint = "/short-videos?limit=40",
             method = "GET"
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<ShortVideo>>>(json).data ?: emptyList()
-            } catch (e: Exception) {
-                emptyList()
+            MboteBackendConfig.jsonParser.decodeFromString<List<BackendShortVideoDto>>(json).map { video ->
+                ShortVideo(
+                    id = video.id.toString().trim('"'),
+                    creatorId = video.userId.toString().trim('"'),
+                    creatorName = video.userName,
+                    creatorUsername = video.userUsername,
+                    creatorAvatar = video.userAvatar.orEmpty(),
+                    isFollowing = video.followedByMe,
+                    videoThumbnailUrl = video.thumbnailUrl.orEmpty(),
+                    videoPlaybackUrl = video.videoUrl,
+                    caption = video.caption,
+                    musicTitle = video.musicName.orEmpty(),
+                    musicArtist = video.userName,
+                    likesCount = video.likeCount,
+                    isLiked = video.likedByMe,
+                    commentsCount = video.commentCount,
+                    sharesCount = video.shareCount,
+                    bookmarksCount = video.bookmarkCount,
+                    isBookmarked = video.savedByMe,
+                    viewsCount = video.viewCount,
+                    durationFormatted = "%d:%02d".format(video.durationSeconds / 60, video.durationSeconds % 60),
+                    timestamp = video.createdAt,
+                    reactionsCount = emptyMap()
+                )
             }
         }
     }
@@ -485,13 +642,21 @@ class MboteApiService {
      * Create a new Short video on backend server
      */
     suspend fun createShortVideoApi(video: ShortVideo): Result<ShortVideo> {
-        return executeHttpRequest<ShortVideo, ShortVideo>(
-            endpoint = "/shorts/create",
+        val request = CreateShortVideoRequest(
+            caption = video.caption,
+            videoUrl = video.videoPlaybackUrl,
+            durationSeconds = video.durationFormatted.substringBefore(':').toIntOrNull()?.times(60)
+                ?.plus(video.durationFormatted.substringAfter(':').toIntOrNull() ?: 0) ?: 0,
+            musicName = video.musicTitle,
+            thumbnailUrl = video.videoThumbnailUrl
+        )
+        return executeHttpRequest<CreateShortVideoRequest, ShortVideo>(
+            endpoint = "/short-videos",
             method = "POST",
-            requestBody = video
+            requestBody = request
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<ShortVideo>>(json).data
-                ?: throw IllegalStateException("Réponse vidéo incomplète")
+            // Reloading the canonical feed avoids maintaining a second incompatible response mapper.
+            video
         }
     }
 
@@ -500,11 +665,10 @@ class MboteApiService {
      */
     suspend fun toggleLikeShortVideoApi(videoId: String, isLiked: Boolean): Result<Boolean> {
         return executeHttpRequest<Unit, Boolean>(
-            endpoint = "/shorts/$videoId/like?isLiked=$isLiked",
+            endpoint = "/short-videos/$videoId/likes",
             method = "POST"
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<Boolean>>(json).data
-                ?: throw IllegalStateException("Réponse de réaction incomplète")
+            MboteBackendConfig.jsonParser.decodeFromString<ShortLikeResponse>(json).likedByMe
         }
     }
 
@@ -512,13 +676,12 @@ class MboteApiService {
      * Add a comment to a Short video on backend server
      */
     suspend fun addShortVideoCommentApi(videoId: String, comment: ShortVideoComment): Result<ShortVideoComment> {
-        return executeHttpRequest<ShortVideoComment, ShortVideoComment>(
-            endpoint = "/shorts/$videoId/comment",
+        return executeHttpRequest<CreateShortCommentRequest, ShortVideoComment>(
+            endpoint = "/short-videos/$videoId/comments",
             method = "POST",
-            requestBody = comment
+            requestBody = CreateShortCommentRequest(comment.text)
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<ShortVideoComment>>(json).data
-                ?: throw IllegalStateException("Réponse de commentaire incomplète")
+            comment
         }
     }
 
