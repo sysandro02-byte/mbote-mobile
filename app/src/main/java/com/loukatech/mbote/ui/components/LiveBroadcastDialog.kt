@@ -70,9 +70,9 @@ data class LiveComment(
 fun LiveBroadcastDialog(
     currentUserAvatar: String,
     userGiftState: UserGiftState = UserGiftState(),
-    isPremiumUser: Boolean = true,
-    userBadges: List<BadgeType> = listOf(BadgeType.VIP, BadgeType.CERTIFIED_CREATOR),
-    onSendGift: (giftId: String, multiplier: Int) -> Boolean = { _, _ -> true },
+    isPremiumUser: Boolean = false,
+    userBadges: List<BadgeType> = emptyList(),
+    onSendGift: (giftId: String, multiplier: Int) -> Boolean = { _, _ -> false },
     onBuyBundle: (GiftBundle, String) -> Unit = { _, _ -> },
     onBuySingleGift: (GiftItem, Int, String) -> Unit = { _, _, _ -> },
     onDismiss: () -> Unit
@@ -104,13 +104,8 @@ fun LiveBroadcastDialog(
 
     val floatingReactions = remember { mutableStateListOf<EphemeralReaction>() }
 
-    val comments = remember {
-        mutableStateListOf(
-            LiveComment("1", "Merveille K.", "Salut tout le monde ! Bienvenue sur le live 🇨🇬", "19:22", false, BadgeType.VIP),
-            LiveComment("2", "Grâce N.", "Superbe initiative MBoté Live 🔥", "19:22", false, BadgeType.CERTIFIED_CREATOR),
-            LiveComment("3", "Arnold M.", "A envoyé un 💎 Diamant !", "19:23", true, BadgeType.TOP_DONOR)
-        )
-    }
+    // A live starts empty and is populated only by authenticated real-time events.
+    val comments = remember { mutableStateListOf<LiveComment>() }
 
     val coroutineScope = rememberCoroutineScope()
 

@@ -39,7 +39,7 @@ fun TipCreatorSheet(
     walletBalanceFcfa: Long,
     userGiftState: UserGiftState = UserGiftState(),
     onSendTip: (amount: Long, provider: String) -> Unit = { _, _ -> },
-    onSendGift: (giftId: String) -> Boolean = { true },
+    onSendGift: (giftId: String) -> Boolean = { false },
     onBuySingleGift: (GiftItem, Int, String) -> Unit = { _, _, _ -> },
     onBuyBundle: (GiftBundle, String) -> Unit = { _, _ -> },
     onCashout: (amount: Long, provider: String, phone: String) -> Unit = { _, _, _ -> },

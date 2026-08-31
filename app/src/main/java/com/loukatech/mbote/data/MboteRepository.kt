@@ -1051,46 +1051,15 @@ class MboteRepository(
     suspend fun markShortViewed(videoId: String): Result<Unit> = apiService.markShortViewed(videoId)
 
     fun tipCreator(videoId: String, amountFcfa: Long, provider: String = "MBoté Pay / MTN MoMo") {
-        _userProfile.update { u ->
-            u.copy(walletBalanceFcfa = (u.walletBalanceFcfa - amountFcfa).coerceAtLeast(0L))
-        }
+        // The payment backend must confirm a tip before any balance changes.
     }
 
     fun buyGiftBundle(bundle: GiftBundle, provider: String = "MBoté Pay / MTN MoMo"): Boolean {
-        _userGiftState.update { current ->
-            val updatedInventory = current.inventory.toMutableMap()
-            bundle.giftCounts.forEach { (giftId, count) ->
-                updatedInventory[giftId] = (updatedInventory[giftId] ?: 0) + count
-            }
-            current.copy(
-                inventory = updatedInventory,
-                adminPlatformGiftRevenueFcfa = current.adminPlatformGiftRevenueFcfa + bundle.priceFcfa
-            )
-        }
-        if (provider.contains("MBoté", ignoreCase = true)) {
-            _userProfile.update { u ->
-                u.copy(walletBalanceFcfa = (u.walletBalanceFcfa - bundle.priceFcfa).coerceAtLeast(0L))
-            }
-        }
-        return true
+        return false
     }
 
     fun buySingleGift(gift: GiftItem, count: Int = 1, provider: String = "MBoté Pay / MTN MoMo"): Boolean {
-        val totalCost = gift.priceFcfa * count
-        _userGiftState.update { current ->
-            val updatedInventory = current.inventory.toMutableMap()
-            updatedInventory[gift.id] = (updatedInventory[gift.id] ?: 0) + count
-            current.copy(
-                inventory = updatedInventory,
-                adminPlatformGiftRevenueFcfa = current.adminPlatformGiftRevenueFcfa + totalCost
-            )
-        }
-        if (provider.contains("MBoté", ignoreCase = true)) {
-            _userProfile.update { u ->
-                u.copy(walletBalanceFcfa = (u.walletBalanceFcfa - totalCost).coerceAtLeast(0L))
-            }
-        }
-        return true
+        return false
     }
 
     fun buyBadge(badgeType: BadgeType, provider: String = "MTN Mobile Money"): Boolean {
@@ -1164,30 +1133,6 @@ class MboteRepository(
             u.copy(totalGiftsSentFcfa = u.totalGiftsSentFcfa + totalAmount)
         }
         return true
-    }
-
-    fun receiveSimulatedGift(giftId: String, senderName: String) {
-        val currentState = _userGiftState.value
-        val giftItem = currentState.storeGifts.find { it.id == giftId } ?: defaultGiftItems().find { it.id == giftId } ?: return
-        val timeNow = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-
-        val newTransaction = GiftTransaction(
-            giftId = giftId,
-            giftName = giftItem.name,
-            emoji = giftItem.emoji,
-            amountFcfa = giftItem.priceFcfa,
-            isReceived = true,
-            counterpartName = senderName,
-            timestamp = "Aujourd'hui à $timeNow",
-            status = "Disponible"
-        )
-
-        _userGiftState.update { current ->
-            current.copy(
-                transactions = listOf(newTransaction) + current.transactions,
-                totalVirtualEarnedFcfa = current.totalVirtualEarnedFcfa + giftItem.priceFcfa
-            )
-        }
     }
 
     fun cashoutVirtualGifts(amountFcfa: Long, destinationProvider: String, phoneNumber: String): Boolean {

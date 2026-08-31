@@ -1221,10 +1221,6 @@ class MboteViewModel(
         repository.updateWithdrawalStatus(withdrawalId, newStatus)
     }
 
-    fun receiveSimulatedGift(giftId: String, senderName: String) {
-        repository.receiveSimulatedGift(giftId, senderName)
-    }
-
     fun updateLanguage(language: AppLanguage) {
         repository.updateLanguage(language)
     }
