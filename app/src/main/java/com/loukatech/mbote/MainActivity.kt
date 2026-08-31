@@ -62,7 +62,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewModel.initializeCache(applicationContext.filesDir)
-        com.loukatech.mbote.service.WebSocketManager.initialize(this)
         com.loukatech.mbote.service.MboteI18nService.initialize(this)
         com.loukatech.mbote.service.MboteNotificationManager.initNotificationChannels(this)
         com.loukatech.mbote.service.AppUsageTrackingService.start(this)

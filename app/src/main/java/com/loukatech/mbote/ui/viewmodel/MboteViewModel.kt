@@ -96,16 +96,10 @@ class MboteViewModel(
     val socketUrl = com.loukatech.mbote.service.MboteSocketManager.socketUrl
 
     init {
-        com.loukatech.mbote.service.MboteSocketManager.connect()
-
-        viewModelScope.launch {
-            repository.syncAllFromBackend()
-        }
-
         viewModelScope.launch {
             com.loukatech.mbote.service.MboteSocketManager.incomingMessages.collect { msg ->
-                if (msg.chatId.isNotBlank() && msg.text.isNotBlank()) {
-                    repository.sendMessage(msg.chatId, msg.text)
+                if (msg.chatId.isNotBlank()) {
+                    repository.refreshMessagesForChat(msg.chatId)
                 }
             }
         }
@@ -119,6 +113,10 @@ class MboteViewModel(
     val isDataSyncing: StateFlow<Boolean> = _isDataSyncing.asStateFlow()
 
     fun triggerDataSync() {
+        if (!repository.isAuthenticated.value || com.loukatech.mbote.service.api.MboteBackendConfig.authToken.isNullOrBlank()) {
+            return
+        }
+        com.loukatech.mbote.service.MboteSocketManager.connect(forceResetAttempts = true)
         viewModelScope.launch {
             _isDataSyncing.value = true
             repository.syncAllFromBackend()
@@ -210,6 +208,7 @@ class MboteViewModel(
     }
 
     fun logout() {
+        com.loukatech.mbote.service.MboteSocketManager.disconnect()
         repository.logout()
         _showLoginScreen.value = true
     }

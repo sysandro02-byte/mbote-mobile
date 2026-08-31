@@ -26,7 +26,7 @@ object WebSocketManager {
      */
     fun initialize(context: Context) {
         Log.i(TAG, "Initializing WebSocketManager with URL: $socketUrl")
-        connect()
+        if (!com.loukatech.mbote.service.api.MboteBackendConfig.authToken.isNullOrBlank()) connect()
     }
 
     /**

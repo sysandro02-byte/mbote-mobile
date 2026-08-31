@@ -21,7 +21,7 @@ val mboteApiBaseUrl = envProps.getProperty("MBOTE_API_BASE_URL")
     ?: "https://mbote-backend.onrender.com/api"
 val viteSocketUrl = envProps.getProperty("VITE_SOCKET_URL")
     ?: System.getenv("VITE_SOCKET_URL")
-    ?: "wss://mbote-socket.loukatech.com/ws"
+    ?: "https://mbote-backend.onrender.com"
 val viteSupabaseUrl = envProps.getProperty("VITE_SUPABASE_URL")
     ?: System.getenv("VITE_SUPABASE_URL")
     ?: "https://mbote-app.supabase.co"
@@ -131,6 +131,9 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     implementation(libs.okhttp)
+    implementation("io.socket:socket.io-client:2.1.1") {
+        exclude(group = "org.json", module = "json")
+    }
     implementation(libs.androidx.biometric)
     ksp(libs.room.compiler)
 
