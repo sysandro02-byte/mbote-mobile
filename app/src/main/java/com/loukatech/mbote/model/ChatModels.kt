@@ -143,10 +143,16 @@ data class StatusItem(
     val timestamp: String,
     val text: String? = null,
     val imageUrl: String? = null,
+    val audioUrl: String? = null,
     val isAudioStatus: Boolean = false,
     val audioDurationSec: Int = 0,
     val isViewed: Boolean = false,
-    val isMine: Boolean = false
+    val isMine: Boolean = false,
+    val reactionsCount: Int = 0,
+    val commentsCount: Int = 0,
+    val sharesCount: Int = 0,
+    val userReaction: String? = null,
+    val background: String? = null
 )
 
 @Serializable
@@ -172,7 +178,9 @@ data class NewsPost(
     val likesCount: Int = 0,
     val commentsCount: Int = 0,
     val isLiked: Boolean = false,
-    val comments: List<Comment> = emptyList()
+    val comments: List<Comment> = emptyList(),
+    val sharesCount: Int = 0,
+    val mediaType: String = "text"
 )
 
 data class MeetingItem(

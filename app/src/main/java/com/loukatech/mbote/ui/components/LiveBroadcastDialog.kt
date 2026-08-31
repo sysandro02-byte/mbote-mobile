@@ -75,13 +75,12 @@ fun LiveBroadcastDialog(
     onSendGift: (giftId: String, multiplier: Int) -> Boolean = { _, _ -> true },
     onBuyBundle: (GiftBundle, String) -> Unit = { _, _ -> },
     onBuySingleGift: (GiftItem, Int, String) -> Unit = { _, _, _ -> },
-    onSimulateReceivedGift: (giftId: String, sender: String) -> Unit = { _, _ -> },
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     var isLiveStarted by remember { mutableStateOf(false) }
-    var liveTitle by remember { mutableStateOf("🔴 Live MBoté - Échange en direct") }
-    var viewerCount by remember { mutableStateOf(142) }
+    var liveTitle by remember { mutableStateOf("") }
+    var viewerCount by remember { mutableStateOf(0) }
     var commentText by remember { mutableStateOf("") }
 
     // Dialog state
@@ -278,56 +277,6 @@ fun LiveBroadcastDialog(
     // Calculate total gifts owned by the user
     val totalGiftsOwned = remember(userGiftState.inventory) {
         userGiftState.inventory.values.sum()
-    }
-
-    // Simulate incoming viewers, comments and simulated community gifts
-    LaunchedEffect(isLiveStarted) {
-        if (isLiveStarted) {
-            var counter = 0
-            while (true) {
-                delay(3500)
-                counter++
-                viewerCount += (1..4).random()
-                val randomNames = listOf("Christian L.", "Prisca B.", "Destin M.", "Sarah O.", "Junior K.", "Yannick M.", "Arnold M.")
-                val randomMsgs = listOf("Incroyable ce direct !", "Force à vous 🇨🇬💪", "Joyeux live à tous", "Top qualité vidéo", "Toujours présent !")
-                val randomSender = randomNames.random()
-                
-                // Occasional live gift from audience
-                if (counter % 5 == 0) {
-                    val highGifts = listOf(
-                        Triple("g_diamond", "Diamant étincelant", "💎"),
-                        Triple("g_gold_ring", "Bague en or", "💍"),
-                        Triple("g_gold_bar", "Lingot d'or pur", "🪙")
-                    )
-                    val picked = highGifts.random()
-                    val value = if (picked.first == "g_gold_bar") 10000L else if (picked.first == "g_diamond") 5000L else 3000L
-                    
-                    comments.add(
-                        LiveComment(
-                            System.currentTimeMillis().toString(),
-                            randomSender,
-                            "A envoyé un ${picked.third} ${picked.second} !",
-                            "Maintenant",
-                            true
-                        )
-                    )
-                    onSimulateReceivedGift(picked.first, randomSender)
-                    triggerGiftOverlay(randomSender, picked.second, picked.third, value)
-                } else {
-                    comments.add(
-                        LiveComment(
-                            System.currentTimeMillis().toString(),
-                            randomSender,
-                            randomMsgs.random(),
-                            "Maintenant"
-                        )
-                    )
-                    // Periodic automated ambient reactions
-                    val ambientEmoji = listOf("❤️", "🔥", "👏", "🇨🇬", "😍").random()
-                    triggerReaction(ambientEmoji)
-                }
-            }
-        }
     }
 
     androidx.compose.ui.window.Dialog(

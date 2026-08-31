@@ -143,31 +143,6 @@ class MboteRobolectricTest {
     }
 
     @Test
-    fun testAddStatusAndNewsInteractions() {
-        val viewModel = MboteViewModel(MboteRepository())
-        val initialStatusesCount = viewModel.statuses.value.size
-
-        viewModel.postStatus("Nouveau statut de test !", null)
-        assertEquals(initialStatusesCount + 1, viewModel.statuses.value.size)
-        assertEquals("Nouveau statut de test !", viewModel.statuses.value.first().text)
-
-        // News like & comments
-        val firstPost = viewModel.newsPosts.value.first()
-        val initialLikes = firstPost.likesCount
-        val initialCommentsCount = firstPost.commentsCount
-
-        viewModel.toggleNewsLike(firstPost.id)
-        val postAfterLike = viewModel.newsPosts.value.first { it.id == firstPost.id }
-        assertTrue(postAfterLike.isLiked)
-        assertEquals(initialLikes + 1, postAfterLike.likesCount)
-
-        viewModel.addNewsComment(firstPost.id, "Superbe article !")
-        val postAfterComment = viewModel.newsPosts.value.first { it.id == firstPost.id }
-        assertEquals(initialCommentsCount + 1, postAfterComment.commentsCount)
-        assertEquals("Superbe article !", postAfterComment.comments.last().text)
-    }
-
-    @Test
     fun testUserProfileAndSettings() {
         val viewModel = MboteViewModel(MboteRepository())
         val profile = viewModel.userProfile.value

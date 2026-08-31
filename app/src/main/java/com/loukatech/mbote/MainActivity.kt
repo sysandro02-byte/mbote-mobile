@@ -184,11 +184,19 @@ class MainActivity : ComponentActivity() {
             val isOffline by viewModel.isOffline.collectAsStateWithLifecycle()
             val isAuthenticated by viewModel.isAuthenticated.collectAsStateWithLifecycle()
             val isDataSyncing by viewModel.isDataSyncing.collectAsStateWithLifecycle()
+            val publicationError by viewModel.publicationError.collectAsStateWithLifecycle()
             val showLoginScreen by viewModel.showLoginScreen.collectAsStateWithLifecycle()
             val showAdminLoginDialog by viewModel.showAdminLoginDialog.collectAsStateWithLifecycle()
             val showForgotPasswordDialog by viewModel.showForgotPasswordDialog.collectAsStateWithLifecycle()
 
             val isSystemDark = isSystemInDarkTheme()
+
+            LaunchedEffect(publicationError) {
+                publicationError?.let {
+                    android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show()
+                    viewModel.clearPublicationError()
+                }
+            }
             val isDarkTheme = when (userProfile.themeMode) {
                 AppThemeMode.LIGHT -> false
                 AppThemeMode.DARK -> true
@@ -456,6 +464,7 @@ class MainActivity : ComponentActivity() {
                                                         MessagesScreen(
                                                             chats = chats,
                                                             statuses = statuses,
+                                                            userProfile = userProfile,
                                                             searchQuery = searchQuery,
                                                             selectedFilter = chatFilter,
                                                             isSyncing = isDataSyncing,
@@ -468,6 +477,7 @@ class MainActivity : ComponentActivity() {
                                                             onJoinByLinkClick = { viewModel.setShowJoinByInviteLinkDialog(true) },
                                                             onStatusClick = { status -> viewModel.setSelectedStatusStory(status) },
                                                             onAddStatusClick = { viewModel.setShowAddStatusDialog(true) },
+                                                            onConfirmDesktopQr = { payload -> viewModel.confirmDesktopQrLogin(payload) },
                                                             onProfileClick = { name, avatar -> showProfileForUser(name, avatar) }
                                                         )
                                                     }
@@ -551,6 +561,7 @@ class MainActivity : ComponentActivity() {
                                                 MessagesScreen(
                                                     chats = chats,
                                                     statuses = statuses,
+                                                    userProfile = userProfile,
                                                     searchQuery = searchQuery,
                                                     selectedFilter = chatFilter,
                                                     isSyncing = isDataSyncing,
@@ -563,6 +574,7 @@ class MainActivity : ComponentActivity() {
                                                     onJoinByLinkClick = { viewModel.setShowJoinByInviteLinkDialog(true) },
                                                     onStatusClick = { status -> viewModel.setSelectedStatusStory(status) },
                                                     onAddStatusClick = { viewModel.setShowAddStatusDialog(true) },
+                                                    onConfirmDesktopQr = { payload -> viewModel.confirmDesktopQrLogin(payload) },
                                                     onProfileClick = { name, avatar -> showProfileForUser(name, avatar) }
                                                 )
                                             }
@@ -616,18 +628,24 @@ class MainActivity : ComponentActivity() {
                                                     ActusScreen(
                                                         newsPosts = newsPosts,
                                                         statuses = statuses,
+                                                        currentUserName = userProfile.name,
                                                         shortVideos = shortVideos,
                                                         isSyncing = isDataSyncing,
                                                         onLikeClick = { postId -> viewModel.toggleNewsLike(postId) },
+                                                        onShareClick = { postId -> viewModel.shareNewsPost(postId) },
                                                         onCommentClick = { post -> viewModel.setSelectedPostForComments(post) },
                                                         onStatusClick = { status -> viewModel.setSelectedStatusStory(status) },
                                                         onAddStatusClick = { viewModel.setShowAddStatusDialog(true) },
                                                         onOpenShortVideos = { viewModel.openShortVideos("/app?tab=actus") },
                                                         onOpenCreatorProfile = { video -> viewModel.setSelectedCreatorProfile(video) },
                                                         onCreateShortVideoClick = { viewModel.setShowCreateShortVideoDialog(true) },
-                                                        onPublishNews = { title, content, imageUrl, category ->
-                                                            viewModel.addNewsPost(title, content, imageUrl, category)
+                                                        onCreateChannel = { name, description, isPublic, initialPost ->
+                                                            viewModel.createChannel(name, description, isPublic, initialPost)
                                                         },
+                                                        onPublishNews = { title, content, mediaUri, category, mediaType ->
+                                                            viewModel.addNewsPost(context, title, content, mediaUri, category, mediaType)
+                                                        },
+                                                        onRefresh = { viewModel.triggerDataSync() },
                                                         onAuthorProfileClick = { name, avatar -> showProfileForUser(name, avatar) },
                                                         onReportContent = { type, target -> viewModel.submitReport(type, target) }
                                                     )
@@ -853,8 +871,11 @@ class MainActivity : ComponentActivity() {
                     if (showCreateShortVideoDialog) {
                         CreateShortVideoDialog(
                             onDismiss = { viewModel.setShowCreateShortVideoDialog(false) },
-                            onPublish = { caption, hashtags, musicTitle, musicArtist, thumbnailUrl, location ->
+                            onPublish = { videoUri, duration, caption, hashtags, musicTitle, musicArtist, thumbnailUrl, location ->
                                 viewModel.createShortVideo(
+                                    context = context,
+                                    videoUri = videoUri,
+                                    durationSeconds = duration,
                                     caption = caption,
                                     hashtags = hashtags,
                                     musicTitle = musicTitle,
@@ -963,8 +984,8 @@ class MainActivity : ComponentActivity() {
                     if (showAddStatusDialog) {
                         AddStatusDialog(
                             onDismiss = { viewModel.setShowAddStatusDialog(false) },
-                            onConfirm = { text, img ->
-                                viewModel.postStatus(text, img)
+                            onConfirm = { text, mediaUri, mediaType, background, visibility ->
+                                viewModel.postStatus(context, text, mediaUri, mediaType, background, visibility)
                             }
                         )
                     }

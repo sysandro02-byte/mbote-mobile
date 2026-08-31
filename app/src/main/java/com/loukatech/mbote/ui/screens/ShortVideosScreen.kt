@@ -36,6 +36,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import android.media.MediaPlayer
+import android.net.Uri
+import android.widget.VideoView
 import coil.compose.AsyncImage
 import com.loukatech.mbote.model.ShortVideo
 import com.loukatech.mbote.model.ShortVideosFeedType
@@ -96,7 +100,8 @@ fun ShortVideosScreen(
     val coroutineScope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    LaunchedEffect(pagerState.currentPage) {
+    LaunchedEffect(pagerState.currentPage, displayedVideos) {
+        displayedVideos.getOrNull(pagerState.currentPage)?.let { viewModel.markShortViewed(it.id) }
         if (pagerState.currentPage > 0) {
             viewModel.addScrollingMinutes(1)
             com.loukatech.mbote.service.AppUsageTrackingService.recordScroll(context)
@@ -359,8 +364,8 @@ fun ShortVideosScreen(
         if (showCreateDialog) {
             CreateShortVideoDialog(
                 onDismiss = { viewModel.setShowCreateShortVideoDialog(false) },
-                onPublish = { caption, hashtags, musicTitle, musicArtist, thumb, loc ->
-                    viewModel.createShortVideo(caption, hashtags, musicTitle, musicArtist, thumb, loc)
+                onPublish = { videoUri, duration, caption, hashtags, musicTitle, musicArtist, thumb, loc ->
+                    viewModel.createShortVideo(context, videoUri, duration, caption, hashtags, musicTitle, musicArtist, thumb, loc)
                 }
             )
         }
@@ -379,9 +384,6 @@ fun ShortVideosScreen(
                 },
                 onBuySingleGift = { gift, count, provider ->
                     viewModel.buySingleGift(gift, count, provider)
-                },
-                onSimulateReceivedGift = { giftId, sender ->
-                    viewModel.receiveSimulatedGift(giftId, sender)
                 },
                 onDismiss = { showLiveDialog = false }
             )
@@ -671,6 +673,8 @@ fun ShortVideoCardExact(
     var isCaptionExpanded by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val reactionParticles = remember { mutableStateListOf<FloatingReactionParticle>() }
+    var nativeVideoView by remember(video.id) { mutableStateOf<VideoView?>(null) }
+    var nativeMediaPlayer by remember(video.id) { mutableStateOf<MediaPlayer?>(null) }
 
     val reactionOptions = remember {
         listOf(
@@ -707,14 +711,30 @@ fun ShortVideoCardExact(
         label = "disc_angle"
     )
 
-    // Playback progress simulation
+    LaunchedEffect(isPlaying, nativeVideoView) {
+        nativeVideoView?.let { player -> if (isPlaying) player.start() else player.pause() }
+    }
+
+    LaunchedEffect(isMuted, nativeMediaPlayer) {
+        val volume = if (isMuted) 0f else 1f
+        nativeMediaPlayer?.setVolume(volume, volume)
+    }
+
+    DisposableEffect(nativeVideoView) {
+        onDispose {
+            nativeVideoView?.stopPlayback()
+            nativeMediaPlayer = null
+        }
+    }
+
+    // Real playback progress from the native Android player.
     var progress by remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            while (true) {
-                delay(100)
-                progress = (progress + 0.006f) % 1f
-            }
+    LaunchedEffect(nativeVideoView, isPlaying) {
+        while (nativeVideoView != null) {
+            val duration = nativeVideoView?.duration?.takeIf { it > 0 } ?: 0
+            val position = nativeVideoView?.currentPosition ?: 0
+            progress = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
+            delay(200)
         }
     }
 
@@ -743,13 +763,32 @@ fun ShortVideoCardExact(
                 )
             }
     ) {
-        // Video Poster Background
-        AsyncImage(
-            model = video.videoThumbnailUrl,
-            contentDescription = video.caption,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
+        if (video.videoPlaybackUrl.isNotBlank()) {
+            AndroidView(
+                factory = { context ->
+                    VideoView(context).also { player ->
+                        nativeVideoView = player
+                        player.setVideoURI(Uri.parse(video.videoPlaybackUrl))
+                        player.setOnPreparedListener { mediaPlayer ->
+                            nativeMediaPlayer = mediaPlayer
+                            mediaPlayer.isLooping = true
+                            val volume = if (isMuted) 0f else 1f
+                            mediaPlayer.setVolume(volume, volume)
+                            if (isPlaying) player.start()
+                        }
+                    }
+                },
+                update = { player -> if (isPlaying) player.start() else player.pause() },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            AsyncImage(
+                model = video.videoThumbnailUrl,
+                contentDescription = video.caption,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // Gradient overlays for crisp text visibility
         Box(

@@ -40,20 +40,14 @@ data class GiftTransaction(
 
 @Serializable
 data class UserGiftState(
-    val inventory: Map<String, Int> = mapOf(
-        "g_bronze" to 3,
-        "g_gold_ring" to 2,
-        "g_diamond" to 1,
-        "g_gold_bar" to 0,
-        "g_crown" to 0
-    ),
-    val transactions: List<GiftTransaction> = defaultGiftTransactions(),
-    val withdrawals: List<WithdrawalTransaction> = defaultWithdrawalTransactions(),
-    val totalVirtualEarnedFcfa: Long = 48500L,
-    val storeGifts: List<GiftItem> = defaultGiftItems(),
-    val storeBundles: List<GiftBundle> = defaultGiftBundles(),
-    val adminPlatformGiftRevenueFcfa: Long = 480000L,
-    val adminPlatformBadgeRevenueFcfa: Long = 185000L
+    val inventory: Map<String, Int> = emptyMap(),
+    val transactions: List<GiftTransaction> = emptyList(),
+    val withdrawals: List<WithdrawalTransaction> = emptyList(),
+    val totalVirtualEarnedFcfa: Long = 0L,
+    val storeGifts: List<GiftItem> = emptyList(),
+    val storeBundles: List<GiftBundle> = emptyList(),
+    val adminPlatformGiftRevenueFcfa: Long = 0L,
+    val adminPlatformBadgeRevenueFcfa: Long = 0L
 )
 
 fun defaultGiftItems(): List<GiftItem> = listOf(
@@ -100,71 +94,3 @@ fun defaultGiftBundles(): List<GiftBundle> = listOf(
     )
 )
 
-fun defaultGiftTransactions(): List<GiftTransaction> = listOf(
-    GiftTransaction(
-        id = "gt_1",
-        giftId = "g_gold_bar",
-        giftName = "Lingot d'or pur",
-        emoji = "🪙",
-        amountFcfa = 10000L,
-        isReceived = true,
-        counterpartName = "Arnold Makaya",
-        timestamp = "Aujourd'hui à 19:15",
-        status = "Disponible"
-    ),
-    GiftTransaction(
-        id = "gt_2",
-        giftId = "g_diamond",
-        giftName = "Diamant étincelant",
-        emoji = "💎",
-        amountFcfa = 5000L,
-        isReceived = true,
-        counterpartName = "Sarah Okemba",
-        timestamp = "Hier à 21:40",
-        status = "Disponible"
-    ),
-    GiftTransaction(
-        id = "gt_3",
-        giftId = "g_gold_ring",
-        giftName = "Bague en or",
-        emoji = "💍",
-        amountFcfa = 3000L,
-        isReceived = false,
-        counterpartName = "Merveille K.",
-        timestamp = "24 Août à 18:30",
-        status = "Complété"
-    ),
-    GiftTransaction(
-        id = "gt_4",
-        giftId = "g_crown",
-        giftName = "Couronne royale",
-        emoji = "👑",
-        amountFcfa = 25000L,
-        isReceived = true,
-        counterpartName = "Christian Loubassou",
-        timestamp = "22 Août à 20:00",
-        status = "Encaissé (Mobile Money)"
-    ),
-    GiftTransaction(
-        id = "gt_5",
-        giftId = "g_bronze",
-        giftName = "Médaille de bronze",
-        emoji = "🥉",
-        amountFcfa = 1000L,
-        isReceived = false,
-        counterpartName = "Destin Moungali",
-        timestamp = "20 Août à 14:10",
-        status = "Complété"
-    ),
-    GiftTransaction(
-        id = "gt_6",
-        giftId = "g_diamond",
-        giftName = "Diamant étincelant",
-        emoji = "💎",
-        amountFcfa = 5000L,
-        isReceived = true,
-        counterpartName = "Grâce N.",
-        timestamp = "19 Août à 17:45",
-        status = "Disponible"
-    )
-)

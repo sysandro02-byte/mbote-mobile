@@ -1,6 +1,8 @@
 package com.loukatech.mbote.service.api
 
 import android.util.Log
+import android.content.Context
+import android.net.Uri
 import com.loukatech.mbote.BuildConfig
 import com.loukatech.mbote.model.*
 import kotlinx.coroutines.Dispatchers
@@ -217,6 +219,38 @@ data class ChatDto(
 )
 
 @Serializable
+private data class CreateChatRequest(
+    val isGroup: Boolean,
+    val name: String,
+    val participantIds: List<Int>
+)
+
+@Serializable
+private data class CreatedEntityResponse(val id: JsonElement)
+
+@Serializable
+private data class CreateChannelRequest(
+    val name: String,
+    val description: String,
+    val slug: String,
+    val category: String = "Public",
+    val privacy: String = "public",
+    val language: String = "fr"
+)
+
+@Serializable
+private data class CreateChannelPostRequest(
+    val type: String = "text",
+    val content: String,
+    val visibility: String = "public",
+    val allowComments: Boolean = true,
+    val allowShares: Boolean = true
+)
+
+@Serializable
+private data class ConfirmQrLoginRequest(val pairingToken: String)
+
+@Serializable
 private data class ApiErrorResponse(val error: String? = null, val message: String? = null, val code: String? = null)
 
 @Serializable
@@ -267,6 +301,27 @@ private data class CreateShortVideoRequest(
 
 @Serializable
 private data class ShortLikeResponse(val likeCount: Int = 0, val likedByMe: Boolean = false)
+
+@Serializable
+private data class ShortBookmarkResponse(val bookmarkCount: Int = 0, val savedByMe: Boolean = false)
+
+@Serializable
+private data class ShortFollowResponse(val followerCount: Int = 0, val followedByMe: Boolean = false)
+
+@Serializable
+private data class ShortShareResponse(val shareCount: Int = 0)
+
+@Serializable
+private data class ShortUploadResponse(val url: String)
+
+@Serializable
+private data class BackendShortCommentDto(
+    val id: JsonElement,
+    @SerialName("user_name") val userName: String = "",
+    @SerialName("user_avatar") val userAvatar: String? = null,
+    val content: String = "",
+    @SerialName("created_at") val createdAt: String = ""
+)
 
 @Serializable
 private data class CreateShortCommentRequest(val content: String)
@@ -610,31 +665,7 @@ class MboteApiService {
             endpoint = "/short-videos?limit=40",
             method = "GET"
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<List<BackendShortVideoDto>>(json).map { video ->
-                ShortVideo(
-                    id = video.id.toString().trim('"'),
-                    creatorId = video.userId.toString().trim('"'),
-                    creatorName = video.userName,
-                    creatorUsername = video.userUsername,
-                    creatorAvatar = video.userAvatar.orEmpty(),
-                    isFollowing = video.followedByMe,
-                    videoThumbnailUrl = video.thumbnailUrl.orEmpty(),
-                    videoPlaybackUrl = video.videoUrl,
-                    caption = video.caption,
-                    musicTitle = video.musicName.orEmpty(),
-                    musicArtist = video.userName,
-                    likesCount = video.likeCount,
-                    isLiked = video.likedByMe,
-                    commentsCount = video.commentCount,
-                    sharesCount = video.shareCount,
-                    bookmarksCount = video.bookmarkCount,
-                    isBookmarked = video.savedByMe,
-                    viewsCount = video.viewCount,
-                    durationFormatted = "%d:%02d".format(video.durationSeconds / 60, video.durationSeconds % 60),
-                    timestamp = video.createdAt,
-                    reactionsCount = emptyMap()
-                )
-            }
+            MboteBackendConfig.jsonParser.decodeFromString<List<BackendShortVideoDto>>(json).map(::mapShortVideo)
         }
     }
 
@@ -654,10 +685,7 @@ class MboteApiService {
             endpoint = "/short-videos",
             method = "POST",
             requestBody = request
-        ) { json ->
-            // Reloading the canonical feed avoids maintaining a second incompatible response mapper.
-            video
-        }
+        ) { json -> mapShortVideo(MboteBackendConfig.jsonParser.decodeFromString(json)) }
     }
 
     /**
@@ -680,10 +708,159 @@ class MboteApiService {
             endpoint = "/short-videos/$videoId/comments",
             method = "POST",
             requestBody = CreateShortCommentRequest(comment.text)
+        ) { json -> mapShortComment(MboteBackendConfig.jsonParser.decodeFromString(json)) }
+    }
+
+    suspend fun confirmDesktopQrLogin(pairingToken: String): Result<Unit> =
+        executeHttpRequest(
+            endpoint = "/auth/qr/confirm",
+            method = "POST",
+            requestBody = ConfirmQrLoginRequest(pairingToken)
+        ) { Unit }
+
+    suspend fun createGroupApi(name: String, participantIds: List<Int>): Result<String> =
+        executeHttpRequest(
+            endpoint = "/chats",
+            method = "POST",
+            requestBody = CreateChatRequest(true, name, participantIds.distinct())
         ) { json ->
-            comment
+            MboteBackendConfig.jsonParser.decodeFromString<CreatedEntityResponse>(json).id.toString().trim('"')
+        }
+
+    suspend fun createChannelApi(
+        name: String,
+        description: String,
+        isPublic: Boolean,
+        initialPost: String
+    ): Result<String> {
+        val slug = name.lowercase()
+            .replace(Regex("[^a-z0-9]+"), "-")
+            .trim('-')
+            .ifBlank { "chaine-${System.currentTimeMillis()}" }
+        val created = executeHttpRequest(
+            endpoint = "/channels",
+            method = "POST",
+            requestBody = CreateChannelRequest(
+                name = name,
+                description = description,
+                slug = slug,
+                privacy = if (isPublic) "public" else "private"
+            )
+        ) { json ->
+            MboteBackendConfig.jsonParser.decodeFromString<CreatedEntityResponse>(json).id.toString().trim('"')
+        }
+        val channelId = created.getOrElse { return Result.failure(it) }
+        if (initialPost.isNotBlank()) {
+            val post = executeHttpRequest<CreateChannelPostRequest, Unit>(
+                endpoint = "/channels/$channelId/posts",
+                method = "POST",
+                requestBody = CreateChannelPostRequest(
+                    content = initialPost,
+                    visibility = if (isPublic) "public" else "private"
+                )
+            ) { Unit }
+            if (post.isFailure) return Result.failure(post.exceptionOrNull()!!)
+        }
+        return Result.success(channelId)
+    }
+
+    suspend fun fetchShortVideoComments(videoId: String): Result<List<ShortVideoComment>> =
+        executeHttpRequest<Unit, List<ShortVideoComment>>("/short-videos/$videoId/comments?limit=100") { json ->
+            MboteBackendConfig.jsonParser.decodeFromString<List<BackendShortCommentDto>>(json).map(::mapShortComment)
+        }
+
+    suspend fun toggleShortBookmark(videoId: String): Result<Pair<Int, Boolean>> =
+        executeHttpRequest<Unit, Pair<Int, Boolean>>("/short-videos/$videoId/bookmarks", "POST") { json ->
+            val response = MboteBackendConfig.jsonParser.decodeFromString<ShortBookmarkResponse>(json)
+            response.bookmarkCount to response.savedByMe
+        }
+
+    suspend fun toggleShortFollow(authorId: String): Result<Pair<Int, Boolean>> =
+        executeHttpRequest<Unit, Pair<Int, Boolean>>("/short-videos/authors/$authorId/follow", "POST") { json ->
+            val response = MboteBackendConfig.jsonParser.decodeFromString<ShortFollowResponse>(json)
+            response.followerCount to response.followedByMe
+        }
+
+    suspend fun shareShortVideo(videoId: String, targetChatId: String? = null): Result<Int> =
+        executeHttpRequest<Map<String, String?>, Int>(
+            endpoint = "/short-videos/$videoId/shares",
+            method = "POST",
+            requestBody = mapOf("targetChatId" to targetChatId)
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<ShortShareResponse>(json).shareCount }
+
+    suspend fun markShortViewed(videoId: String): Result<Unit> =
+        executeHttpRequest<Unit, Unit>("/short-videos/$videoId/views", "POST") { Unit }
+
+    suspend fun uploadPublicationVideo(context: Context, source: Uri, surface: String): Result<String> = withContext(Dispatchers.IO) {
+        val token = MboteBackendConfig.authToken?.trim().orEmpty()
+        if (token.isBlank()) return@withContext Result.failure(IllegalStateException("Session MBoté requise."))
+        val safeSurface = if (surface == "actus-videos") "actus-videos" else "short-videos"
+        val resolver = context.contentResolver
+        val mimeType = resolver.getType(source)?.takeIf { it.startsWith("video/") } ?: "application/octet-stream"
+        var connection: HttpURLConnection? = null
+        try {
+            connection = (URL("${MboteBackendConfig.baseUrl}/uploads/$safeSurface").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 20_000
+                readTimeout = 120_000
+                doOutput = true
+                setChunkedStreamingMode(256 * 1024)
+                setRequestProperty("Authorization", "Bearer $token")
+                setRequestProperty("Content-Type", mimeType)
+                setRequestProperty("Accept", "application/json")
+            }
+            resolver.openInputStream(source)?.use { input ->
+                connection.outputStream.use { output -> input.copyTo(output, 256 * 1024) }
+            } ?: return@withContext Result.failure(IllegalStateException("Vidéo Android inaccessible."))
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (code !in 200..299) {
+                val error = runCatching { MboteBackendConfig.jsonParser.decodeFromString<ApiErrorResponse>(response) }.getOrNull()
+                Result.failure(IllegalStateException(error?.error ?: error?.message ?: "Upload HTTP $code"))
+            } else {
+                Result.success(MboteBackendConfig.jsonParser.decodeFromString<ShortUploadResponse>(response).url)
+            }
+        } catch (error: Exception) {
+            Result.failure(error)
+        } finally {
+            connection?.disconnect()
         }
     }
+
+    private fun mapShortVideo(video: BackendShortVideoDto) = ShortVideo(
+        id = video.id.toString().trim('"'),
+        creatorId = video.userId.toString().trim('"'),
+        creatorName = video.userName,
+        creatorUsername = video.userUsername,
+        creatorAvatar = video.userAvatar.orEmpty(),
+        isFollowing = video.followedByMe,
+        videoThumbnailUrl = video.thumbnailUrl.orEmpty(),
+        videoPlaybackUrl = video.videoUrl,
+        caption = video.caption,
+        hashtags = Regex("#[\\p{L}\\p{N}_-]+").findAll(video.caption).map { it.value }.toList(),
+        musicTitle = video.musicName.orEmpty(),
+        musicArtist = video.userName,
+        likesCount = video.likeCount,
+        isLiked = video.likedByMe,
+        commentsCount = video.commentCount,
+        sharesCount = video.shareCount,
+        bookmarksCount = video.bookmarkCount,
+        isBookmarked = video.savedByMe,
+        viewsCount = video.viewCount,
+        durationFormatted = "%d:%02d".format(video.durationSeconds / 60, video.durationSeconds % 60),
+        timestamp = video.createdAt,
+        reactionsCount = emptyMap()
+    )
+
+    private fun mapShortComment(comment: BackendShortCommentDto) = ShortVideoComment(
+        id = comment.id.toString().trim('"'),
+        authorName = comment.userName.ifBlank { "Utilisateur MBoté" },
+        authorUsername = "",
+        authorAvatar = comment.userAvatar.orEmpty(),
+        text = comment.content,
+        timestamp = comment.createdAt
+    )
 
     private fun String.capitalizeWords(): String = split(" ")
         .joinToString(" ") { word ->

@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import coil.compose.AsyncImage
 import com.loukatech.mbote.ui.theme.MbotePurpleLight
 import com.loukatech.mbote.ui.theme.MbotePurplePrimary
@@ -45,6 +47,8 @@ import com.loukatech.mbote.ui.theme.MbotePurpleSoft
 fun CreateShortVideoDialog(
     onDismiss: () -> Unit,
     onPublish: (
+        videoUri: android.net.Uri,
+        durationSeconds: Int,
         caption: String,
         hashtags: List<String>,
         musicTitle: String,
@@ -60,14 +64,15 @@ fun CreateShortVideoDialog(
     // Step 1: Découper state
     var startTimeSec by remember { mutableFloatStateOf(0f) }
     var endTimeSec by remember { mutableFloatStateOf(120f) }
-    var videoSourceText by remember { mutableStateOf("Video_MBote_Short_001.mp4") }
+    var videoSourceText by remember { mutableStateOf("") }
+    var selectedVideoUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var isMuted by remember { mutableStateOf(false) }
 
     // Step 2: Details state
-    var title by remember { mutableStateOf("Moment de calme au coucher du soleil ✨") }
-    var subtitle by remember { mutableStateOf("Respirez. Laissez-vous inspirer par la beauté de la nature. 💚") }
+    var title by remember { mutableStateOf("") }
+    var subtitle by remember { mutableStateOf("") }
     var musicSearchQuery by remember { mutableStateOf("") }
-    var selectedMusicId by remember { mutableStateOf("song_1") }
+    var selectedMusicId by remember { mutableStateOf("no_music") }
     var musicVolume by remember { mutableFloatStateOf(0.6f) }
 
     // Step 3: Aperçu & publier state
@@ -76,20 +81,21 @@ fun CreateShortVideoDialog(
     var allowComments by remember { mutableStateOf(true) }
     var draftCount by remember { mutableIntStateOf(0) }
     var isPublishing by remember { mutableStateOf(false) }
+    var publishError by remember { mutableStateOf<String?>(null) }
+
+    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        selectedVideoUri = uri
+        videoSourceText = uri?.lastPathSegment.orEmpty()
+        publishError = null
+    }
 
     val presetMusicList = remember {
         listOf(
-            MusicOption("no_music", "Seulement avec le son de la vidéo", "Aucune musique ajoutée", "00:00", isAudioOnly = true),
-            MusicOption("song_1", "SoundHelix Song 1", "Pop libre de droit", "06:12"),
-            MusicOption("song_2", "SoundHelix Song 2", "Énergie positive", "05:43"),
-            MusicOption("song_3", "SoundHelix Song 3", "Voyage et inspiration", "05:02"),
-            MusicOption("song_4", "SoundHelix Song 4", "Ambiance créative", "06:33"),
-            MusicOption("song_5", "Formule 7 (Live)", "Fally Ipupa", "04:15"),
-            MusicOption("song_6", "Loi (Remix)", "Koffi Olomide", "03:50")
+            MusicOption("no_music", "Son original de la vidéo", "Aucune musique ajoutée", "00:00", isAudioOnly = true)
         )
     }
 
-    val selectedMusicObj = presetMusicList.find { it.id == selectedMusicId } ?: presetMusicList[1]
+    val selectedMusicObj = presetMusicList.find { it.id == selectedMusicId } ?: presetMusicList.first()
 
     val emojisList = listOf("😍", "🔥", "✨", "🌍", "💚", "✈️")
 
@@ -202,7 +208,7 @@ fun CreateShortVideoDialog(
                                         endTimeSec = 120f
                                     },
                                     onSelectFileClick = {
-                                        videoSourceText = "MBote_Camera_Record_${(10..99).random()}.mp4"
+                                        videoPicker.launch("video/*")
                                     }
                                 )
                             }
@@ -226,8 +232,7 @@ fun CreateShortVideoDialog(
                                     volume = musicVolume,
                                     onVolumeChange = { musicVolume = it },
                                     onGenerateAiDetails = {
-                                        title = "Moment magique au coucher du soleil 🌅✨"
-                                        subtitle = "Vibrez au rythme de la nature et laissez-vous transporter par MBoté ShortVideo! 💚🇨🇩"
+                                        publishError = "La génération automatique n’est pas disponible sans API IA configurée."
                                     }
                                 )
                             }
@@ -289,17 +294,21 @@ fun CreateShortVideoDialog(
 
                 Button(
                     onClick = {
-                        if (currentStep < 3) {
+                        if (selectedVideoUri == null) {
+                            publishError = "Sélectionnez une vraie vidéo avant de continuer."
+                        } else if (currentStep < 3) {
                             currentStep++
                         } else {
                             isPublishing = true
                             onPublish(
-                                if (title.isNotBlank()) title else "MBoté ShortVideo ✨",
-                                listOf("#MboteShorts", "#Brazza", "#Kinshasa"),
+                                selectedVideoUri!!,
+                                (endTimeSec - startTimeSec).toInt().coerceIn(1, 120),
+                                title.trim(),
+                                Regex("#[\\p{L}\\p{N}_-]+").findAll("$title $subtitle").map { it.value }.toList(),
                                 selectedMusicObj.title,
                                 selectedMusicObj.artist,
-                                "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&auto=format&fit=crop&q=80",
-                                "Brazzaville, Congo"
+                                "",
+                                ""
                             )
                         }
                     },
@@ -343,6 +352,7 @@ fun CreateShortVideoDialog(
                         }
                     }
                 }
+                publishError?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
             }
         }
     }

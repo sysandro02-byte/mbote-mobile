@@ -1,5 +1,6 @@
 package com.loukatech.mbote.ui.screens
 
+import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.loukatech.mbote.model.*
 import com.loukatech.mbote.service.PartnerTypingState
 import com.loukatech.mbote.ui.components.FilterChipRow
@@ -38,11 +40,13 @@ import com.loukatech.mbote.ui.components.StatusRingAvatar
 import com.loukatech.mbote.ui.theme.PurpleLight
 import com.loukatech.mbote.ui.theme.PurplePrimary
 import com.loukatech.mbote.ui.theme.PurpleSoft
+import kotlinx.coroutines.launch
 
 @Composable
 fun MessagesScreen(
     chats: List<Chat>,
     statuses: List<StatusItem>,
+    userProfile: UserProfile,
     searchQuery: String,
     selectedFilter: String,
     isSyncing: Boolean = false,
@@ -56,71 +60,41 @@ fun MessagesScreen(
     onStatusClick: (StatusItem) -> Unit,
     onAddStatusClick: () -> Unit,
     onProfileClick: (String, String) -> Unit = { _, _ -> },
+    onConfirmDesktopQr: suspend (String) -> Result<Unit> = { Result.failure(IllegalStateException("Connexion QR indisponible")) },
     modifier: Modifier = Modifier
 ) {
     var filterOptions = listOf("Tous", "Discussions", "Groupes", "Canaux", "Non lus")
     var showOptionsMenu by remember { mutableStateOf(false) }
-    var showWebMboteDialog by remember { mutableStateOf(false) }
     var showImportantMessagesDialog by remember { mutableStateOf(false) }
     var showQrScannerDialog by remember { mutableStateOf(false) }
     var isSearchVisible by remember { mutableStateOf(searchQuery.isNotBlank()) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val desktopQrScanner = remember(context) { GmsBarcodeScanning.getClient(context) }
+
+    fun scanDesktopQr() {
+        desktopQrScanner.startScan()
+            .addOnSuccessListener { barcode ->
+                val payload = barcode.rawValue.orEmpty()
+                coroutineScope.launch {
+                    onConfirmDesktopQr(payload)
+                        .onSuccess { Toast.makeText(context, "Mboté PC connecté avec succès.", Toast.LENGTH_LONG).show() }
+                        .onFailure { Toast.makeText(context, it.message ?: "Connexion QR impossible.", Toast.LENGTH_LONG).show() }
+                }
+            }
+            .addOnFailureListener { error ->
+                Toast.makeText(context, error.message ?: "Scanner QR indisponible.", Toast.LENGTH_LONG).show()
+            }
+    }
 
     if (showQrScannerDialog) {
         com.loukatech.mbote.ui.components.QrCodeScannerDialog(
-            userProfile = UserProfile(name = "Moi (MBoté)", username = "@mbote_user", avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150"),
+            userProfile = userProfile,
             allChats = chats,
             onOpenChat = { chatId ->
                 onChatClick(chatId)
             },
             onDismiss = { showQrScannerDialog = false }
-        )
-    }
-
-    if (showWebMboteDialog) {
-        AlertDialog(
-            onDismissRequest = { showWebMboteDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = PurplePrimary)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Web MBoté - Liage d'appareil", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                }
-            },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text("Rendez-vous sur web.mbote.cg sur votre ordinateur, puis scannez le code QR ci-dessous :", fontSize = 13.sp)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color.White,
-                        border = BorderStroke(2.dp, PurplePrimary),
-                        modifier = Modifier.size(180.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                            Icon(Icons.Default.QrCode2, contentDescription = "Code QR", tint = PurplePrimary, modifier = Modifier.size(140.dp))
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Session chiffrée de bout en bout", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showWebMboteDialog = false
-                        android.widget.Toast.makeText(context, "Appareil Web MBoté lié avec succès !", android.widget.Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = PurplePrimary)
-                ) {
-                    Text("Simuler le scan QR")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showWebMboteDialog = false }) {
-                    Text("Fermer")
-                }
-            }
         )
     }
 
@@ -376,7 +350,7 @@ fun MessagesScreen(
                                         leadingIcon = { Icon(Icons.Default.QrCodeScanner, contentDescription = null, tint = PurplePrimary) },
                                         onClick = {
                                             showOptionsMenu = false
-                                            showWebMboteDialog = true
+                                            scanDesktopQr()
                                         }
                                     )
                                     HorizontalDivider()

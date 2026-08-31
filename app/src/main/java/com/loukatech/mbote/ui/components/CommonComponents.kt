@@ -51,6 +51,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.window.DialogProperties
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 @Composable
 fun StatusRingAvatar(
@@ -444,14 +446,14 @@ fun NewChatDialog(
 @Composable
 fun AddStatusDialog(
     onDismiss: () -> Unit,
-    onConfirm: (text: String, imageUrl: String?) -> Unit
+    onConfirm: (text: String, mediaUri: android.net.Uri?, mediaType: String, background: String?, visibility: String) -> Unit
 ) {
     var text by remember { mutableStateOf("") }
     var statusMode by remember { mutableStateOf("Texte") } // "Texte", "Photo", "Vocal"
     var selectedColorIndex by remember { mutableStateOf(0) }
-    var selectedImageIndex by remember { mutableStateOf(0) }
-    var isRecordingAudio by remember { mutableStateOf(false) }
+    var selectedMediaUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var privacyOption by remember { mutableStateOf("Mes Masta (contacts)") }
+    val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> selectedMediaUri = uri }
 
     val bgGradients = listOf(
         listOf(Color(0xFF7C3AED), Color(0xFFC084FC)), // Mbote Purple
@@ -460,14 +462,6 @@ fun AddStatusDialog(
         listOf(Color(0xFFDC2626), Color(0xFFF87171)), // Crimson Sunset
         listOf(Color(0xFFD97706), Color(0xFFFBBF24)), // Amber Warm
         listOf(Color(0xFF0F172A), Color(0xFF334155))  // Midnight Dark
-    )
-
-    val presetImages = listOf(
-        null,
-        "https://images.unsplash.com/photo-1501504905252-473c47e087f8?w=500&auto=format&fit=crop&q=80",
-        "https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=500&auto=format&fit=crop&q=80",
-        "https://images.unsplash.com/photo-1519389950473-47ba0277781c?w=500&auto=format&fit=crop&q=80",
-        "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80"
     )
 
     val currentGradient = bgGradients[selectedColorIndex]
@@ -576,6 +570,16 @@ fun AddStatusDialog(
                     }
                 }
 
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Mes Masta (contacts)", "Public").forEach { option ->
+                        FilterChip(
+                            selected = privacyOption == option,
+                            onClick = { privacyOption = option },
+                            label = { Text(option, maxLines = 1) }
+                        )
+                    }
+                }
+
                 // Live Preview Canvas Card
                 Box(
                     modifier = Modifier
@@ -583,7 +587,7 @@ fun AddStatusDialog(
                         .height(180.dp)
                         .clip(RoundedCornerShape(18.dp))
                         .background(
-                            if (statusMode == "Texte" || presetImages[selectedImageIndex] == null) {
+                            if (statusMode == "Texte" || selectedMediaUri == null) {
                                 androidx.compose.ui.graphics.Brush.linearGradient(currentGradient)
                             } else {
                                 androidx.compose.ui.graphics.Brush.linearGradient(
@@ -593,9 +597,9 @@ fun AddStatusDialog(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (statusMode == "Photo" && presetImages[selectedImageIndex] != null) {
+                    if (statusMode == "Photo" && selectedMediaUri != null) {
                         AsyncImage(
-                            model = presetImages[selectedImageIndex],
+                            model = selectedMediaUri,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
@@ -613,21 +617,21 @@ fun AddStatusDialog(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             IconButton(
-                                onClick = { isRecordingAudio = !isRecordingAudio },
+                                onClick = { mediaPicker.launch("audio/*") },
                                 modifier = Modifier
                                     .size(60.dp)
                                     .clip(CircleShape)
-                                    .background(if (isRecordingAudio) Color(0xFFEF4444) else Color.White.copy(alpha = 0.25f))
+                                    .background(if (selectedMediaUri != null) Color(0xFF059669) else Color.White.copy(alpha = 0.25f))
                             ) {
                                 Icon(
-                                    imageVector = if (isRecordingAudio) Icons.Default.MicOff else Icons.Default.Mic,
-                                    contentDescription = "Enregistrer",
+                                imageVector = Icons.Default.Mic,
+                                contentDescription = "Choisir un audio",
                                     tint = Color.White,
                                     modifier = Modifier.size(30.dp)
                                 )
                             }
                             Text(
-                                text = if (isRecordingAudio) "Enregistrement en cours (00:08)..." else "Appuyez pour enregistrer un statut vocal",
+                                text = if (selectedMediaUri != null) "Audio sélectionné" else "Choisir un fichier audio réel",
                                 fontSize = 12.sp,
                                 color = Color.White,
                                 fontWeight = FontWeight.SemiBold
@@ -693,45 +697,15 @@ fun AddStatusDialog(
                     }
                 } else if (statusMode == "Photo") {
                     Text(
-                        text = "Choisir une illustration de fond :",
+                        text = "Choisir une photo de votre appareil :",
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(presetImages.size) { index ->
-                            val img = presetImages[index]
-                            Box(
-                                modifier = Modifier
-                                    .size(52.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .border(
-                                        width = if (selectedImageIndex == index) 2.5.dp else 1.dp,
-                                        color = if (selectedImageIndex == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .clickable { selectedImageIndex = index }
-                            ) {
-                                if (img != null) {
-                                    AsyncImage(
-                                        model = img,
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else {
-                                    Text(
-                                        text = "Dégradé",
-                                        fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.align(Alignment.Center)
-                                    )
-                                }
-                            }
-                        }
+                    OutlinedButton(onClick = { mediaPicker.launch("image/*") }) {
+                        Icon(Icons.Outlined.Image, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (selectedMediaUri == null) "Sélectionner une photo" else "Changer la photo")
                     }
                 }
 
@@ -754,12 +728,13 @@ fun AddStatusDialog(
 
                     Button(
                         onClick = {
-                            val imgToPost = if (statusMode == "Photo") presetImages[selectedImageIndex] else null
-                            val textToPost = if (statusMode == "Vocal") "🎙️ Statut Vocal MBoté" else text
-                            onConfirm(textToPost, imgToPost)
+                            val type = when (statusMode) { "Photo" -> "image"; "Vocal" -> "audio"; else -> "text" }
+                            val background = if (type == "text") listOf("#7C3AED", "#2563EB", "#059669", "#DC2626", "#D97706", "#0F172A")[selectedColorIndex] else null
+                            val visibility = if (privacyOption.contains("Public", ignoreCase = true)) "public" else "friends"
+                            onConfirm(text.trim(), selectedMediaUri, type, background, visibility)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                        enabled = (statusMode == "Vocal" && isRecordingAudio) || text.isNotBlank() || (statusMode == "Photo" && presetImages[selectedImageIndex] != null),
+                        enabled = text.isNotBlank() || selectedMediaUri != null,
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .weight(1.4f)

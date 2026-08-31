@@ -128,6 +128,7 @@ dependencies {
     implementation(libs.camerax.camera2)
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     implementation(libs.okhttp)

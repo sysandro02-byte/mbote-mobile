@@ -111,6 +111,12 @@ class MboteViewModel(
 
     private val _isDataSyncing = MutableStateFlow(false)
     val isDataSyncing: StateFlow<Boolean> = _isDataSyncing.asStateFlow()
+    private val _isPublishing = MutableStateFlow(false)
+    val isPublishing: StateFlow<Boolean> = _isPublishing.asStateFlow()
+    private val _publicationError = MutableStateFlow<String?>(null)
+    val publicationError: StateFlow<String?> = _publicationError.asStateFlow()
+
+    fun clearPublicationError() { _publicationError.value = null }
 
     fun triggerDataSync() {
         if (!repository.isAuthenticated.value || com.loukatech.mbote.service.api.MboteBackendConfig.authToken.isNullOrBlank()) {
@@ -160,6 +166,9 @@ class MboteViewModel(
     suspend fun register(request: com.loukatech.mbote.service.api.RegisterRequest): Result<com.loukatech.mbote.service.api.PendingOtpChallenge> {
         return repository.register(request)
     }
+
+    suspend fun confirmDesktopQrLogin(qrPayload: String): Result<Unit> =
+        repository.confirmDesktopQrLogin(qrPayload)
 
     suspend fun getRegistrationPublicConfig(): Result<com.loukatech.mbote.service.api.RegistrationPublicConfig> =
         repository.getRegistrationPublicConfig()
@@ -694,11 +703,17 @@ class MboteViewModel(
         initialMessage: String = ""
     ) {
         if (name.isNotBlank()) {
-            val msg = if (initialMessage.isNotBlank()) initialMessage.trim() else "Groupe $name créé !"
-            val group = repository.createNewGroup(name.trim(), description.trim(), members, avatar, msg)
-            _showCreateGroupDialog.value = false
-            _showQuickActionsMenu.value = false
-            openChat(group.id)
+            viewModelScope.launch {
+                _isPublishing.value = true
+                repository.createGroupApi(name.trim(), description.trim(), members, avatar, initialMessage.trim())
+                    .onSuccess { group ->
+                        _showCreateGroupDialog.value = false
+                        _showQuickActionsMenu.value = false
+                        openChat(group.id)
+                    }
+                    .onFailure { _publicationError.value = it.message ?: "Création du groupe impossible." }
+                _isPublishing.value = false
+            }
         }
     }
 
@@ -715,11 +730,17 @@ class MboteViewModel(
 
     fun createChannel(name: String, description: String, isPublic: Boolean, initialPost: String) {
         if (name.isNotBlank()) {
-            val msg = if (initialPost.isNotBlank()) initialPost.trim() else "Bienvenue sur la chaîne $name !"
-            val channel = repository.createNewChannel(name.trim(), description.trim(), isPublic, msg)
-            _showCreateChannelDialog.value = false
-            _showQuickActionsMenu.value = false
-            openChat(channel.id)
+            viewModelScope.launch {
+                _isPublishing.value = true
+                repository.createChannelApi(name.trim(), description.trim(), isPublic, initialPost.trim())
+                    .onSuccess {
+                        _showCreateChannelDialog.value = false
+                        _showQuickActionsMenu.value = false
+                        repository.refreshPublicationsFromBackend()
+                    }
+                    .onFailure { _publicationError.value = it.message ?: "Création de la chaîne impossible." }
+                _isPublishing.value = false
+            }
         }
     }
 
@@ -751,10 +772,15 @@ class MboteViewModel(
         }
     }
 
-    fun postStatus(text: String, imageUrl: String? = null, isAudioStatus: Boolean = false, durationSec: Int = 0) {
-        if (text.isNotBlank() || imageUrl != null || isAudioStatus) {
-            repository.addStatus(text, imageUrl, isAudioStatus, durationSec)
-            _showAddStatusDialog.value = false
+    fun postStatus(context: android.content.Context, text: String, mediaUri: android.net.Uri? = null, mediaType: String = "text", background: String? = null, visibility: String = "friends") {
+        if (text.isBlank() && mediaUri == null) return
+        viewModelScope.launch {
+            _isPublishing.value = true
+            _publicationError.value = null
+            val result = repository.addStatusFromDevice(context, text, mediaUri, mediaType, background, visibility)
+            _isPublishing.value = false
+            if (result.isSuccess) _showAddStatusDialog.value = false
+            else _publicationError.value = result.exceptionOrNull()?.message ?: "Publication du statut impossible."
         }
     }
 
@@ -785,18 +811,24 @@ class MboteViewModel(
     }
 
     fun toggleNewsLike(postId: String) {
-        repository.toggleNewsLike(postId)
+        viewModelScope.launch {
+            repository.toggleNewsLike(postId).onFailure { _publicationError.value = it.message }
+        }
     }
 
-    fun addNewsPost(title: String, content: String, imageUrl: String? = null, category: String = "Communauté") {
+    fun addNewsPost(context: android.content.Context, title: String, content: String, mediaUri: android.net.Uri? = null, category: String = "Communauté", mediaType: String = "text") {
         viewModelScope.launch {
-            repository.publishPostApi(title, content, imageUrl, category)
+            _isPublishing.value = true
+            repository.publishPostFromDevice(context, title, content, mediaUri, category, mediaType).onFailure { _publicationError.value = it.message }
+            _isPublishing.value = false
         }
     }
 
     fun addNewsComment(postId: String, text: String) {
         if (text.isNotBlank()) {
-            repository.addNewsComment(postId, text.trim())
+            viewModelScope.launch {
+                repository.addNewsComment(postId, text.trim()).onFailure { _publicationError.value = it.message }
+            }
         }
     }
 
@@ -1024,6 +1056,17 @@ class MboteViewModel(
 
     fun setSelectedStatusStory(status: StatusItem?) {
         _selectedStatusStory.value = status
+        if (status != null && !status.isMine) {
+            viewModelScope.launch { repository.markStatusViewed(status.id) }
+        }
+    }
+
+    fun shareNewsPost(postId: String) {
+        viewModelScope.launch { repository.shareNewsPost(postId).onFailure { _publicationError.value = it.message } }
+    }
+
+    fun markShortViewed(videoId: String) {
+        viewModelScope.launch { repository.markShortViewed(videoId) }
     }
 
     fun setSelectedDiscoverProfile(profile: DiscoverProfile?) {
@@ -1055,11 +1098,11 @@ class MboteViewModel(
     }
 
     fun toggleLikeShortVideo(videoId: String) {
-        repository.toggleLikeShortVideo(videoId)
+        viewModelScope.launch { repository.toggleLikeShortVideo(videoId).onFailure { _publicationError.value = it.message } }
     }
 
     fun reactToShortVideo(videoId: String, emoji: String) {
-        repository.reactToShortVideo(videoId, emoji)
+        viewModelScope.launch { repository.reactToShortVideo(videoId, emoji).onFailure { _publicationError.value = it.message } }
     }
 
     fun setSelectedCreatorProfile(video: ShortVideo?) {
@@ -1079,15 +1122,15 @@ class MboteViewModel(
     }
 
     fun toggleBookmarkShortVideo(videoId: String) {
-        repository.toggleBookmarkShortVideo(videoId)
+        viewModelScope.launch { repository.toggleBookmarkShortVideo(videoId).onFailure { _publicationError.value = it.message } }
     }
 
     fun toggleFollowShortCreator(creatorId: String) {
-        repository.toggleFollowShortCreator(creatorId)
+        viewModelScope.launch { repository.toggleFollowShortCreator(creatorId).onFailure { _publicationError.value = it.message } }
     }
 
     fun addShortVideoComment(videoId: String, text: String) {
-        repository.addShortVideoComment(videoId, text)
+        viewModelScope.launch { repository.addShortVideoComment(videoId, text).onFailure { _publicationError.value = it.message } }
     }
 
     fun toggleLikeShortComment(videoId: String, commentId: String) {
@@ -1096,6 +1139,7 @@ class MboteViewModel(
 
     fun setSelectedShortVideoForComments(video: ShortVideo?) {
         _selectedShortVideoForComments.value = video
+        if (video != null) viewModelScope.launch { repository.refreshShortComments(video.id) }
     }
 
     fun setSelectedShortVideoForShare(video: ShortVideo?) {
@@ -1111,6 +1155,9 @@ class MboteViewModel(
     }
 
     fun createShortVideo(
+        context: android.content.Context,
+        videoUri: android.net.Uri,
+        durationSeconds: Int,
         caption: String,
         hashtags: List<String>,
         musicTitle: String,
@@ -1118,13 +1165,21 @@ class MboteViewModel(
         thumbnailUrl: String,
         location: String? = null
     ) {
-        repository.createShortVideo(caption, hashtags, musicTitle, musicArtist, thumbnailUrl, location)
-        _showCreateShortVideoDialog.value = false
+        viewModelScope.launch {
+            _isPublishing.value = true
+            val result = repository.createShortVideo(context, videoUri, durationSeconds, caption, hashtags, musicTitle, musicArtist, thumbnailUrl, location)
+            _isPublishing.value = false
+            if (result.isSuccess) _showCreateShortVideoDialog.value = false
+            else _publicationError.value = result.exceptionOrNull()?.message ?: "Publication ShortMBoté impossible."
+        }
     }
 
     fun shareShortVideoToChat(chatId: String, shortVideo: ShortVideo) {
-        repository.shareShortVideoToChat(chatId, shortVideo)
-        _selectedShortVideoForShare.value = null
+        viewModelScope.launch {
+            val result = repository.shareShortVideoToChat(chatId, shortVideo)
+            if (result.isSuccess) _selectedShortVideoForShare.value = null
+            else _publicationError.value = result.exceptionOrNull()?.message
+        }
     }
 
     val userGiftState: StateFlow<UserGiftState> = repository.userGiftState

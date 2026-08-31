@@ -48,8 +48,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import coil.compose.AsyncImage
-import com.loukatech.mbote.data.ShortVideosData
 import com.loukatech.mbote.model.NewsPost
 import com.loukatech.mbote.model.ShortVideo
 import com.loukatech.mbote.model.StatusItem
@@ -97,18 +98,22 @@ data class ChannelInfo(
 fun ActusScreen(
     newsPosts: List<NewsPost>,
     statuses: List<StatusItem>,
+    currentUserName: String = "",
     shortVideos: List<ShortVideo> = emptyList(),
     isSyncing: Boolean = false,
     onLikeClick: (String) -> Unit,
+    onShareClick: (String) -> Unit,
     onCommentClick: (NewsPost) -> Unit,
     onStatusClick: (StatusItem) -> Unit,
     onAddStatusClick: () -> Unit,
     onOpenShortVideos: () -> Unit = {},
     onOpenCreatorProfile: (ShortVideo) -> Unit = {},
     onCreateShortVideoClick: () -> Unit = {},
-    onPublishNews: (title: String, content: String, imageUrl: String?, category: String) -> Unit = { _, _, _, _ -> },
+    onCreateChannel: (String, String, Boolean, String) -> Unit = { _, _, _, _ -> },
+    onPublishNews: (title: String, content: String, mediaUri: android.net.Uri?, category: String, mediaType: String) -> Unit = { _, _, _, _, _ -> },
     onAuthorProfileClick: (String, String) -> Unit = { _, _ -> },
     onReportContent: (String, String) -> Unit = { _, _ -> },
+    onRefresh: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -132,9 +137,7 @@ fun ActusScreen(
 
     val categoryFilters = listOf("Pour vous", "Public", "Amis", "Tendances", "Communauté")
 
-    val displayShortVideos = remember(shortVideos) {
-        if (shortVideos.isNotEmpty()) shortVideos else ShortVideosData.initialShortVideos
-    }
+    val displayShortVideos = shortVideos
 
     val initialChannelsList = remember {
         listOf(
@@ -296,8 +299,9 @@ fun ActusScreen(
             isRefreshing = isRefreshing,
             onRefresh = {
                 isRefreshing = true
+                onRefresh()
                 coroutineScope.launch {
-                    kotlinx.coroutines.delay(1200)
+                    kotlinx.coroutines.delay(600)
                     isRefreshing = false
                 }
             },
@@ -583,7 +587,8 @@ fun ActusScreen(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Text(
-                                        text = "LO",
+                                        text = currentUserName.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+                                            .take(2).mapNotNull { it.firstOrNull()?.uppercase() }.joinToString("").ifBlank { "M" },
                                         color = Color.White,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp
@@ -592,7 +597,7 @@ fun ActusScreen(
                             }
 
                             Text(
-                                text = "Quoi de neuf, Loukatech",
+                                text = if (currentUserName.isBlank()) "Quoi de neuf ?" else "Quoi de neuf, $currentUserName ?",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 fontSize = 14.sp,
                                 modifier = Modifier
@@ -732,6 +737,7 @@ fun ActusScreen(
                         post = post,
                         onLike = { onLikeClick(post.id) },
                         onComment = { onCommentClick(post) },
+                        onShare = { onShareClick(post.id) },
                         onOpenMediaFullScreen = { url, title, author, avatar, isVideo ->
                             activeFullScreenMediaUrl = url
                             activeFullScreenTitle = title
@@ -800,6 +806,7 @@ fun ActusScreen(
             CreateChannelDialog(
                 onDismiss = { showCreateChannelDialog = false },
                 onConfirm = { channelName, description, isPublic, initialPost ->
+                    onCreateChannel(channelName, description, isPublic, initialPost)
                     showCreateChannelDialog = false
                 }
             )
@@ -810,8 +817,8 @@ fun ActusScreen(
             NewActusModal(
                 initialMediaType = initialMediaType,
                 onDismiss = { showNewActusModal = false },
-                onPublish = { title, content, imageUrl, category ->
-                    onPublishNews(title, content, imageUrl, category)
+                onPublish = { title, content, mediaUri, category, mediaType ->
+                    onPublishNews(title, content, mediaUri, category, mediaType)
                     showNewActusModal = false
                 }
             )
@@ -900,12 +907,19 @@ private fun PublishTypeMenuItem(
 fun NewActusModal(
     initialMediaType: String = "Photo",
     onDismiss: () -> Unit,
-    onPublish: (title: String, content: String, imageUrl: String?, category: String) -> Unit
+    onPublish: (title: String, content: String, mediaUri: android.net.Uri?, category: String, mediaType: String) -> Unit
 ) {
-    var titleText by remember { mutableStateOf("Photo Actus") }
+    var titleText by remember { mutableStateOf("") }
     var contentText by remember { mutableStateOf("") }
     var selectedMediaTab by remember { mutableStateOf(initialMediaType) }
-    var attachedImageUrl by remember { mutableStateOf<String?>("https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80") }
+    var attachedMediaUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> attachedMediaUri = uri }
+    val apiMediaType = when (selectedMediaTab) {
+        "Photo", "Image" -> "image"
+        "Vidéo" -> "video"
+        "Audio" -> "audio"
+        else -> "text"
+    }
 
     val wordCount = remember(contentText) {
         if (contentText.isBlank()) 0
@@ -971,10 +985,11 @@ fun NewActusModal(
                             Button(
                                 onClick = {
                                     onPublish(
-                                        titleText.ifBlank { "Photo Actus" },
-                                        contentText.ifBlank { "Nouvelle actualité partagée sur MBoté." },
-                                        attachedImageUrl,
-                                        "Communauté"
+                                        titleText.trim(),
+                                        contentText.trim(),
+                                        attachedMediaUri,
+                                        "Communauté",
+                                        apiMediaType
                                     )
                                 },
                                 shape = RoundedCornerShape(20.dp),
@@ -1348,10 +1363,10 @@ fun NewActusModal(
                                     modifier = Modifier.weight(1f)
                                 )
                                 MediaTabChip(
-                                    icon = Icons.Outlined.PlayCircle,
-                                    label = "ShortVideo",
-                                    isSelected = selectedMediaTab == "ShortVideo",
-                                    onClick = { selectedMediaTab = "ShortVideo" },
+                                    icon = Icons.Outlined.Mic,
+                                    label = "Audio",
+                                    isSelected = selectedMediaTab == "Audio",
+                                    onClick = { selectedMediaTab = "Audio" },
                                     modifier = Modifier.weight(1f)
                                 )
                                 MediaTabChip(
@@ -1370,14 +1385,14 @@ fun NewActusModal(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                attachedImageUrl?.let { img ->
+                                attachedMediaUri?.let { media ->
                                     Box(
                                         modifier = Modifier
                                             .size(110.dp)
                                             .clip(RoundedCornerShape(14.dp))
                                     ) {
                                         AsyncImage(
-                                            model = img,
+                                            model = media,
                                             contentDescription = "Média attaché",
                                             contentScale = ContentScale.Crop,
                                             modifier = Modifier.fillMaxSize()
@@ -1390,7 +1405,7 @@ fun NewActusModal(
                                                 .align(Alignment.TopEnd)
                                                 .padding(6.dp)
                                                 .size(22.dp)
-                                                .clickable { attachedImageUrl = null }
+                                                .clickable { attachedMediaUri = null }
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Icon(
@@ -1422,7 +1437,13 @@ fun NewActusModal(
                                             )
                                         }
                                         .clickable {
-                                            attachedImageUrl = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80"
+                                            val mime = when (apiMediaType) {
+                                                "image" -> "image/*"
+                                                "video" -> "video/*"
+                                                "audio" -> "audio/*"
+                                                else -> "*/*"
+                                            }
+                                            mediaPicker.launch(mime)
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1443,14 +1464,16 @@ fun NewActusModal(
                     Button(
                         onClick = {
                             onPublish(
-                                titleText.ifBlank { "Photo Actus" },
-                                contentText.ifBlank { "Nouvelle actualité partagée sur MBoté." },
-                                attachedImageUrl,
-                                "Communauté"
+                                titleText.trim(),
+                                contentText.trim(),
+                                attachedMediaUri,
+                                "Communauté",
+                                apiMediaType
                             )
                         },
                         shape = RoundedCornerShape(24.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary),
+                        enabled = contentText.isNotBlank() || titleText.isNotBlank() || attachedMediaUri != null,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
@@ -2371,6 +2394,7 @@ fun ActusPostCard(
     post: NewsPost,
     onLike: () -> Unit,
     onComment: () -> Unit,
+    onShare: () -> Unit,
     onOpenMediaFullScreen: (url: String, title: String, authorName: String, authorAvatar: String, isVideo: Boolean) -> Unit = { _, _, _, _, _ -> },
     onProfileClick: () -> Unit = {},
     onReportClick: () -> Unit = {}
@@ -2689,7 +2713,7 @@ fun ActusPostCard(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .clickable {
-                                Toast.makeText(context, "Publication partagée dans vos discussions !", Toast.LENGTH_SHORT).show()
+                                onShare()
                             }
                             .padding(horizontal = 6.dp, vertical = 4.dp)
                     ) {

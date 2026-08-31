@@ -35,14 +35,7 @@ data class ShortVideo(
     val likesCount: Int = 0,
     val isLiked: Boolean = false,
     val userReaction: String? = null, // e.g. "❤️", "🔥", "👏", "😮", "💎", "🇨🇬"
-    val reactionsCount: Map<String, Int> = mapOf(
-        "❤️" to 142,
-        "🔥" to 89,
-        "👏" to 45,
-        "😮" to 18,
-        "💎" to 32,
-        "🇨🇬" to 67
-    ),
+    val reactionsCount: Map<String, Int> = emptyMap(),
     val commentsCount: Int = 0,
     val sharesCount: Int = 0,
     val bookmarksCount: Int = 0,

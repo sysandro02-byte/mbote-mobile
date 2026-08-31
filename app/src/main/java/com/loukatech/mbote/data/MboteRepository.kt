@@ -56,6 +56,16 @@ class MboteRepository(
 
     suspend fun register(request: RegisterRequest): Result<PendingOtpChallenge> = apiService.register(request)
 
+    suspend fun confirmDesktopQrLogin(qrPayload: String): Result<Unit> {
+        val token = runCatching {
+            android.net.Uri.parse(qrPayload).getQueryParameter("token")
+        }.getOrNull()?.trim().orEmpty().ifBlank { qrPayload.trim() }
+        if (token.length !in 32..256 || !token.matches(Regex("^[A-Za-z0-9_-]+$"))) {
+            return Result.failure(IllegalArgumentException("Ce QR code n’est pas une session Mboté PC valide."))
+        }
+        return apiService.confirmDesktopQrLogin(token)
+    }
+
     suspend fun getRegistrationPublicConfig(): Result<RegistrationPublicConfig> = apiService.getRegistrationPublicConfig()
 
     suspend fun verifyRegistrationOtp(pendingUserId: String, otp: String): Result<Unit> {
@@ -422,6 +432,9 @@ class MboteRepository(
             // Keep existing Short videos if offline
         }
 
+        publicationApiService.fetchActusPosts().onSuccess { _newsPosts.value = it }
+        publicationApiService.fetchStatuses(_userProfile.value.id).onSuccess { _statuses.value = it }
+
         val chatsResult = apiService.fetchUserChats()
         if (chatsResult.isSuccess) {
             val remoteChats = chatsResult.getOrNull() ?: emptyList()
@@ -493,6 +506,11 @@ class MboteRepository(
                 _shortVideos.value = remoteShorts
             }
         }
+    }
+
+    suspend fun refreshPublicationsFromBackend() {
+        publicationApiService.fetchActusPosts().onSuccess { _newsPosts.value = it }
+        publicationApiService.fetchStatuses(_userProfile.value.id).onSuccess { _statuses.value = it }
     }
 
     suspend fun refreshMessagesForChat(chatId: String) {
@@ -864,57 +882,17 @@ class MboteRepository(
         sendMessage(chatId, "Mbote ${profile.name} ! 👋 J'ai adoré ton profil et tes centres d'intérêt (${profile.interests.take(2).joinToString(", ")}). Ravi(e) de faire ta connaissance !")
     }
 
-    fun toggleLikeShortVideo(videoId: String) {
-        reactToShortVideo(videoId, "❤️")
-    }
+    suspend fun toggleLikeShortVideo(videoId: String): Result<Unit> = reactToShortVideo(videoId, "❤️")
 
-    fun reactToShortVideo(videoId: String, emoji: String) {
-        var isCurrentlyLikedNow = false
-        _shortVideos.update { list ->
-            list.map { v ->
-                if (v.id == videoId) {
-                    val currentReaction = v.userReaction
-                    val updatedReactionsMap = v.reactionsCount.toMutableMap()
-
-                    val (newUserReaction, newLiked) = if (currentReaction == emoji) {
-                        // User toggled off this reaction
-                        val currentCount = updatedReactionsMap[emoji] ?: 1
-                        updatedReactionsMap[emoji] = (currentCount - 1).coerceAtLeast(0)
-                        Pair(null, false)
-                    } else {
-                        // If user had another reaction previously, decrease its count
-                        if (currentReaction != null) {
-                            val prevCount = updatedReactionsMap[currentReaction] ?: 1
-                            updatedReactionsMap[currentReaction] = (prevCount - 1).coerceAtLeast(0)
-                        }
-                        // Increase count for new reaction
-                        val newCount = (updatedReactionsMap[emoji] ?: 0) + 1
-                        updatedReactionsMap[emoji] = newCount
-                        Pair(emoji, emoji == "❤️" || currentReaction != null)
-                    }
-
-                    isCurrentlyLikedNow = newUserReaction != null
-
-                    // Calculate total likes count based on reactions
-                    val totalReactions = updatedReactionsMap.values.sum()
-                    v.copy(
-                        userReaction = newUserReaction,
-                        isLiked = (newUserReaction != null),
-                        likesCount = totalReactions,
-                        reactionsCount = updatedReactionsMap
-                    )
-                } else v
-            }
+    suspend fun reactToShortVideo(videoId: String, emoji: String): Result<Unit> {
+        val response = apiService.toggleLikeShortVideoApi(videoId, true)
+        if (response.isFailure) return Result.failure(response.exceptionOrNull()!!)
+        val liked = response.getOrThrow()
+        refreshShortsFromBackend()
+        _shortVideos.update { videos ->
+            videos.map { if (it.id == videoId) it.copy(userReaction = if (liked) emoji else null) else it }
         }
-
-        // Trigger real API call asynchronously
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            try {
-                apiService.toggleLikeShortVideoApi(videoId, isCurrentlyLikedNow)
-            } catch (e: Exception) {
-                // Ignore failure (offline local success)
-            }
-        }
+        return Result.success(Unit)
     }
 
     fun getOrCreateChatForCreator(shortVideo: ShortVideo): String {
@@ -950,32 +928,24 @@ class MboteRepository(
     }
 
 
-    fun toggleBookmarkShortVideo(videoId: String) {
-        _shortVideos.update { list ->
-            list.map { v ->
-                if (v.id == videoId) {
-                    val newBookmarked = !v.isBookmarked
-                    v.copy(
-                        isBookmarked = newBookmarked,
-                        bookmarksCount = if (newBookmarked) v.bookmarksCount + 1 else (v.bookmarksCount - 1).coerceAtLeast(0)
-                    )
-                } else v
-            }
-        }
+    suspend fun toggleBookmarkShortVideo(videoId: String): Result<Unit> {
+        val response = apiService.toggleShortBookmark(videoId)
+        if (response.isFailure) return Result.failure(response.exceptionOrNull()!!)
+        val (count, saved) = response.getOrThrow()
+        _shortVideos.update { videos -> videos.map { if (it.id == videoId) it.copy(bookmarksCount = count, isBookmarked = saved) else it } }
+        return Result.success(Unit)
     }
 
-    fun toggleFollowShortCreator(creatorId: String) {
-        _shortVideos.update { list ->
-            list.map { v ->
-                if (v.creatorId == creatorId) {
-                    v.copy(isFollowing = !v.isFollowing)
-                } else v
-            }
-        }
+    suspend fun toggleFollowShortCreator(creatorId: String): Result<Unit> {
+        val response = apiService.toggleShortFollow(creatorId)
+        if (response.isFailure) return Result.failure(response.exceptionOrNull()!!)
+        val followed = response.getOrThrow().second
+        _shortVideos.update { videos -> videos.map { if (it.creatorId == creatorId) it.copy(isFollowing = followed) else it } }
+        return Result.success(Unit)
     }
 
-    fun addShortVideoComment(videoId: String, text: String) {
-        if (text.isBlank()) return
+    suspend fun addShortVideoComment(videoId: String, text: String): Result<Unit> {
+        if (text.isBlank()) return Result.failure(IllegalArgumentException("Commentaire requis."))
         val newComment = ShortVideoComment(
             authorName = _userProfile.value.name,
             authorUsername = _userProfile.value.username,
@@ -986,25 +956,9 @@ class MboteRepository(
             isLiked = false
         )
 
-        _shortVideos.update { list ->
-            list.map { v ->
-                if (v.id == videoId) {
-                    v.copy(
-                        comments = listOf(newComment) + v.comments,
-                        commentsCount = v.commentsCount + 1
-                    )
-                } else v
-            }
-        }
-
-        // Send to real backend API asynchronously
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            try {
-                apiService.addShortVideoCommentApi(videoId, newComment)
-            } catch (e: Exception) {
-                // Offline fallback (local success)
-            }
-        }
+        val response = apiService.addShortVideoCommentApi(videoId, newComment)
+        if (response.isFailure) return Result.failure(response.exceptionOrNull()!!)
+        return refreshShortComments(videoId)
     }
 
     fun toggleLikeShortComment(videoId: String, commentId: String) {
@@ -1026,14 +980,19 @@ class MboteRepository(
         }
     }
 
-    fun createShortVideo(
+    suspend fun createShortVideo(
+        context: android.content.Context,
+        videoUri: android.net.Uri,
+        durationSeconds: Int,
         caption: String,
         hashtags: List<String>,
         musicTitle: String,
         musicArtist: String,
         thumbnailUrl: String,
         location: String? = null
-    ) {
+    ): Result<ShortVideo> {
+        val uploaded = apiService.uploadPublicationVideo(context, videoUri, "short-videos")
+        if (uploaded.isFailure) return Result.failure(uploaded.exceptionOrNull()!!)
         val user = _userProfile.value
         val newShort = ShortVideo(
             creatorId = user.id,
@@ -1042,42 +1001,54 @@ class MboteRepository(
             creatorAvatar = user.avatar,
             isCreatorVerified = user.isVerified,
             isFollowing = true,
-            videoThumbnailUrl = thumbnailUrl.ifBlank { "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop&q=80" },
+            videoThumbnailUrl = thumbnailUrl,
+            videoPlaybackUrl = uploaded.getOrThrow(),
             caption = caption,
             hashtags = hashtags,
             musicTitle = musicTitle.ifBlank { "Son original • ${user.name}" },
             musicArtist = musicArtist.ifBlank { user.name },
-            likesCount = 1,
-            isLiked = true,
+            likesCount = 0,
+            isLiked = false,
             commentsCount = 0,
             sharesCount = 0,
             bookmarksCount = 0,
             isBookmarked = false,
-            location = location ?: "Brazzaville, Congo",
+            durationFormatted = "%d:%02d".format(durationSeconds / 60, durationSeconds % 60),
+            location = location,
             timestamp = "À l'instant",
             comments = emptyList()
         )
-        _shortVideos.update { listOf(newShort) + it }
-
-        // Send to real backend API asynchronously
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            try {
-                apiService.createShortVideoApi(newShort)
-            } catch (e: Exception) {
-                // Offline fallback (local success)
-            }
-        }
+        val created = apiService.createShortVideoApi(newShort)
+        if (created.isFailure) return Result.failure(created.exceptionOrNull()!!)
+        val published = created.getOrThrow()
+        _shortVideos.update { listOf(published) + it.filterNot { video -> video.id == published.id } }
+        return Result.success(published)
     }
 
-    fun shareShortVideoToChat(chatId: String, shortVideo: ShortVideo) {
+    suspend fun shareShortVideoToChat(chatId: String, shortVideo: ShortVideo): Result<Unit> {
+        val shared = apiService.shareShortVideo(shortVideo.id, chatId)
+        if (shared.isFailure) return Result.failure(shared.exceptionOrNull()!!)
         val shareMessage = "🎬 MBoté Shorts de ${shortVideo.creatorName} (${shortVideo.creatorUsername}) :\n\"${shortVideo.caption}\"\n🎵 ${shortVideo.musicTitle} #MBoteShorts"
         sendMessage(chatId, shareMessage)
         _shortVideos.update { list ->
             list.map { v ->
-                if (v.id == shortVideo.id) v.copy(sharesCount = v.sharesCount + 1) else v
+                if (v.id == shortVideo.id) v.copy(sharesCount = shared.getOrThrow()) else v
             }
         }
+        return Result.success(Unit)
     }
+
+    suspend fun refreshShortComments(videoId: String): Result<Unit> {
+        val result = apiService.fetchShortVideoComments(videoId)
+        if (result.isFailure) return Result.failure(result.exceptionOrNull()!!)
+        val comments = result.getOrThrow()
+        _shortVideos.update { videos ->
+            videos.map { if (it.id == videoId) it.copy(comments = comments, commentsCount = comments.size) else it }
+        }
+        return Result.success(Unit)
+    }
+
+    suspend fun markShortViewed(videoId: String): Result<Unit> = apiService.markShortViewed(videoId)
 
     fun tipCreator(videoId: String, amountFcfa: Long, provider: String = "MBoté Pay / MTN MoMo") {
         _userProfile.update { u ->
@@ -1548,18 +1519,25 @@ class MboteRepository(
         return newChat
     }
 
-    fun createNewGroup(
+    suspend fun createGroupApi(
         groupName: String,
         description: String,
         members: List<SyncedContact>,
         avatar: String? = null,
-        initialMessage: String = "Groupe créé. Bienvenue à tous !"
-    ): Chat {
+        initialMessage: String = ""
+    ): Result<Chat> {
+        val participantIds = members.mapNotNull { it.id.toIntOrNull() }.distinct()
+        if (members.isNotEmpty() && participantIds.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Sélectionnez des contacts MBoté synchronisés avec le serveur."))
+        }
+        val createdId = apiService.createGroupApi(groupName, participantIds).getOrElse {
+            return Result.failure(it)
+        }
         val participantList = members.map { contact ->
             Participant(
                 id = contact.id,
                 name = contact.name,
-                avatar = contact.avatarUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+                avatar = contact.avatarUrl.orEmpty(),
                 role = "Membre"
             )
         } + Participant(
@@ -1569,40 +1547,36 @@ class MboteRepository(
             role = "Admin"
         )
 
-        val groupAvatar = if (!avatar.isNullOrBlank()) avatar else "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150&auto=format&fit=crop&q=80"
+        val groupAvatar = avatar.orEmpty()
 
         val newGroup = Chat(
+            id = createdId,
             name = groupName,
             avatar = groupAvatar,
-            lastMessage = initialMessage,
-            lastMessageTime = "À l'instant",
+            lastMessage = "",
+            lastMessageTime = "",
             isGroup = true,
             isChannel = false,
             participants = participantList,
-            messages = listOf(
-                Message(
-                    text = initialMessage,
-                    senderId = _userProfile.value.id,
-                    senderName = _userProfile.value.name,
-                    timestamp = timeFormat.format(Date()),
-                    status = MessageStatus.SENT,
-                    isMine = true
-                )
-            )
+            messages = emptyList()
         )
         _chats.update { listOf(newGroup) + it }
-        return newGroup
+        return Result.success(newGroup)
     }
 
-    fun createNewChannel(
+    suspend fun createChannelApi(
         channelName: String,
         description: String,
         isPublic: Boolean,
-        initialMessage: String = "Bienvenue sur la chaîne officielle MBoté !"
-    ): Chat {
+        initialMessage: String = ""
+    ): Result<String> {
+        val channelId = apiService.createChannelApi(channelName, description, isPublic, initialMessage).getOrElse {
+            return Result.failure(it)
+        }
         val newChannel = Chat(
+            id = channelId,
             name = channelName,
-            avatar = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
+            avatar = "",
             lastMessage = initialMessage,
             lastMessageTime = "À l'instant",
             isGroup = false,
@@ -1628,83 +1602,118 @@ class MboteRepository(
             )
         )
         _chats.update { listOf(newChannel) + it }
-        return newChannel
+        return Result.success(channelId)
     }
 
-    fun addStatus(text: String, imageUrl: String? = null, isAudioStatus: Boolean = false, durationSec: Int = 0) {
-        val newStatus = StatusItem(
-            userName = _userProfile.value.name,
-            userAvatar = _userProfile.value.avatar,
-            timestamp = "À l'instant",
-            text = text,
-            imageUrl = imageUrl,
-            isAudioStatus = isAudioStatus,
-            audioDurationSec = durationSec,
-            isMine = true
+    suspend fun addStatus(
+        text: String,
+        mediaDataUrl: String? = null,
+        mediaType: String = "text",
+        background: String? = null,
+        visibility: String = "friends"
+    ): Result<StatusItem> {
+        val content = mediaDataUrl?.takeIf(String::isNotBlank) ?: text.trim()
+        val request = CreateStatusRequest(
+            type = mediaType,
+            content = content,
+            background = background,
+            visibility = visibility,
+            caption = text.trim().takeIf(String::isNotBlank)
         )
-        _statuses.update { listOf(newStatus) + it }
+        val result = publicationApiService.createStatus(request, _userProfile.value.id)
+        result.onSuccess { created -> _statuses.update { listOf(created) + it.filterNot { status -> status.id == created.id } } }
+        return result
     }
 
-    fun toggleNewsLike(postId: String) {
-        _newsPosts.update { posts ->
-            posts.map { post ->
-                if (post.id == postId) {
-                    val newLiked = !post.isLiked
-                    val newCount = if (newLiked) post.likesCount + 1 else post.likesCount - 1
-                    post.copy(isLiked = newLiked, likesCount = newCount)
-                } else post
-            }
+    suspend fun addStatusFromDevice(
+        context: android.content.Context,
+        text: String,
+        mediaUri: android.net.Uri?,
+        mediaType: String,
+        background: String? = null,
+        visibility: String = "friends"
+    ): Result<StatusItem> {
+        val dataUrl = if (mediaUri != null && mediaType != "text") {
+            contentUriToDataUrl(context, mediaUri, 12 * 1024 * 1024).getOrElse { return Result.failure(it) }
+        } else null
+        return addStatus(text, dataUrl, mediaType, background, visibility)
+    }
+
+    suspend fun markStatusViewed(statusId: String): Result<Unit> = publicationApiService.markStatusViewed(statusId)
+
+    suspend fun toggleNewsLike(postId: String): Result<Unit> {
+        val result = publicationApiService.reactToActusPost(postId, "❤️")
+        if (result.isSuccess) publicationApiService.fetchActusPosts().onSuccess { _newsPosts.value = it }
+        return result
+    }
+
+    suspend fun shareNewsPost(postId: String): Result<Unit> {
+        val result = publicationApiService.shareActusPost(postId)
+        if (result.isFailure) return Result.failure(result.exceptionOrNull()!!)
+        _newsPosts.update { posts -> posts.map { if (it.id == postId) it.copy(sharesCount = result.getOrThrow()) else it } }
+        return Result.success(Unit)
+    }
+
+    suspend fun publishPostApi(
+        title: String,
+        content: String,
+        mediaUrl: String? = null,
+        category: String = "Communauté",
+        mediaType: String = "text",
+        durationSeconds: Int? = null
+    ): Result<NewsPost> {
+        val description = listOf(title.trim(), content.trim(), category.takeIf(String::isNotBlank)?.let { "Catégorie : $it" }).filterNotNull().filter(String::isNotBlank).joinToString("\n")
+        val type = mediaType.lowercase().takeIf { it in setOf("text", "image", "audio", "video") } ?: "text"
+        val request = CreateActusPostRequest(
+            type = type,
+            content = if (type == "text") description else mediaUrl.orEmpty(),
+            thumbnail = if (type == "text") null else description,
+            durationSeconds = durationSeconds
+        )
+        if (request.content.isBlank()) return Result.failure(IllegalArgumentException("Contenu de publication requis."))
+        val result = publicationApiService.createActusPost(request)
+        result.onSuccess { created -> _newsPosts.update { listOf(created) + it.filterNot { post -> post.id == created.id } } }
+        return result
+    }
+
+    suspend fun publishPostFromDevice(
+        context: android.content.Context,
+        title: String,
+        content: String,
+        mediaUri: android.net.Uri?,
+        category: String,
+        mediaType: String
+    ): Result<NewsPost> {
+        val media = when {
+            mediaUri == null || mediaType == "text" -> null
+            mediaType == "video" -> apiService.uploadPublicationVideo(context, mediaUri, "actus-videos").getOrElse { return Result.failure(it) }
+            else -> contentUriToDataUrl(context, mediaUri, 12 * 1024 * 1024).getOrElse { return Result.failure(it) }
         }
+        return publishPostApi(title, content, media, category, mediaType)
     }
 
-    fun addNewsPost(title: String, content: String, imageUrl: String? = null, category: String = "Communauté") {
-        val newPost = NewsPost(
-            id = "post_${System.currentTimeMillis()}",
-            authorName = _userProfile.value.name.ifBlank { "Loukatech" },
-            authorAvatar = _userProfile.value.avatar,
-            authorRole = "Statut",
-            category = category,
-            title = title,
-            content = if (title.isNotBlank() && !content.startsWith(title)) "$title\n$content" else content,
-            imageUrl = imageUrl ?: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80",
-            timestamp = "À l'instant",
-            likesCount = 0,
-            commentsCount = 0,
-            isLiked = false
-        )
-        _newsPosts.update { listOf(newPost) + it }
-    }
-
-    suspend fun publishPostApi(title: String, content: String, imageUrl: String? = null, category: String = "Communauté"): Result<NewsPost> {
-        val req = CreatePublicationRequest(
-            authorName = _userProfile.value.name.ifBlank { "Utilisateur MBoté" },
-            authorAvatar = _userProfile.value.avatar,
-            contentText = if (title.isNotBlank()) "$title\n$content" else content,
-            mediaUrl = imageUrl,
-            category = category
-        )
-        val res = publicationApiService.publishNewPost(req)
-        return if (res.isSuccess) {
-            val dto = res.getOrNull()!!
-            val newsPost = NewsPost(
-                id = dto.id,
-                authorName = dto.authorName,
-                authorAvatar = dto.authorAvatar,
-                authorRole = dto.authorTitle,
-                category = dto.category,
-                title = title,
-                content = dto.contentText,
-                imageUrl = dto.mediaUrl ?: imageUrl ?: "",
-                timestamp = dto.timestamp,
-                likesCount = dto.likesCount,
-                commentsCount = dto.commentsCount,
-                isLiked = dto.isLikedByMe
-            )
-            _newsPosts.update { listOf(newsPost) + it }
-            Result.success(newsPost)
-        } else {
-            addNewsPost(title, content, imageUrl, category)
-            Result.success(_newsPosts.value.first())
+    private suspend fun contentUriToDataUrl(
+        context: android.content.Context,
+        uri: android.net.Uri,
+        maxBytes: Int
+    ): Result<String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val resolver = context.contentResolver
+            val mime = resolver.getType(uri) ?: throw IllegalArgumentException("Type de média Android inconnu.")
+            val bytes = resolver.openInputStream(uri)?.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(64 * 1024)
+                var total = 0
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    total += read
+                    if (total > maxBytes) throw IllegalArgumentException("Média trop volumineux (maximum ${maxBytes / 1024 / 1024} Mo).")
+                    output.write(buffer, 0, read)
+                }
+                output.toByteArray()
+            } ?: throw IllegalArgumentException("Média Android inaccessible.")
+            "data:$mime;base64,${android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)}"
         }
     }
 
@@ -1760,23 +1769,14 @@ class MboteRepository(
         }
     }
 
-    fun addNewsComment(postId: String, text: String) {
-        val newComment = Comment(
-            authorName = _userProfile.value.name,
-            authorAvatar = _userProfile.value.avatar,
-            text = text,
-            timestamp = "À l'instant"
-        )
-        _newsPosts.update { posts ->
-            posts.map { post ->
-                if (post.id == postId) {
-                    post.copy(
-                        commentsCount = post.commentsCount + 1,
-                        comments = post.comments + newComment
-                    )
-                } else post
-            }
+    suspend fun addNewsComment(postId: String, text: String): Result<Unit> {
+        val result = publicationApiService.addActusComment(postId, text)
+        if (result.isFailure) return result
+        val comments = publicationApiService.fetchActusComments(postId)
+        comments.onSuccess { loaded ->
+            _newsPosts.update { posts -> posts.map { if (it.id == postId) it.copy(comments = loaded, commentsCount = loaded.size) else it } }
         }
+        return Result.success(Unit)
     }
 
     fun createMeeting(title: String, durationMin: Int = 45): MeetingItem {
@@ -2137,141 +2137,6 @@ class MboteRepository(
                 timestamp = "20 Août à 09:15",
                 durationText = "Manqué",
                 phoneNumber = "+242 06 444 3322"
-            )
-        )
-    }
-
-    private fun createInitialStatuses(): List<StatusItem> {
-        return listOf(
-            StatusItem(
-                userName = "Mon statut",
-                userAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                timestamp = "Appuyez pour ajouter",
-                isMine = true
-            ),
-            StatusItem(
-                userName = "Grace Makiese",
-                userAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                timestamp = "Il y a 25 min",
-                text = "En route pour le sommet Tech Afrique 2026 ! ✈️🌍",
-                imageUrl = "https://images.unsplash.com/photo-1501504905252-473c47e087f8?w=500&auto=format&fit=crop&q=80"
-            ),
-            StatusItem(
-                userName = "Yannick Nguesso",
-                userAvatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-                timestamp = "Il y a 2 h",
-                text = "Statut vocal : Récapitulatif du sprint architecture",
-                isAudioStatus = true,
-                audioDurationSec = 28
-            ),
-            StatusItem(
-                userName = "Sarah Mabiala",
-                userAvatar = "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
-                timestamp = "Il y a 5 h",
-                text = "Excellente journée à tous depuis Brazzaville ☀️"
-            )
-        )
-    }
-
-    private fun createInitialNews(): List<NewsPost> {
-        return listOf(
-            NewsPost(
-                id = "post_1",
-                authorName = "Since",
-                authorAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                authorRole = "Statut",
-                category = "Communauté",
-                title = "",
-                content = "Nouvelle actu\nLa sagesse ne trahit jamais\n#MBoté",
-                imageUrl = null,
-                timestamp = "05 août 2026 à 00:29",
-                likesCount = 0,
-                commentsCount = 0,
-                isLiked = false
-            ),
-            NewsPost(
-                id = "post_2",
-                authorName = "ONDONGO Paul-wilfrid",
-                authorAvatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-                authorRole = "Statut",
-                category = "Actus",
-                title = "",
-                content = "Photo Actus\n#Congo #MBoté",
-                imageUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&auto=format&fit=crop&q=80",
-                timestamp = "01 août 2026 à 20:46",
-                likesCount = 1,
-                commentsCount = 0,
-                isLiked = true
-            ),
-            NewsPost(
-                id = "post_3",
-                authorName = "Loukatech",
-                authorAvatar = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
-                authorRole = "Statut",
-                category = "Tutoriel",
-                title = "",
-                content = "COMMENT CRÉER VOTRE COMPTE MBOTÉ\n1. Téléchargez l'application\n2. Entrez votre numéro de téléphone\n3. Validez le code OTP\n4. Profitez de l'expérience !\n#Congo #MBoté",
-                imageUrl = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80",
-                timestamp = "27 juil. 2026 à 21:32",
-                likesCount = 0,
-                commentsCount = 0,
-                isLiked = false
-            ),
-            NewsPost(
-                id = "post_4",
-                authorName = "JEAN MARTIN",
-                authorAvatar = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
-                authorRole = "Statut",
-                category = "Communauté",
-                title = "",
-                content = "Le rire au pleure 😭 😭 😭 😭 😭\nCatégorie : Communauté\n#Congo #MBoté",
-                imageUrl = "https://images.unsplash.com/photo-1519389950473-47ba0277781c?w=800&auto=format&fit=crop&q=80",
-                timestamp = "24 juil. 2026 à 13:11",
-                likesCount = 0,
-                commentsCount = 0,
-                isLiked = false
-            ),
-            NewsPost(
-                id = "post_5",
-                authorName = "Loukatech",
-                authorAvatar = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
-                authorRole = "Statut",
-                category = "Communauté",
-                title = "",
-                content = "Les futurs mariés 🎉 💍\nCatégorie : Communauté\n#Congo #MBoté",
-                imageUrl = "https://images.unsplash.com/photo-1511285560929-80b456fea0bc?w=800&auto=format&fit=crop&q=80",
-                timestamp = "22 juil. 2026 à 08:48",
-                likesCount = 1,
-                commentsCount = 0,
-                isLiked = true
-            ),
-            NewsPost(
-                id = "post_6",
-                authorName = "Since",
-                authorAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                authorRole = "Statut",
-                category = "Actualité",
-                title = "",
-                content = "Nouvelle actu\nIl fait beau ☀️\n#MBoté",
-                imageUrl = null,
-                timestamp = "21 juil. 2026 à 09:34",
-                likesCount = 0,
-                commentsCount = 0,
-                isLiked = false
-            ),
-            NewsPost(
-                id = "post_7",
-                authorName = "Loukatech",
-                authorAvatar = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
-                authorRole = "Statut",
-                category = "Technologie",
-                title = "",
-                content = "MBoté application africaine 🌍\n\"TOUT EN UN SEUL ESPACE\"\n#Congo #MBoté",
-                imageUrl = "https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800&auto=format&fit=crop&q=80",
-                timestamp = "20 juil. 2026 à 20:52",
-                likesCount = 1,
-                commentsCount = 0,
-                isLiked = true
             )
         )
     }
