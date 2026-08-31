@@ -268,6 +268,18 @@ private data class ConfirmQrLoginRequest(val pairingToken: String)
 private data class ApiErrorResponse(val error: String? = null, val message: String? = null, val code: String? = null)
 
 @Serializable
+data class MediaSearchItem(
+    val id: String,
+    val title: String = "",
+    val url: String,
+    val previewUrl: String = "",
+    val type: String = "gif"
+)
+
+@Serializable
+private data class MediaSearchResponse(val items: List<MediaSearchItem> = emptyList())
+
+@Serializable
 private data class PublicMastaUserDto(
     val id: JsonElement,
     val name: String = "",
@@ -448,6 +460,14 @@ class MboteApiService {
         ) { json ->
             MboteBackendConfig.jsonParser.decodeFromString<PendingOtpChallenge>(json)
         }
+    }
+
+    suspend fun searchGiphy(query: String, stickers: Boolean): Result<List<MediaSearchItem>> {
+        val safeQuery = java.net.URLEncoder.encode(query.trim().take(50), "UTF-8")
+        val type = if (stickers) "sticker" else "gif"
+        return executeHttpRequest<Unit, List<MediaSearchItem>>(
+            endpoint = "/media/search?type=$type&q=$safeQuery&limit=20"
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<MediaSearchResponse>(json).items }
     }
 
     suspend fun getRegistrationPublicConfig(): Result<RegistrationPublicConfig> =

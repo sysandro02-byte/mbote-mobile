@@ -278,6 +278,7 @@ class MainActivity : ComponentActivity() {
                                 onSendMediaMessage = { mediaUrl, isVideo, caption ->
                                     viewModel.sendMediaAttachment(activeChat!!.id, mediaUrl, isVideo, caption)
                                 },
+                                onSearchGiphy = { query, stickers -> viewModel.searchGiphy(query, stickers) },
                                 onToggleBlock = { shouldBlock ->
                                     if (shouldBlock) {
                                         viewModel.blockContact(partnerContactId)
@@ -504,6 +505,7 @@ class MainActivity : ComponentActivity() {
                                                                 onSendMessage = { text, replyTo -> viewModel.sendMessage(activeChat!!.id, text, replyTo) },
                                                                 onSendVoiceMessage = { audioPath, durationSec, replyTo -> viewModel.sendVoiceMessage(activeChat!!.id, audioPath, durationSec, replyTo) },
                                                                 onSendMediaMessage = { mediaUrl, isVideo, caption -> viewModel.sendMediaAttachment(activeChat!!.id, mediaUrl, isVideo, caption) },
+                                                                onSearchGiphy = { query, stickers -> viewModel.searchGiphy(query, stickers) },
                                                                 onToggleBlock = { shouldBlock ->
                                                                     if (shouldBlock) {
                                                                         viewModel.blockContact(partnerContactId)

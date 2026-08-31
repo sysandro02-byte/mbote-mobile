@@ -23,6 +23,8 @@ class MboteViewModel(
     private val contactsSyncService: ContactsSyncService = ContactsSyncService()
 ) : ViewModel() {
 
+    suspend fun searchGiphy(query: String, stickers: Boolean) = repository.apiService.searchGiphy(query, stickers)
+
     val userProfile = repository.userProfile
     val notifications = repository.notifications
     val chats = repository.chats

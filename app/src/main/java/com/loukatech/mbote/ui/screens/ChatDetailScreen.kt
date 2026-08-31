@@ -42,6 +42,7 @@ import com.loukatech.mbote.model.*
 import com.loukatech.mbote.service.AudioRecorderManager
 import com.loukatech.mbote.service.ChatExportManager
 import com.loukatech.mbote.service.ChatExportResult
+import com.loukatech.mbote.service.api.MediaSearchItem
 import com.loukatech.mbote.ui.components.AudioPlaybackWaveform
 import com.loukatech.mbote.ui.components.ChatExportDialog
 import com.loukatech.mbote.ui.components.ChatSettingsDialog
@@ -84,6 +85,7 @@ fun ChatDetailScreen(
     onSendMessage: (String, Message?) -> Unit,
     onSendVoiceMessage: (audioPath: String, durationSec: Int, replyTo: Message?) -> Unit = { _, _, _ -> },
     onSendMediaMessage: (mediaUrl: String, isVideo: Boolean, caption: String) -> Unit = { _, _, _ -> },
+    onSearchGiphy: suspend (query: String, stickers: Boolean) -> Result<List<MediaSearchItem>> = { _, _ -> Result.success(emptyList()) },
     onToggleBlock: (Boolean) -> Unit = {},
     onReaction: (messageId: String, emoji: String) -> Unit,
     onDeleteMessage: (messageId: String) -> Unit,
@@ -121,6 +123,11 @@ fun ChatDetailScreen(
     var mediaPickerIsVideo by remember { mutableStateOf(false) }
     var showEmojiGifPanel by remember { mutableStateOf(false) }
     var emojiGifTab by remember { mutableIntStateOf(0) } // 0: Emojis, 1: GIFs
+    var mediaSearchQuery by remember { mutableStateOf("") }
+    var searchStickers by remember { mutableStateOf(false) }
+    var mediaSearchItems by remember { mutableStateOf<List<MediaSearchItem>>(emptyList()) }
+    var mediaSearchLoading by remember { mutableStateOf(false) }
+    var mediaSearchError by remember { mutableStateOf<String?>(null) }
 
     val recorderManager = remember { AudioRecorderManager(context) }
     val listState = rememberLazyListState()
@@ -1026,17 +1033,63 @@ fun ChatDetailScreen(
                                         }
                                     }
                                 } else {
-                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Icon(Icons.Outlined.GifBox, contentDescription = null, tint = MbotePurplePrimary)
-                                            Spacer(modifier = Modifier.height(8.dp))
-                                            Text("Fournisseur GIF/stickers non configuré", fontWeight = FontWeight.Bold)
-                                            Text(
-                                                "Ajoutez GIPHY_API_KEY au fichier .env pour activer la recherche réelle.",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                textAlign = TextAlign.Center,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            OutlinedTextField(
+                                                value = mediaSearchQuery,
+                                                onValueChange = { mediaSearchQuery = it.take(50) },
+                                                placeholder = { Text("Rechercher sur GIPHY") },
+                                                singleLine = true,
+                                                modifier = Modifier.weight(1f)
                                             )
+                                            IconButton(
+                                                enabled = mediaSearchQuery.isNotBlank() && !mediaSearchLoading,
+                                                onClick = {
+                                                    coroutineScope.launch {
+                                                        mediaSearchLoading = true
+                                                        mediaSearchError = null
+                                                        onSearchGiphy(mediaSearchQuery, searchStickers)
+                                                            .onSuccess { mediaSearchItems = it }
+                                                            .onFailure { mediaSearchError = it.message }
+                                                        mediaSearchLoading = false
+                                                    }
+                                                }
+                                            ) { Icon(Icons.Default.Search, contentDescription = "Rechercher") }
+                                        }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            FilterChip(selected = !searchStickers, onClick = { searchStickers = false }, label = { Text("GIF") })
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            FilterChip(selected = searchStickers, onClick = { searchStickers = true }, label = { Text("Stickers") })
+                                            Spacer(modifier = Modifier.weight(1f))
+                                            Text("Powered by GIPHY", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                        if (mediaSearchLoading) {
+                                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                        }
+                                        mediaSearchError?.let {
+                                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                        }
+                                        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                                            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
+                                            modifier = Modifier.fillMaxSize(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            items(mediaSearchItems.size) { index ->
+                                                val media = mediaSearchItems[index]
+                                                AsyncImage(
+                                                    model = media.previewUrl.ifBlank { media.url },
+                                                    contentDescription = media.title,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier
+                                                        .aspectRatio(1f)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .clickable {
+                                                            onSendMediaMessage(media.url, false, if (media.type == "sticker") "[Sticker]" else "[GIF]")
+                                                            showEmojiGifPanel = false
+                                                        }
+                                                )
+                                            }
                                         }
                                     }
                                 }
