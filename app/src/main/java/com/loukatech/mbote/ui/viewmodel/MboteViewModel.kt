@@ -119,7 +119,18 @@ class MboteViewModel(
     private val _publicationError = MutableStateFlow<String?>(null)
     val publicationError: StateFlow<String?> = _publicationError.asStateFlow()
 
-    fun clearPublicationError() { _publicationError.value = null }
+    init {
+        viewModelScope.launch {
+            repository.messagingError.collect { error ->
+                if (!error.isNullOrBlank()) _publicationError.value = error
+            }
+        }
+    }
+
+    fun clearPublicationError() {
+        _publicationError.value = null
+        repository.clearMessagingError()
+    }
 
     fun triggerDataSync() {
         if (!repository.isAuthenticated.value || com.loukatech.mbote.service.api.MboteBackendConfig.authToken.isNullOrBlank()) {
@@ -279,12 +290,7 @@ class MboteViewModel(
     }
 
     fun isFriend(chatName: String): Boolean {
-        if (chatName == "Luna AI - MBoté Assistant" || 
-            chatName == "MBoté Actualités Officielles" || 
-            chatName == "Tech Hub Brazzaville 🇨🇬" || 
-            chatName.contains("🤖") || 
-            chatName.contains("Official") || 
-            chatName.contains("Officiel")) {
+        if (chatName.contains("Official") || chatName.contains("Officiel")) {
             return true
         }
         val mastaList = mastaUsers.value
@@ -293,9 +299,7 @@ class MboteViewModel(
             user.subType == MastaSubOption.FRIENDS || 
             user.subType == MastaSubOption.ONLINE || 
             user.subType == MastaSubOption.CITIES
-        } else {
-            chatName.equals("Grace Makiese", ignoreCase = true)
-        }
+        } else false
     }
 
     // Real-time socket typing states map (chatId -> PartnerTypingState)
@@ -481,9 +485,11 @@ class MboteViewModel(
         if (existing != null) {
             openChat(existing.id)
         } else {
-            val contact = SyncedContact(name = name, phoneNumber = "+242 06 000 0000", isMboteUser = true)
-            val id = repository.getOrCreateChatForContact(contact)
-            openChat(id)
+            viewModelScope.launch {
+                repository.createDirectChat(name, "")
+                    .onSuccess { openChat(it.id) }
+                    .onFailure { _publicationError.value = it.message ?: "Discussion impossible." }
+            }
         }
     }
 
@@ -561,79 +567,14 @@ class MboteViewModel(
         }
     }
 
-    private fun simulatePartnerResponse(chatId: String, userText: String) {
-        typingJob?.cancel()
-        typingJob = viewModelScope.launch {
-            val chat = repository.chats.value.find { it.id == chatId } ?: return@launch
-            
-            if (chat.isAI) {
-                // Luna AI is handled in repository, just simulate typing for visual polish!
-                _isPartnerTyping.value = true
-                delay(2000)
-                _isPartnerTyping.value = false
-                return@launch
-            }
-            if (chat.isChannel) return@launch
-
-            // Delay first, then show typing, then append the response
-            delay(800)
-            _isPartnerTyping.value = true
-            com.loukatech.mbote.service.MboteSocketManager.onRemotePartnerTypingReceived(chatId, chat.name, true)
-            delay(2200)
-            _isPartnerTyping.value = false
-            com.loukatech.mbote.service.MboteSocketManager.onRemotePartnerTypingReceived(chatId, chat.name, false)
-
-            val replyText = when {
-                userText.contains("salut", ignoreCase = true) || userText.contains("bonjour", ignoreCase = true) || userText.contains("mbote", ignoreCase = true) -> {
-                    "Mbote ! Comment tu vas ? 😊 Ça me fait plaisir de te lire."
-                }
-                userText.contains("ça va", ignoreCase = true) || userText.contains("comment tu vas", ignoreCase = true) -> {
-                    "Je vais super bien, merci ! Et toi, la famille, le travail ? 🇨🇬"
-                }
-                userText.contains("ok", ignoreCase = true) || userText.contains("d'accord", ignoreCase = true) -> {
-                    "Super ! On fait comme ça alors. 👍"
-                }
-                userText.contains("merci", ignoreCase = true) -> {
-                    "Avec grand plaisir ! N'hésite pas si tu as besoin d'autre chose. ✨"
-                }
-                userText.contains("reunion", ignoreCase = true) || userText.contains("réunion", ignoreCase = true) -> {
-                    "Oui, je suis disponible pour la réunion sur MBoté Meetings. Envoie-moi le lien !"
-                }
-                userText.contains("argent", ignoreCase = true) || userText.contains("pay", ignoreCase = true) -> {
-                    "Ah, parfait ! On peut utiliser le service sécurisé MBoté Pay pour le transfert. 💳"
-                }
-                else -> {
-                    "C'est noté ! Je te recontacte un peu plus tard, je suis un peu occupé là. Prends soin de toi ! 🙏"
-                }
-            }
-
-            val partner = chat.participants.firstOrNull { it.id != "current_user" }
-            val senderId = partner?.id ?: "partner"
-            val senderName = partner?.name ?: chat.name
-            val senderAvatar = partner?.avatar ?: chat.avatar
-
-            val replyMessage = Message(
-                id = "msg_sim_${System.currentTimeMillis()}",
-                text = replyText,
-                senderId = senderId,
-                senderName = senderName,
-                senderAvatar = senderAvatar,
-                timestamp = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date()),
-                status = MessageStatus.READ,
-                isMine = false
-            )
-
-            repository.appendSimulatedMessage(chatId, replyMessage)
-        }
-    }
-
     fun sendVoiceMessage(
+        context: android.content.Context,
         chatId: String,
         audioPath: String,
         durationSec: Int,
         replyTo: Message? = null
     ) {
-        repository.sendVoiceMessage(chatId, audioPath, durationSec, replyTo)
+        repository.sendVoiceMessage(context, chatId, audioPath, durationSec, replyTo)
     }
 
     fun sendAronQuestion(chatId: String, question: AronQuestion) {
@@ -699,10 +640,21 @@ class MboteViewModel(
 
     fun createChat(name: String, message: String, isGroup: Boolean) {
         if (name.isNotBlank() && message.isNotBlank()) {
-            val newChat = repository.createNewChat(name.trim(), message.trim(), isGroup)
-            _showNewChatDialog.value = false
-            _showQuickActionsMenu.value = false
-            openChat(newChat.id)
+            if (isGroup) {
+                _publicationError.value = "Utilisez « Créer un groupe » pour sélectionner de vrais membres MBoté."
+                return
+            }
+            viewModelScope.launch {
+                _isPublishing.value = true
+                repository.createDirectChat(name.trim(), message.trim())
+                    .onSuccess { chat ->
+                        _showNewChatDialog.value = false
+                        _showQuickActionsMenu.value = false
+                        openChat(chat.id)
+                    }
+                    .onFailure { _publicationError.value = it.message ?: "Discussion impossible." }
+                _isPublishing.value = false
+            }
         }
     }
 
@@ -729,6 +681,7 @@ class MboteViewModel(
     }
 
     fun sendMediaAttachment(
+        context: android.content.Context,
         chatId: String,
         mediaUrl: String,
         isVideo: Boolean,
@@ -736,7 +689,7 @@ class MboteViewModel(
         replyTo: Message? = null
     ) {
         val mediaType = if (isVideo) MediaType.VIDEO else MediaType.IMAGE
-        repository.sendMediaMessage(chatId, mediaUrl, mediaType, caption, replyTo)
+        repository.sendMediaMessage(context, chatId, mediaUrl, mediaType, caption, replyTo)
     }
 
     fun createChannel(name: String, description: String, isPublic: Boolean, initialPost: String) {

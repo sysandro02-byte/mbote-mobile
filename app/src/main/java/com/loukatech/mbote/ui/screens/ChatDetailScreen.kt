@@ -861,7 +861,7 @@ fun ChatDetailScreen(
                                             fontSize = 14.sp
                                         )
                                     },
-                                    trailingIcon = if (chat.id == "chat_luna") {
+                                    trailingIcon = if (chat.isAI) {
                                         {
                                             IconButton(onClick = { showLunaVoiceCommandSheet = true }) {
                                                 Icon(
@@ -2359,23 +2359,23 @@ fun MediaPickerDialog(
     onDismiss: () -> Unit,
     onSendMedia: (url: String, caption: String) -> Unit
 ) {
-    val sampleImages = listOf(
-        "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800",
-        "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=800",
-        "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=800",
-        "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=800",
-        "https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=800",
-        "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800"
-    )
-
-    val sampleVideos = listOf(
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
-    )
-
-    var selectedUrl by remember { mutableStateOf(if (isVideo) sampleVideos[0] else sampleImages[0]) }
+    var selectedUrl by remember { mutableStateOf<String?>(null) }
     var caption by remember { mutableStateOf("") }
+    var pickerOpened by remember { mutableStateOf(false) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) {
+            onDismiss()
+        } else {
+            selectedUrl = uri.toString()
+        }
+    }
+
+    LaunchedEffect(isVideo) {
+        if (!pickerOpened) {
+            pickerOpened = true
+            picker.launch(if (isVideo) "video/*" else "image/*")
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2397,55 +2397,24 @@ fun MediaPickerDialog(
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = if (isVideo) "Sélectionnez une vidéo de votre galerie :" else "Sélectionnez une photo de votre galerie :",
+                    text = if (selectedUrl == null) "Ouverture de la galerie…" else "Fichier sélectionné depuis votre appareil.",
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
-
-                // Presets gallery grid / row
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    val mediaList = if (isVideo) sampleVideos else sampleImages
-                    items(mediaList) { itemUrl ->
-                        val isSelected = selectedUrl == itemUrl
-                        Box(
-                            modifier = Modifier
-                                .size(70.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .border(
-                                    BorderStroke(
-                                        if (isSelected) 3.dp else 1.dp,
-                                        if (isSelected) MbotePurplePrimary else Color.Transparent
-                                    ),
-                                    RoundedCornerShape(12.dp)
-                                )
-                                .clickable { selectedUrl = itemUrl }
+                if (selectedUrl != null) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (isVideo) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color(0xFF1E293B)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.PlayCircleFilled,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                }
-                            } else {
-                                AsyncImage(
-                                    model = itemUrl,
-                                    contentDescription = "Photo option",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
+                            Icon(if (isVideo) Icons.Default.Videocam else Icons.Default.Image, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (isVideo) "Vidéo prête à envoyer" else "Photo prête à envoyer", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -2463,7 +2432,8 @@ fun MediaPickerDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSendMedia(selectedUrl, caption) },
+                onClick = { selectedUrl?.let { onSendMedia(it, caption) } },
+                enabled = selectedUrl != null,
                 colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary),
                 shape = RoundedCornerShape(12.dp)
             ) {

@@ -12,7 +12,12 @@ import java.util.Locale
 import java.util.UUID
 import java.io.File
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -148,6 +153,11 @@ class MboteRepository(
     private val _chats = MutableStateFlow<List<Chat>>(emptyList())
     val chats: StateFlow<List<Chat>> = _chats.asStateFlow()
 
+    private val _messagingError = MutableStateFlow<String?>(null)
+    val messagingError: StateFlow<String?> = _messagingError.asStateFlow()
+
+    fun clearMessagingError() { _messagingError.value = null }
+
     private val _calls = MutableStateFlow<List<CallItem>>(emptyList())
     val calls: StateFlow<List<CallItem>> = _calls.asStateFlow()
 
@@ -215,7 +225,54 @@ class MboteRepository(
         return _blockedContactIds.value.contains(contactId)
     }
 
+    private fun appendOptimisticMessage(chatId: String, message: Message, preview: String) {
+        _chats.update { chatList ->
+            chatList.map { chat ->
+                if (chat.id == chatId) chat.copy(
+                    lastMessage = preview,
+                    lastMessageTime = message.timestamp,
+                    messages = chat.messages + message
+                ) else chat
+            }
+        }
+    }
+
+    private fun reconcileMessage(chatId: String, localId: String, remote: Message) {
+        _chats.update { chatList ->
+            chatList.map { chat ->
+                if (chat.id != chatId) chat else {
+                    val messages = chat.messages
+                        .filterNot { it.id == remote.id && it.id != localId }
+                        .map { if (it.id == localId) remote else it }
+                    chat.copy(
+                        lastMessage = remote.text,
+                        lastMessageTime = remote.timestamp,
+                        messages = messages
+                    )
+                }
+            }
+        }
+    }
+
+    private fun rejectOptimisticMessage(chatId: String, localId: String, error: Throwable?) {
+        _chats.update { chatList ->
+            chatList.map { chat ->
+                if (chat.id != chatId) chat else {
+                    val messages = chat.messages.filterNot { it.id == localId }
+                    val last = messages.lastOrNull()
+                    chat.copy(
+                        lastMessage = last?.text.orEmpty(),
+                        lastMessageTime = last?.timestamp ?: chat.lastMessageTime,
+                        messages = messages
+                    )
+                }
+            }
+        }
+        _messagingError.value = error?.message ?: "Le message n’a pas pu être envoyé."
+    }
+
     fun sendMediaMessage(
+        context: android.content.Context,
         chatId: String,
         mediaUrl: String,
         mediaType: MediaType,
@@ -229,7 +286,9 @@ class MboteRepository(
             mediaType == MediaType.IMAGE -> "📷 Photo"
             else -> "Fichier média"
         }
+        val localId = "local_${UUID.randomUUID()}"
         val newMsg = Message(
+            id = localId,
             text = caption.ifBlank { if (mediaType == MediaType.VIDEO) "Vidéo" else "Photo" },
             senderId = _userProfile.value.id,
             senderName = _userProfile.value.name,
@@ -242,29 +301,26 @@ class MboteRepository(
             replyToText = replyTo?.text,
             replyToSender = replyTo?.senderName
         )
-        _chats.update { chatList ->
-            chatList.map { c ->
-                if (c.id == chatId) {
-                    val updatedMessages = c.messages + newMsg
-                    c.copy(
-                        lastMessage = previewText,
-                        lastMessageTime = currentTime,
-                        messages = updatedMessages
-                    )
-                } else c
-            }
-        }
+        appendOptimisticMessage(chatId, newMsg, previewText)
 
-        // Post message to backend REST API asynchronously
         CoroutineScope(Dispatchers.IO).launch {
+            val persistedUrl = if (mediaUrl.startsWith("content:") || mediaUrl.startsWith("file:")) {
+                contentUriToDataUrl(context, android.net.Uri.parse(mediaUrl), 12 * 1024 * 1024)
+                    .getOrElse {
+                        rejectOptimisticMessage(chatId, localId, it)
+                        return@launch
+                    }
+            } else mediaUrl
             apiService.sendMessageApi(
                 SendMessageDto(
                     chatId = chatId,
                     text = previewText,
                     mediaType = if (mediaType == MediaType.VIDEO) "VIDEO" else "IMAGE",
-                    mediaUrl = mediaUrl
+                    mediaUrl = persistedUrl,
+                    replyToMessageId = replyTo?.id
                 )
-            )
+            ).onSuccess { reconcileMessage(chatId, localId, it.toMessage()) }
+                .onFailure { rejectOptimisticMessage(chatId, localId, it) }
         }
     }
 
@@ -273,7 +329,9 @@ class MboteRepository(
         val chat = _chats.value.find { it.id == chatId }
         val disappearingSec = chat?.disappearingTimerSec ?: 0
 
+        val localId = "local_${UUID.randomUUID()}"
         val newMessage = Message(
+            id = localId,
             text = text,
             senderId = _userProfile.value.id,
             senderName = _userProfile.value.name,
@@ -286,18 +344,7 @@ class MboteRepository(
             disappearingDurationSec = disappearingSec
         )
 
-        _chats.update { chatList ->
-            chatList.map { c ->
-                if (c.id == chatId) {
-                    val updatedMessages = c.messages + newMessage
-                    c.copy(
-                        lastMessage = text,
-                        lastMessageTime = currentTime,
-                        messages = updatedMessages
-                    )
-                } else c
-            }
-        }
+        appendOptimisticMessage(chatId, newMessage, text)
 
         // Post message to backend REST API asynchronously
         CoroutineScope(Dispatchers.IO).launch {
@@ -305,9 +352,11 @@ class MboteRepository(
                 SendMessageDto(
                     chatId = chatId,
                     text = text,
-                    mediaType = "TEXT"
+                    mediaType = "TEXT",
+                    replyToMessageId = replyTo?.id
                 )
-            )
+            ).onSuccess { reconcileMessage(chatId, localId, it.toMessage()) }
+                .onFailure { rejectOptimisticMessage(chatId, localId, it) }
         }
 
         // If chatting with AI, generate an instant response
@@ -317,6 +366,7 @@ class MboteRepository(
     }
 
     fun sendVoiceMessage(
+        context: android.content.Context,
         chatId: String,
         audioPath: String,
         durationSec: Int,
@@ -327,7 +377,9 @@ class MboteRepository(
         val chat = _chats.value.find { it.id == chatId }
         val disappearingSec = chat?.disappearingTimerSec ?: 0
 
+        val localId = "local_${UUID.randomUUID()}"
         val voiceMsg = Message(
+            id = localId,
             text = "🎤 Message vocal ($formattedDuration)",
             senderId = _userProfile.value.id,
             senderName = _userProfile.value.name,
@@ -343,29 +395,34 @@ class MboteRepository(
             disappearingDurationSec = disappearingSec
         )
 
-        _chats.update { chatList ->
-            chatList.map { c ->
-                if (c.id == chatId) {
-                    val updatedMessages = c.messages + voiceMsg
-                    c.copy(
-                        lastMessage = "🎤 Message vocal ($formattedDuration)",
-                        lastMessageTime = currentTime,
-                        messages = updatedMessages
-                    )
-                } else c
-            }
-        }
+        appendOptimisticMessage(chatId, voiceMsg, "🎤 Message vocal ($formattedDuration)")
 
         // Post message to backend REST API asynchronously
         CoroutineScope(Dispatchers.IO).launch {
+            val audioFile = File(audioPath)
+            if (!audioFile.isFile || audioFile.length() <= 0L || audioFile.length() > 12 * 1024 * 1024) {
+                rejectOptimisticMessage(chatId, localId, IllegalArgumentException("Le message vocal est introuvable ou trop volumineux."))
+                return@launch
+            }
+            val extension = audioFile.extension.lowercase()
+            val mime = when (extension) {
+                "m4a", "mp4" -> "audio/mp4"
+                "ogg", "opus" -> "audio/ogg"
+                "wav" -> "audio/wav"
+                else -> "audio/mpeg"
+            }
+            val encoded = android.util.Base64.encodeToString(audioFile.readBytes(), android.util.Base64.NO_WRAP)
+            val remoteAudioUrl = "data:$mime;base64,$encoded"
             apiService.sendMessageApi(
                 SendMessageDto(
                     chatId = chatId,
                     text = "🎤 Message vocal ($formattedDuration)",
                     mediaType = "AUDIO",
-                    mediaUrl = audioPath
+                    mediaUrl = remoteAudioUrl,
+                    replyToMessageId = replyTo?.id
                 )
-            )
+            ).onSuccess { reconcileMessage(chatId, localId, it.toMessage()) }
+                .onFailure { rejectOptimisticMessage(chatId, localId, it) }
         }
 
         if (chat?.isAI == true) {
@@ -373,16 +430,53 @@ class MboteRepository(
         }
     }
 
+    private fun sendStructuredChatMessage(
+        chatId: String,
+        message: Message,
+        preview: String,
+        apiMediaType: String,
+        metadata: JsonObject
+    ) {
+        appendOptimisticMessage(chatId, message, preview)
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.sendMessageApi(
+                SendMessageDto(
+                    chatId = chatId,
+                    text = message.text,
+                    mediaType = apiMediaType,
+                    metadata = metadata
+                )
+            ).onSuccess { reconcileMessage(chatId, message.id, it.toMessage()) }
+                .onFailure { rejectOptimisticMessage(chatId, message.id, it) }
+        }
+    }
+
+    private inline fun <reified T> decodeMessageMetadata(metadata: JsonObject?, key: String): T? {
+        return metadata?.get(key)?.let { element ->
+            runCatching { json.decodeFromString<T>(element.toString()) }.getOrNull()
+        }
+    }
+
     fun MessageDto.toMessage(): Message {
+        val displayTime = timestamp.substringAfter('T', timestamp).take(5).ifBlank { "À l'instant" }
+        val mine = isMine || senderId == _userProfile.value.id
+        val poll = decodeMessageMetadata<PollData>(metadata, "pollData")
+        val location = decodeMessageMetadata<LocationData>(metadata, "locationData")
+        val payment = decodeMessageMetadata<PaymentTransferData>(metadata, "paymentData")
+        val aron = decodeMessageMetadata<AronQuestion>(metadata, "aronQuestion")
         return Message(
             id = this.id,
             text = this.text,
             senderId = this.senderId,
             senderName = this.senderName,
             senderAvatar = this.senderAvatar,
-            timestamp = this.timestamp,
-            status = MessageStatus.READ,
-            isMine = this.isMine,
+            timestamp = displayTime,
+            status = when (status.lowercase()) {
+                "read" -> MessageStatus.READ
+                "delivered" -> MessageStatus.DELIVERED
+                else -> MessageStatus.SENT
+            },
+            isMine = mine,
             isEncrypted = true,
             mediaType = when (this.mediaType) {
                 "IMAGE" -> MediaType.IMAGE
@@ -395,7 +489,17 @@ class MboteRepository(
                 "ARON_QUESTION" -> MediaType.ARON_QUESTION
                 else -> MediaType.NONE
             },
-            mediaUrl = this.mediaUrl
+            mediaUrl = this.mediaUrl,
+            audioDurationSec = this.audioDurationSec,
+            isRecalled = this.isRecalled,
+            isStarred = this.isStarred,
+            replyToText = this.replyToText,
+            replyToSender = this.replyToSender,
+            reactions = this.reactions,
+            pollData = poll,
+            locationData = location,
+            paymentData = payment,
+            aronQuestion = aron
         )
     }
 
@@ -449,10 +553,20 @@ class MboteRepository(
                     emptyList()
                 }
                 
+                val participants = chatDto.participants.map { participant ->
+                    Participant(
+                        id = participant.id,
+                        name = participant.name,
+                        avatar = participant.avatar,
+                        isOnline = participant.isOnline,
+                        role = participant.role
+                    )
+                }
+                val other = participants.firstOrNull { it.id != _userProfile.value.id }
                 Chat(
                     id = chatDto.id,
-                    name = chatDto.name,
-                    avatar = chatDto.avatar,
+                    name = chatDto.name.takeUnless { it == "Discussion" || it.isBlank() } ?: other?.name ?: "Discussion",
+                    avatar = chatDto.avatar.ifBlank { other?.avatar.orEmpty() },
                     lastMessage = chatDto.lastMessage,
                     lastMessageTime = chatDto.lastMessageTime,
                     unreadCount = chatDto.unreadCount,
@@ -461,7 +575,8 @@ class MboteRepository(
                     isChannel = chatDto.isChannel,
                     isAI = false,
                     isVerified = false,
-                    participants = emptyList(),
+                    participants = participants,
+                    disappearingTimerSec = chatDto.disappearingDurationSec,
                     messages = messagesList
                 )
             }
@@ -538,10 +653,10 @@ class MboteRepository(
 
     fun sendAronQuestion(chatId: String, question: AronQuestion) {
         val currentTime = timeFormat.format(Date())
-        val chat = _chats.value.find { it.id == chatId }
         val msgText = "🔮 Question d'Aron #${question.id} :\n« ${question.questionFr} »"
 
         val aronMsg = Message(
+            id = "local_${UUID.randomUUID()}",
             text = msgText,
             senderId = _userProfile.value.id,
             senderName = _userProfile.value.name,
@@ -553,21 +668,13 @@ class MboteRepository(
             aronQuestion = question
         )
 
-        _chats.update { chatList ->
-            chatList.map { c ->
-                if (c.id == chatId) {
-                    c.copy(
-                        lastMessage = "🔮 ${question.category} : Question #${question.id}",
-                        lastMessageTime = currentTime,
-                        messages = c.messages + aronMsg
-                    )
-                } else c
-            }
-        }
-
-        if (chat?.isAI == true) {
-            triggerAiResponse(chatId, "Réponds à la question d'Aron: ${question.questionFr}")
-        }
+        sendStructuredChatMessage(
+            chatId = chatId,
+            message = aronMsg,
+            preview = "🔮 ${question.category} : Question #${question.id}",
+            apiMediaType = "ARON_QUESTION",
+            metadata = buildJsonObject { put("aronQuestion", json.parseToJsonElement(json.encodeToString(question))) }
+        )
     }
 
     fun sendPoll(chatId: String, question: String, optionTexts: List<String>, isMultipleChoice: Boolean = false) {
@@ -583,6 +690,7 @@ class MboteRepository(
         )
 
         val pollMessage = Message(
+            id = "local_${UUID.randomUUID()}",
             text = "📊 Sondage : $question",
             senderId = _userProfile.value.id,
             senderName = _userProfile.value.name,
@@ -594,57 +702,17 @@ class MboteRepository(
             pollData = pollData
         )
 
-        _chats.update { chatList ->
-            chatList.map { c ->
-                if (c.id == chatId) {
-                    c.copy(
-                        lastMessage = "📊 Sondage : $question",
-                        lastMessageTime = currentTime,
-                        messages = c.messages + pollMessage
-                    )
-                } else c
-            }
-        }
+        sendStructuredChatMessage(
+            chatId = chatId,
+            message = pollMessage,
+            preview = "📊 Sondage : $question",
+            apiMediaType = "POLL",
+            metadata = buildJsonObject { put("pollData", json.parseToJsonElement(json.encodeToString(pollData))) }
+        )
     }
 
     fun votePoll(chatId: String, messageId: String, optionId: String) {
-        val myUserId = _userProfile.value.id
-        _chats.update { chatList ->
-            chatList.map { chat ->
-                if (chat.id == chatId) {
-                    val updatedMessages = chat.messages.map { msg ->
-                        if (msg.id == messageId && msg.pollData != null) {
-                            val poll = msg.pollData
-                            val updatedOptions = poll.options.map { opt ->
-                                val hasVoted = opt.voterIds.contains(myUserId)
-                                if (opt.id == optionId) {
-                                    if (hasVoted) {
-                                        opt.copy(
-                                            votesCount = maxOf(0, opt.votesCount - 1),
-                                            voterIds = opt.voterIds - myUserId
-                                        )
-                                    } else {
-                                        opt.copy(
-                                            votesCount = opt.votesCount + 1,
-                                            voterIds = opt.voterIds + myUserId
-                                        )
-                                    }
-                                } else {
-                                    if (!poll.isMultipleChoice && !hasVoted) {
-                                        opt.copy(
-                                            votesCount = maxOf(0, opt.votesCount - 1),
-                                            voterIds = opt.voterIds - myUserId
-                                        )
-                                    } else opt
-                                }
-                            }
-                            msg.copy(pollData = poll.copy(options = updatedOptions))
-                        } else msg
-                    }
-                    chat.copy(messages = updatedMessages)
-                } else chat
-            }
-        }
+        _messagingError.value = "Le vote de sondage attend l'endpoint backend MBoté dédié. Aucun vote local simulé n'a été enregistré."
     }
 
     fun sendLocation(
@@ -665,6 +733,7 @@ class MboteRepository(
         )
 
         val locMessage = Message(
+            id = "local_${UUID.randomUUID()}",
             text = if (isLive) "📍 Position en direct partagée ($durationMinutes min)" else "📍 Lieu : $placeName",
             senderId = _userProfile.value.id,
             senderName = _userProfile.value.name,
@@ -676,17 +745,13 @@ class MboteRepository(
             locationData = locData
         )
 
-        _chats.update { chatList ->
-            chatList.map { c ->
-                if (c.id == chatId) {
-                    c.copy(
-                        lastMessage = locMessage.text,
-                        lastMessageTime = currentTime,
-                        messages = c.messages + locMessage
-                    )
-                } else c
-            }
-        }
+        sendStructuredChatMessage(
+            chatId = chatId,
+            message = locMessage,
+            preview = locMessage.text,
+            apiMediaType = "LOCATION",
+            metadata = buildJsonObject { put("locationData", json.parseToJsonElement(json.encodeToString(locData))) }
+        )
     }
 
     fun sendPaymentTransfer(
@@ -707,6 +772,7 @@ class MboteRepository(
 
         val msgText = if (isRequest) "💳 Demande de paiement : $amount ($provider)" else "💸 Transfert envoyé : $amount via $provider"
         val payMessage = Message(
+            id = "local_${UUID.randomUUID()}",
             text = msgText,
             senderId = _userProfile.value.id,
             senderName = _userProfile.value.name,
@@ -718,17 +784,13 @@ class MboteRepository(
             paymentData = paymentData
         )
 
-        _chats.update { chatList ->
-            chatList.map { c ->
-                if (c.id == chatId) {
-                    c.copy(
-                        lastMessage = msgText,
-                        lastMessageTime = currentTime,
-                        messages = c.messages + payMessage
-                    )
-                } else c
-            }
-        }
+        sendStructuredChatMessage(
+            chatId = chatId,
+            message = payMessage,
+            preview = msgText,
+            apiMediaType = "PAYMENT",
+            metadata = buildJsonObject { put("paymentData", json.parseToJsonElement(json.encodeToString(paymentData))) }
+        )
     }
 
     fun translateMessage(chatId: String, messageId: String, targetLanguage: String = "Lingala") {
@@ -833,7 +895,7 @@ class MboteRepository(
 
         val newChat = Chat(
             name = contact.name,
-            avatar = contact.avatarUrl ?: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
+            avatar = contact.avatarUrl.orEmpty(),
             lastMessage = "Discussion chiffrée démarrée",
             lastMessageTime = "À l'instant",
             isOnline = contact.isMboteUser,
@@ -1275,55 +1337,8 @@ class MboteRepository(
                 // Launch delayed sending mechanism
                 CoroutineScope(Dispatchers.Default).launch {
                     kotlinx.coroutines.delay(delaySeconds * 1000L)
-                    
-                    val sendTime = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-                    val scheduledMessageObj = Message(
-                        text = msgText,
-                        senderId = "me",
-                        senderName = "Moi",
-                        senderAvatar = "",
-                        timestamp = sendTime,
-                        status = MessageStatus.SENT,
-                        isMine = true
-                    )
-
-                    _chats.update { chatList ->
-                        chatList.map { chat ->
-                            if (chat.id == targetChatId) {
-                                chat.copy(
-                                    lastMessage = msgText,
-                                    lastMessageTime = sendTime,
-                                    messages = chat.messages + scheduledMessageObj
-                                )
-                            } else chat
-                        }
-                    }
-
+                    sendMessage(targetChatId, msgText)
                     _scheduledMessages.update { list -> list.filter { it != schedMsg } }
-
-                    // Simulate the receiver answering to make it awesome!
-                    kotlinx.coroutines.delay(2000L)
-                    val replyTime = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-                    val receiverReplyObj = Message(
-                        text = "Merci pour ton message planifié ! C'est super pratique cette fonction de Luna AI. 😊👍",
-                        senderId = "receiver",
-                        senderName = targetChatName,
-                        senderAvatar = targetChat?.avatar ?: "",
-                        timestamp = replyTime,
-                        status = MessageStatus.READ,
-                        isMine = false
-                    )
-                    _chats.update { chatList ->
-                        chatList.map { chat ->
-                            if (chat.id == targetChatId) {
-                                chat.copy(
-                                    lastMessage = receiverReplyObj.text,
-                                    lastMessageTime = replyTime,
-                                    messages = chat.messages + receiverReplyObj
-                                )
-                            } else chat
-                        }
-                    }
                 }
 
                 val targetTimeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(System.currentTimeMillis() + delaySeconds * 1000L))
@@ -1401,50 +1416,34 @@ class MboteRepository(
     }
 
     fun addReaction(chatId: String, messageId: String, emoji: String) {
-        _chats.update { chatList ->
-            chatList.map { chat ->
-                if (chat.id == chatId) {
-                    val updatedMessages = chat.messages.map { msg ->
-                        if (msg.id == messageId) {
-                            val currentReactions = msg.reactions.toMutableMap()
-                            val count = currentReactions[emoji] ?: 0
-                            currentReactions[emoji] = count + 1
-                            msg.copy(reactions = currentReactions)
-                        } else msg
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.toggleMessageReactionApi(messageId, emoji)
+                .onSuccess { reactions ->
+                    _chats.update { chatList ->
+                        chatList.map { chat ->
+                            if (chat.id == chatId) chat.copy(messages = chat.messages.map { message ->
+                                if (message.id == messageId) message.copy(reactions = reactions) else message
+                            }) else chat
+                        }
                     }
-                    chat.copy(messages = updatedMessages)
-                } else chat
-            }
-        }
-    }
-
-    fun appendSimulatedMessage(chatId: String, message: Message) {
-        _chats.update { chatList ->
-            chatList.map { chat ->
-                if (chat.id == chatId) {
-                    val updatedMessages = chat.messages + message
-                    chat.copy(
-                        lastMessage = message.text,
-                        lastMessageTime = message.timestamp,
-                        messages = updatedMessages
-                    )
-                } else chat
-            }
+                }
+                .onFailure { _messagingError.value = it.message ?: "Réaction impossible." }
         }
     }
 
     fun deleteMessage(chatId: String, messageId: String) {
-        _chats.update { chatList ->
-            chatList.map { chat ->
-                if (chat.id == chatId) {
-                    val updatedMessages = chat.messages.map { msg ->
-                        if (msg.id == messageId) {
-                            msg.copy(isRecalled = true, text = "Ce message a été supprimé")
-                        } else msg
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.deleteMessageApi(messageId)
+                .onSuccess {
+                    _chats.update { chatList ->
+                        chatList.map { chat ->
+                            if (chat.id == chatId) chat.copy(messages = chat.messages.map { message ->
+                                if (message.id == messageId) message.copy(isRecalled = true, text = "Ce message a été supprimé") else message
+                            }) else chat
+                        }
                     }
-                    chat.copy(messages = updatedMessages)
-                } else chat
-            }
+                }
+                .onFailure { _messagingError.value = it.message ?: "Suppression impossible." }
         }
     }
 
@@ -1454,28 +1453,36 @@ class MboteRepository(
                 if (chat.id == chatId) chat.copy(unreadCount = 0) else chat
             }
         }
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.markChatReadApi(chatId)
+                .onFailure { _messagingError.value = it.message ?: "Lecture non synchronisée." }
+        }
     }
 
-    fun createNewChat(name: String, initialMessage: String, isGroup: Boolean = false): Chat {
-        val newChat = Chat(
-            name = name,
-            avatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
-            lastMessage = initialMessage,
-            lastMessageTime = "À l'instant",
-            isGroup = isGroup,
-            messages = listOf(
-                Message(
-                    text = initialMessage,
-                    senderId = _userProfile.value.id,
-                    senderName = _userProfile.value.name,
-                    timestamp = timeFormat.format(Date()),
-                    status = MessageStatus.SENT,
-                    isMine = true
-                )
-            )
+    suspend fun createDirectChat(name: String, initialMessage: String): Result<Chat> {
+        val contact = _mastaUsers.value.firstOrNull { it.name.equals(name, ignoreCase = true) }
+            ?: return Result.failure(IllegalArgumentException("Sélectionnez un utilisateur MBoté réel dans Masta."))
+        val participantId = contact.id.toIntOrNull()
+            ?: return Result.failure(IllegalArgumentException("Ce profil n’est pas encore relié au serveur MBoté."))
+        val dto = apiService.createDirectChatApi(participantId).getOrElse { return Result.failure(it) }
+        val participants = dto.participants.map {
+            Participant(it.id, it.name, it.avatar, it.isOnline, it.role)
+        }
+        val chat = Chat(
+            id = dto.id,
+            name = dto.name.takeUnless { it.isBlank() || it == "Discussion" } ?: contact.name,
+            avatar = dto.avatar.ifBlank { contact.avatar },
+            lastMessage = dto.lastMessage,
+            lastMessageTime = dto.lastMessageTime,
+            unreadCount = dto.unreadCount,
+            isOnline = dto.isOnline,
+            isGroup = false,
+            participants = participants,
+            disappearingTimerSec = dto.disappearingDurationSec
         )
-        _chats.update { listOf(newChat) + it }
-        return newChat
+        _chats.update { listOf(chat) + it.filterNot { current -> current.id == chat.id } }
+        if (initialMessage.isNotBlank()) sendMessage(chat.id, initialMessage.trim())
+        return Result.success(chat)
     }
 
     suspend fun createGroupApi(
@@ -1868,190 +1875,18 @@ class MboteRepository(
         _userProfile.update { it.copy(notificationsEnabled = !it.notificationsEnabled) }
     }
 
-    private fun createInitialChats(): List<Chat> {
-        val qAron = AronQuestionsData.allQuestions.first()
-        return listOf(
-            Chat(
-                id = "chat_luna",
-                name = "Luna AI - MBoté Assistant",
-                avatar = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
-                lastMessage = "Mbote ! Comment puis-je vous aider aujourd'hui ?",
-                lastMessageTime = "14:20",
-                unreadCount = 1,
-                isOnline = true,
-                isAI = true,
-                isVerified = true,
-                isPinned = true,
-                messages = listOf(
-                    Message(
-                        id = "m_ai_1",
-                        text = "Bienvenue sur MBoté ! Je suis votre assistante d'intelligence artificielle. Posez-moi vos questions ou découvrez les questions d'Aron pour vos discussions.",
-                        senderId = "luna_ai",
-                        senderName = "Luna AI",
-                        senderAvatar = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
-                        timestamp = "14:15",
-                        status = MessageStatus.READ,
-                        isMine = false
-                    ),
-                    Message(
-                        id = "m_ai_2",
-                        text = "Mbote ! Comment puis-je vous aider aujourd'hui ?",
-                        senderId = "luna_ai",
-                        senderName = "Luna AI",
-                        senderAvatar = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
-                        timestamp = "14:20",
-                        status = MessageStatus.READ,
-                        isMine = false
-                    )
-                )
-            ),
-            Chat(
-                id = "chat_tech_hub",
-                name = "Tech Hub Brazzaville 🇨🇬",
-                avatar = "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150&auto=format&fit=crop&q=80",
-                lastMessage = "📊 Nouveau sondage : Quelle date pour le prochain Hackathon MBoté ?",
-                lastMessageTime = "13:45",
-                unreadCount = 3,
-                isGroup = true,
-                isPinned = true,
-                participants = listOf(
-                    Participant("u1", "Grace Makiese", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"),
-                    Participant("u2", "Yannick Nguesso", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"),
-                    Participant("u3", "Sarah Mabiala", "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80")
-                ),
-                messages = listOf(
-                    Message(
-                        id = "m_th_1",
-                        text = "Bonjour l'équipe ! Où en est le déploiement sur les serveurs de Pointe-Noire ?",
-                        senderId = "u1",
-                        senderName = "Grace Makiese",
-                        timestamp = "13:30",
-                        status = MessageStatus.READ,
-                        isMine = false
-                    ),
-                    Message(
-                        id = "m_th_2",
-                        text = "Tout est prêt, la latence est passée sous la barre des 35ms !",
-                        senderId = "u2",
-                        senderName = "Yannick Nguesso",
-                        timestamp = "13:38",
-                        status = MessageStatus.READ,
-                        isMine = false
-                    ),
-                    Message(
-                        id = "m_th_poll",
-                        text = "📊 Sondage : Date du prochain Hackathon MBoté",
-                        senderId = "u1",
-                        senderName = "Grace Makiese",
-                        timestamp = "13:45",
-                        status = MessageStatus.READ,
-                        isMine = false,
-                        mediaType = MediaType.POLL,
-                        pollData = PollData(
-                            question = "Quand organisons-nous le Hackathon MBoté 2026 ?",
-                            options = listOf(
-                                PollOption(text = "Samedi 5 Septembre (Brazzaville)", votesCount = 4, voterIds = listOf("u1", "u2", "u3", "u4")),
-                                PollOption(text = "Samedi 12 Septembre (Kinshasa)", votesCount = 2, voterIds = listOf("u5", "u6")),
-                                PollOption(text = "En ligne sur MBoté Réunions", votesCount = 6, voterIds = listOf("user_me", "u7", "u8", "u9", "u10", "u11"))
-                            )
-                        )
-                    )
-                )
-            ),
-            Chat(
-                id = "chat_grace",
-                name = "Grace Makiese",
-                avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                lastMessage = "Super, on se connecte pour la réunion à 15h !",
-                lastMessageTime = "12:10",
-                unreadCount = 0,
-                isOnline = true,
-                isVerified = true,
-                messages = listOf(
-                    Message(
-                        id = "m_g_1",
-                        text = "Salut Marc, as-tu reçu les documents pour la réunion ?",
-                        senderId = "u1",
-                        senderName = "Grace Makiese",
-                        timestamp = "12:05",
-                        status = MessageStatus.READ,
-                        isMine = false
-                    ),
-                    Message(
-                        id = "m_g_2",
-                        text = "Oui bien reçu ! Je viens de valider l'ordre du jour.",
-                        senderId = "user_me",
-                        senderName = "Marc Loutala",
-                        timestamp = "12:08",
-                        status = MessageStatus.READ,
-                        isMine = true
-                    ),
-                    Message(
-                        id = "m_g_aron",
-                        text = "🔮 Question d'Aron :\n« ${qAron.questionFr} »",
-                        senderId = "u1",
-                        senderName = "Grace Makiese",
-                        timestamp = "12:09",
-                        status = MessageStatus.READ,
-                        isMine = false,
-                        mediaType = MediaType.ARON_QUESTION,
-                        aronQuestion = qAron
-                    ),
-                    Message(
-                        id = "m_g_3",
-                        text = "Super, on se connecte pour la réunion à 15h !",
-                        senderId = "u1",
-                        senderName = "Grace Makiese",
-                        timestamp = "12:10",
-                        status = MessageStatus.READ,
-                        isMine = false
-                    )
-                )
-            ),
-            Chat(
-                id = "chat_canal_officiel",
-                name = "MBoté Actualités Officielles",
-                avatar = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
-                lastMessage = "✨ Découvrez les 36 Questions d'Aron pour approfondir vos relations et connexions !",
-                lastMessageTime = "Hier",
-                unreadCount = 0,
-                isChannel = true,
-                isVerified = true,
-                messages = listOf(
-                    Message(
-                        id = "m_co_1",
-                        text = "✨ Découvrez les 36 Questions d'Arthur Aron intégrées à MBoté ! Conçues scientifiquement pour favoriser la vulnérabilité positive et tisser des liens authentiques avec vos proches et nouveaux amis.",
-                        senderId = "mbote_official",
-                        senderName = "MBoté Officiel",
-                        timestamp = "Hier",
-                        status = MessageStatus.READ,
-                        isMine = false
-                    )
-                )
-            ),
-            Chat(
-                id = "chat_yannick",
-                name = "Yannick Nguesso",
-                avatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-                lastMessage = "Je t'ai envoyé l'enregistrement vocal du point.",
-                lastMessageTime = "Hier",
-                unreadCount = 0,
-                isOnline = false,
-                messages = listOf(
-                    Message(
-                        id = "m_y_1",
-                        text = "Je t'ai envoyé l'enregistrement vocal du point.",
-                        senderId = "u2",
-                        senderName = "Yannick Nguesso",
-                        timestamp = "Hier",
-                        mediaType = MediaType.AUDIO,
-                        audioDurationSec = 42,
-                        status = MessageStatus.READ,
-                        isMine = false
-                    )
-                )
-            )
+    private fun createInitialChats(): List<Chat> = emptyList()
+
+    private fun isDemoChat(chat: Chat): Boolean {
+        val demoIds = setOf("chat_luna", "chat_tech_hub", "chat_grace", "chat_canal_officiel", "chat_yannick")
+        val demoNames = setOf(
+            "Luna AI - MBoté Assistant",
+            "Tech Hub Brazzaville 🇨🇬",
+            "Grace Makiese",
+            "MBoté Actualités Officielles",
+            "Yannick Nguesso"
         )
+        return chat.id in demoIds || chat.name in demoNames || chat.messages.any { it.id.startsWith("m_th_") || it.id.startsWith("m_g_") || it.id.startsWith("m_y_") || it.id.startsWith("m_ai_") }
     }
 
     private fun createInitialCalls(): List<CallItem> {
@@ -2417,8 +2252,9 @@ class MboteRepository(
             if (chatsFile.exists()) {
                 val chatsText = chatsFile.readText()
                 val cachedChats = json.decodeFromString(ListSerializer(Chat.serializer()), chatsText)
-                if (cachedChats.isNotEmpty()) {
-                    _chats.value = cachedChats
+                val realCachedChats = cachedChats.filterNot(::isDemoChat)
+                if (realCachedChats.isNotEmpty()) {
+                    _chats.value = realCachedChats
                 }
             }
         } catch (e: Exception) {

@@ -11,7 +11,18 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
@@ -181,16 +192,33 @@ data class AdminStatsData(
     val apiVersion: String = "v1.4.2-mbote-prod"
 )
 
-@Serializable
 data class SendMessageDto(
     val chatId: String,
     val text: String,
     val mediaType: String = "NONE",
     val mediaUrl: String? = null,
-    val replyToMessageId: String? = null
+    val replyToMessageId: String? = null,
+    val metadata: JsonObject? = null
 )
 
 @Serializable
+private data class BackendSendMessageRequest(
+    val content: String,
+    val type: String = "text",
+    val metadata: JsonObject? = null
+)
+
+@Serializable
+private data class ChatReactionRequest(val emoji: String)
+
+data class ChatParticipantDto(
+    val id: String,
+    val name: String,
+    val avatar: String = "",
+    val isOnline: Boolean = false,
+    val role: String = "Membre"
+)
+
 data class MessageDto(
     val id: String,
     val chatId: String,
@@ -202,10 +230,17 @@ data class MessageDto(
     val mediaType: String = "TEXT",
     val mediaUrl: String? = null,
     val isStarred: Boolean = false,
-    val isMine: Boolean = false
+    val isMine: Boolean = false,
+    val status: String = "sent",
+    val isRecalled: Boolean = false,
+    val reactions: Map<String, Int> = emptyMap(),
+    val replyToMessageId: String? = null,
+    val replyToText: String? = null,
+    val replyToSender: String? = null,
+    val audioDurationSec: Int = 0,
+    val metadata: JsonObject? = null
 )
 
-@Serializable
 data class ChatDto(
     val id: String,
     val name: String,
@@ -215,7 +250,9 @@ data class ChatDto(
     val unreadCount: Int = 0,
     val isOnline: Boolean = false,
     val isGroup: Boolean = false,
-    val isChannel: Boolean = false
+    val isChannel: Boolean = false,
+    val participants: List<ChatParticipantDto> = emptyList(),
+    val disappearingDurationSec: Int = 0
 )
 
 @Serializable
@@ -372,6 +409,116 @@ private data class CreateShortCommentRequest(val content: String)
  * Performs real HTTP REST calls with JSON payloads, Bearer Authorization, and error handling.
  */
 class MboteApiService {
+    private fun JsonObject.element(vararg keys: String): JsonElement? =
+        keys.firstNotNullOfOrNull { key -> this[key]?.takeUnless { it is JsonNull } }
+
+    private fun JsonObject.string(vararg keys: String, default: String = ""): String =
+        element(*keys)?.jsonPrimitive?.contentOrNull ?: default
+
+    private fun JsonObject.boolean(vararg keys: String, default: Boolean = false): Boolean =
+        element(*keys)?.jsonPrimitive?.booleanOrNull ?: default
+
+    private fun JsonObject.integer(vararg keys: String, default: Int = 0): Int =
+        element(*keys)?.jsonPrimitive?.intOrNull ?: default
+
+    private fun responseArray(json: String): JsonArray {
+        val root = MboteBackendConfig.jsonParser.parseToJsonElement(json)
+        return when (root) {
+            is JsonArray -> root
+            is JsonObject -> root["data"] as? JsonArray ?: JsonArray(emptyList())
+            else -> JsonArray(emptyList())
+        }
+    }
+
+    private fun responseObject(json: String): JsonObject {
+        val root = MboteBackendConfig.jsonParser.parseToJsonElement(json)
+        return when (root) {
+            is JsonObject -> (root["data"] as? JsonObject) ?: root
+            else -> throw IllegalStateException("Réponse serveur invalide")
+        }
+    }
+
+    private fun parseChatDto(element: JsonElement): ChatDto {
+        val obj = element.jsonObject
+        val participants = (obj["participants"] as? JsonArray).orEmpty().mapNotNull { item ->
+            val participant = item as? JsonObject ?: return@mapNotNull null
+            val id = participant.string("id")
+            if (id.isBlank()) return@mapNotNull null
+            ChatParticipantDto(
+                id = id,
+                name = participant.string("name", "username", default = "Utilisateur"),
+                avatar = participant.string("avatar", "avatar_url"),
+                isOnline = participant.boolean("is_online", "isOnline"),
+                role = participant.string("role", default = "Membre")
+            )
+        }
+        return ChatDto(
+            id = obj.string("id"),
+            name = obj.string("name", default = if (obj.boolean("is_group", "isGroup")) "Groupe" else "Discussion"),
+            avatar = obj.string("avatar", "avatar_url"),
+            lastMessage = obj.string("last_message", "lastMessage"),
+            lastMessageTime = obj.string("last_message_at", "lastMessageTime", "created_at"),
+            unreadCount = obj.integer("unread_count", "unreadCount"),
+            isOnline = obj.boolean("is_online", "isOnline"),
+            isGroup = obj.boolean("is_group", "isGroup"),
+            isChannel = obj.boolean("is_channel", "isChannel"),
+            participants = participants,
+            disappearingDurationSec = obj.integer("disappearing_duration", "disappearingDuration")
+        )
+    }
+
+    private fun parseMessageDto(element: JsonElement): MessageDto {
+        val obj = element.jsonObject
+        val rawType = obj.string("type", "media_type", "mediaType", default = "text").lowercase()
+        val rawContent = obj.string("content", "text")
+        val attachment = runCatching { MboteBackendConfig.jsonParser.parseToJsonElement(rawContent) as? JsonObject }.getOrNull()
+        val metadata = obj.element("metadata") as? JsonObject
+        val reply = (metadata?.element("replyTo", "reply_to") ?: obj.element("reply_context", "replyContext")) as? JsonObject
+        val reactions = mutableMapOf<String, Int>()
+        when (val rawReactions = obj["reactions"]) {
+            is JsonArray -> rawReactions.forEach { reactionElement ->
+                val reaction = reactionElement as? JsonObject ?: return@forEach
+                val emoji = reaction.string("emoji")
+                if (emoji.isNotBlank()) reactions[emoji] = (reactions[emoji] ?: 0) + 1
+            }
+            is JsonObject -> rawReactions.forEach { (emoji, value) ->
+                reactions[emoji] = when (value) {
+                    is JsonArray -> value.size
+                    is JsonPrimitive -> value.intOrNull ?: 0
+                    else -> 0
+                }
+            }
+            else -> Unit
+        }
+        return MessageDto(
+            id = obj.string("id"),
+            chatId = obj.string("chat_id", "chatId"),
+            senderId = obj.string("sender_id", "senderId"),
+            senderName = obj.string("sender_name", "senderName", default = "Utilisateur MBoté"),
+            senderAvatar = obj.string("sender_avatar", "senderAvatar"),
+            text = attachment?.string("caption")?.takeIf { it.isNotBlank() } ?: when (rawType) {
+                "image" -> "Photo"
+                "video" -> "Vidéo"
+                "audio" -> "Message vocal"
+                "file", "document" -> "Document"
+                else -> rawContent
+            },
+            timestamp = obj.string("created_at", "timestamp"),
+            mediaType = rawType.uppercase(),
+            mediaUrl = attachment?.string("url")?.takeIf { it.isNotBlank() }
+                ?: obj.string("media_url", "mediaUrl").takeIf { it.isNotBlank() },
+            isStarred = obj.boolean("is_starred", "isStarred"),
+            isMine = obj.boolean("is_mine", "isMine"),
+            status = obj.string("status", default = "sent"),
+            isRecalled = obj.boolean("is_recalled", "isRecalled"),
+            reactions = reactions,
+            replyToMessageId = reply?.string("message_id", "messageId"),
+            replyToText = reply?.string("text"),
+            replyToSender = reply?.string("sender_name", "senderName"),
+            audioDurationSec = attachment?.integer("durationSeconds") ?: metadata?.integer("durationSeconds") ?: 0,
+            metadata = metadata
+        )
+    }
 
     private val tag = "MboteApiService"
 
@@ -601,11 +748,7 @@ class MboteApiService {
             endpoint = "/chats",
             method = "GET"
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<ChatDto>>>(json).data ?: emptyList()
-            } catch (e: Exception) {
-                emptyList()
-            }
+            responseArray(json).map(::parseChatDto).filter { it.id.isNotBlank() }
         }
     }
 
@@ -617,11 +760,7 @@ class MboteApiService {
             endpoint = "/chats/$chatId/messages",
             method = "GET"
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<MessageDto>>>(json).data ?: emptyList()
-            } catch (e: Exception) {
-                emptyList()
-            }
+            responseArray(json).map(::parseMessageDto).filter { it.id.isNotBlank() }
         }
     }
 
@@ -629,13 +768,64 @@ class MboteApiService {
      * Send message API call to backend server
      */
     suspend fun sendMessageApi(dto: SendMessageDto): Result<MessageDto> {
-        return executeHttpRequest<SendMessageDto, MessageDto>(
+        val messageType = when (dto.mediaType.uppercase()) {
+            "IMAGE" -> "image"
+            "VIDEO" -> "video"
+            "AUDIO" -> "audio"
+            "FILE" -> "file"
+            "LOCATION" -> "location"
+            "POLL" -> "poll"
+            "PAYMENT" -> "payment"
+            "ARON_QUESTION" -> "aron_question"
+            else -> "text"
+        }
+        val content = dto.mediaUrl?.takeIf { it.isNotBlank() }?.let { url ->
+            buildJsonObject {
+                put("url", url)
+                put("caption", dto.text)
+                if (messageType == "audio") put("name", "Message vocal")
+            }.toString()
+        } ?: dto.text
+        val metadata = buildJsonObject {
+            dto.metadata?.forEach { (key, value) -> put(key, value) }
+            dto.replyToMessageId?.takeIf { it.isNotBlank() }?.let { messageId ->
+                put("replyTo", buildJsonObject { put("messageId", messageId) })
+            }
+        }.takeIf { it.isNotEmpty() }
+        val request = BackendSendMessageRequest(content = content, type = messageType, metadata = metadata)
+        return executeHttpRequest<BackendSendMessageRequest, MessageDto>(
             endpoint = "/chats/${dto.chatId}/messages",
             method = "POST",
-            requestBody = dto
+            requestBody = request
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<MessageDto>>(json).data
-                ?: throw IllegalStateException("Réponse de message incomplète")
+            parseMessageDto(responseObject(json))
+        }
+    }
+
+    suspend fun markChatReadApi(chatId: String): Result<Boolean> =
+        executeHttpRequest<Unit, Boolean>(endpoint = "/chats/$chatId/read", method = "POST") { true }
+
+    suspend fun toggleMessageReactionApi(messageId: String, emoji: String): Result<Map<String, Int>> {
+        return executeHttpRequest<ChatReactionRequest, Map<String, Int>>(
+            endpoint = "/messages/$messageId/reactions",
+            method = "POST",
+            requestBody = ChatReactionRequest(emoji)
+        ) { json ->
+            val obj = responseObject(json)
+            val reactions = obj["reactions"]
+            val counts = mutableMapOf<String, Int>()
+            when (reactions) {
+                is JsonArray -> reactions.forEach { item ->
+                    val reaction = item as? JsonObject ?: return@forEach
+                    val value = reaction.string("emoji")
+                    if (value.isNotBlank()) counts[value] = (counts[value] ?: 0) + 1
+                }
+                is JsonObject -> reactions.forEach { (key, value) ->
+                    counts[key] = if (value is JsonArray) value.size else value.jsonPrimitive.intOrNull ?: 0
+                }
+                else -> Unit
+            }
+            counts
         }
     }
 
@@ -782,6 +972,13 @@ class MboteApiService {
         ) { json ->
             MboteBackendConfig.jsonParser.decodeFromString<CreatedEntityResponse>(json).id.toString().trim('"')
         }
+
+    suspend fun createDirectChatApi(participantId: Int): Result<ChatDto> =
+        executeHttpRequest(
+            endpoint = "/chats",
+            method = "POST",
+            requestBody = CreateChatRequest(false, "", listOf(participantId))
+        ) { json -> parseChatDto(responseObject(json)) }
 
     suspend fun createChannelApi(
         name: String,

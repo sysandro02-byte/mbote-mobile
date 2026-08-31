@@ -273,10 +273,10 @@ class MainActivity : ComponentActivity() {
                                     viewModel.sendMessage(activeChat!!.id, text, replyTo)
                                 },
                                 onSendVoiceMessage = { audioPath, durationSec, replyTo ->
-                                    viewModel.sendVoiceMessage(activeChat!!.id, audioPath, durationSec, replyTo)
+                                    viewModel.sendVoiceMessage(context, activeChat!!.id, audioPath, durationSec, replyTo)
                                 },
                                 onSendMediaMessage = { mediaUrl, isVideo, caption ->
-                                    viewModel.sendMediaAttachment(activeChat!!.id, mediaUrl, isVideo, caption)
+                                    viewModel.sendMediaAttachment(context, activeChat!!.id, mediaUrl, isVideo, caption)
                                 },
                                 onSearchGiphy = { query, stickers -> viewModel.searchGiphy(query, stickers) },
                                 onToggleBlock = { shouldBlock ->
@@ -503,8 +503,8 @@ class MainActivity : ComponentActivity() {
                                                                 onAudioCallClick = { viewModel.startCall(activeChat!!.name, activeChat!!.avatar, false) },
                                                                 onVideoCallClick = { viewModel.startCall(activeChat!!.name, activeChat!!.avatar, true) },
                                                                 onSendMessage = { text, replyTo -> viewModel.sendMessage(activeChat!!.id, text, replyTo) },
-                                                                onSendVoiceMessage = { audioPath, durationSec, replyTo -> viewModel.sendVoiceMessage(activeChat!!.id, audioPath, durationSec, replyTo) },
-                                                                onSendMediaMessage = { mediaUrl, isVideo, caption -> viewModel.sendMediaAttachment(activeChat!!.id, mediaUrl, isVideo, caption) },
+                                                                onSendVoiceMessage = { audioPath, durationSec, replyTo -> viewModel.sendVoiceMessage(context, activeChat!!.id, audioPath, durationSec, replyTo) },
+                                                                onSendMediaMessage = { mediaUrl, isVideo, caption -> viewModel.sendMediaAttachment(context, activeChat!!.id, mediaUrl, isVideo, caption) },
                                                                 onSearchGiphy = { query, stickers -> viewModel.searchGiphy(query, stickers) },
                                                                 onToggleBlock = { shouldBlock ->
                                                                     if (shouldBlock) {
