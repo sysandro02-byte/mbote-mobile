@@ -283,7 +283,16 @@ private data class MediaSearchResponse(val items: List<MediaSearchItem> = emptyL
 private data class PaymentIntentRequest(val provider: String, val amount: Long, val currency: String, val phone: String)
 
 @Serializable
-data class PaymentIntentResponse(val id: String, val provider: String, val status: String, val amount: Long, val currency: String)
+data class PaymentIntentResponse(
+    val id: String,
+    val provider: String,
+    val status: String,
+    val amount: Long,
+    val currency: String,
+    val merchantCode: String? = null,
+    val ussdCode: String? = null,
+    val instructions: String? = null
+)
 
 @Serializable
 private data class PublicMastaUserDto(

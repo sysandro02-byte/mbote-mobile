@@ -1204,6 +1204,10 @@ class MboteViewModel(
         if (!repository.isAuthenticated.value) return false
         viewModelScope.launch {
             repository.requestGiftPurchase(bundle.priceFcfa, provider)
+                .onSuccess { intent ->
+                    _publicationError.value = intent.instructions
+                        ?: "Paiement ${intent.status.lowercase()}. Référence ${intent.id}."
+                }
                 .onFailure { _publicationError.value = it.message }
         }
         return true
@@ -1213,6 +1217,10 @@ class MboteViewModel(
         if (!repository.isAuthenticated.value || count <= 0) return false
         viewModelScope.launch {
             repository.requestGiftPurchase(gift.priceFcfa * count, provider)
+                .onSuccess { intent ->
+                    _publicationError.value = intent.instructions
+                        ?: "Paiement ${intent.status.lowercase()}. Référence ${intent.id}."
+                }
                 .onFailure { _publicationError.value = it.message }
         }
         return true
