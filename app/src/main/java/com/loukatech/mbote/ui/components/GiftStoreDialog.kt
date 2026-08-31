@@ -39,8 +39,8 @@ import com.loukatech.mbote.ui.theme.MbotePurpleSoft
 @Composable
 fun GiftStoreDialog(
     userGiftState: UserGiftState,
-    onBuyBundle: (GiftBundle, String) -> Unit,
-    onBuySingleGift: (GiftItem, Int, String) -> Unit,
+    onBuyBundle: (GiftBundle, String) -> Boolean,
+    onBuySingleGift: (GiftItem, Int, String) -> Boolean,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -306,10 +306,11 @@ fun GiftStoreDialog(
 
                                         Button(
                                             onClick = {
-                                                onBuyBundle(bundle, selectedProvider)
-                                                successMessage = "Félicitations ! Le lot \"${bundle.title}\" a été crédité sur votre compte MBoté."
-                                                isSuccess = true
-                                                Toast.makeText(context, "Achat de ${bundle.title} confirmé !", Toast.LENGTH_SHORT).show()
+                                                if (onBuyBundle(bundle, selectedProvider)) {
+                                                    successMessage = "Demande envoyée. Confirmez le paiement sur votre téléphone ; les cadeaux seront crédités après validation de l’opérateur."
+                                                    isSuccess = true
+                                                    Toast.makeText(context, "Paiement en attente de confirmation", Toast.LENGTH_SHORT).show()
+                                                } else Toast.makeText(context, "Connexion et numéro Mobile Money requis", Toast.LENGTH_LONG).show()
                                             },
                                             colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary),
                                             shape = RoundedCornerShape(10.dp),
@@ -349,10 +350,11 @@ fun GiftStoreDialog(
                                             // Buy 1
                                             Button(
                                                 onClick = {
-                                                    onBuySingleGift(gift, 1, selectedProvider)
-                                                    successMessage = "1x ${gift.name} (${gift.emoji}) ajouté à votre inventaire !"
-                                                    isSuccess = true
-                                                    Toast.makeText(context, "Achat de 1x ${gift.name} réussi", Toast.LENGTH_SHORT).show()
+                                                    if (onBuySingleGift(gift, 1, selectedProvider)) {
+                                                        successMessage = "Demande envoyée. Confirmez le paiement sur votre téléphone."
+                                                        isSuccess = true
+                                                        Toast.makeText(context, "Paiement en attente", Toast.LENGTH_SHORT).show()
+                                                    } else Toast.makeText(context, "Connexion et numéro Mobile Money requis", Toast.LENGTH_LONG).show()
                                                 },
                                                 colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary),
                                                 shape = RoundedCornerShape(8.dp),
@@ -365,10 +367,11 @@ fun GiftStoreDialog(
                                             // Buy 5
                                             OutlinedButton(
                                                 onClick = {
-                                                    onBuySingleGift(gift, 5, selectedProvider)
-                                                    successMessage = "5x ${gift.name} (${gift.emoji}) ajoutés à votre inventaire !"
-                                                    isSuccess = true
-                                                    Toast.makeText(context, "Achat de 5x ${gift.name} réussi", Toast.LENGTH_SHORT).show()
+                                                    if (onBuySingleGift(gift, 5, selectedProvider)) {
+                                                        successMessage = "Demande envoyée. Confirmez le paiement sur votre téléphone."
+                                                        isSuccess = true
+                                                        Toast.makeText(context, "Paiement en attente", Toast.LENGTH_SHORT).show()
+                                                    } else Toast.makeText(context, "Connexion et numéro Mobile Money requis", Toast.LENGTH_LONG).show()
                                                 },
                                                 shape = RoundedCornerShape(8.dp),
                                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),

@@ -40,8 +40,8 @@ fun TipCreatorSheet(
     userGiftState: UserGiftState = UserGiftState(),
     onSendTip: (amount: Long, provider: String) -> Unit = { _, _ -> },
     onSendGift: (giftId: String) -> Boolean = { false },
-    onBuySingleGift: (GiftItem, Int, String) -> Unit = { _, _, _ -> },
-    onBuyBundle: (GiftBundle, String) -> Unit = { _, _ -> },
+    onBuySingleGift: (GiftItem, Int, String) -> Boolean = { _, _, _ -> false },
+    onBuyBundle: (GiftBundle, String) -> Boolean = { _, _ -> false },
     onCashout: (amount: Long, provider: String, phone: String) -> Unit = { _, _, _ -> },
     onOpenStore: () -> Unit = {},
     onDismiss: () -> Unit,
@@ -576,9 +576,12 @@ fun TipCreatorSheet(
             confirmButton = {
                 Button(
                     onClick = {
-                        onBuySingleGift(gift, instantBuyQuantity, instantBuyProvider)
-                        Toast.makeText(context, "✅ Achat de $instantBuyQuantity ${gift.name} réussi !", Toast.LENGTH_SHORT).show()
-                        giftToInstantBuy = null
+                        if (onBuySingleGift(gift, instantBuyQuantity, instantBuyProvider)) {
+                            Toast.makeText(context, "Demande envoyée : confirmez le paiement sur votre téléphone.", Toast.LENGTH_LONG).show()
+                            giftToInstantBuy = null
+                        } else {
+                            Toast.makeText(context, "Connexion et numéro Mobile Money requis.", Toast.LENGTH_LONG).show()
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary)
                 ) {

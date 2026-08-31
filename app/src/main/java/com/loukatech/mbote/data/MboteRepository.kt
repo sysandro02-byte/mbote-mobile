@@ -1061,6 +1061,17 @@ class MboteRepository(
         return false
     }
 
+    suspend fun requestGiftPurchase(amountFcfa: Long, providerLabel: String): Result<PaymentIntentResponse> {
+        val provider = when {
+            providerLabel.contains("MTN", ignoreCase = true) -> "mtn_momo"
+            providerLabel.contains("Airtel", ignoreCase = true) -> "airtel_money"
+            else -> "mbote_pay"
+        }
+        val phone = _userProfile.value.phone.filter(Char::isDigit)
+        if (phone.length !in 8..15) return Result.failure(IllegalStateException("Ajoutez un numéro Mobile Money valide à votre profil."))
+        return apiService.createPaymentIntent(provider, amountFcfa, phone)
+    }
+
     fun buySingleGift(gift: GiftItem, count: Int = 1, provider: String = "MBoté Pay / MTN MoMo"): Boolean {
         return false
     }

@@ -280,6 +280,12 @@ data class MediaSearchItem(
 private data class MediaSearchResponse(val items: List<MediaSearchItem> = emptyList())
 
 @Serializable
+private data class PaymentIntentRequest(val provider: String, val amount: Long, val currency: String, val phone: String)
+
+@Serializable
+data class PaymentIntentResponse(val id: String, val provider: String, val status: String, val amount: Long, val currency: String)
+
+@Serializable
 private data class PublicMastaUserDto(
     val id: JsonElement,
     val name: String = "",
@@ -469,6 +475,13 @@ class MboteApiService {
             endpoint = "/media/search?type=$type&q=$safeQuery&limit=20"
         ) { json -> MboteBackendConfig.jsonParser.decodeFromString<MediaSearchResponse>(json).items }
     }
+
+    suspend fun createPaymentIntent(provider: String, amountFcfa: Long, phone: String): Result<PaymentIntentResponse> =
+        executeHttpRequest(
+            endpoint = "/payments/intents",
+            method = "POST",
+            requestBody = PaymentIntentRequest(provider, amountFcfa, "XAF", phone)
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<PaymentIntentResponse>(json) }
 
     suspend fun getRegistrationPublicConfig(): Result<RegistrationPublicConfig> =
         executeHttpRequest<Unit, RegistrationPublicConfig>(endpoint = "/public-settings") { json ->

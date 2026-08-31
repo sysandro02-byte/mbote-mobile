@@ -1201,11 +1201,21 @@ class MboteViewModel(
     }
 
     fun buyGiftBundle(bundle: GiftBundle, provider: String = "MBoté Pay / MTN MoMo"): Boolean {
-        return repository.buyGiftBundle(bundle, provider)
+        if (!repository.isAuthenticated.value) return false
+        viewModelScope.launch {
+            repository.requestGiftPurchase(bundle.priceFcfa, provider)
+                .onFailure { _publicationError.value = it.message }
+        }
+        return true
     }
 
     fun buySingleGift(gift: GiftItem, count: Int = 1, provider: String = "MBoté Pay / MTN MoMo"): Boolean {
-        return repository.buySingleGift(gift, count, provider)
+        if (!repository.isAuthenticated.value || count <= 0) return false
+        viewModelScope.launch {
+            repository.requestGiftPurchase(gift.priceFcfa * count, provider)
+                .onFailure { _publicationError.value = it.message }
+        }
+        return true
     }
 
     fun sendGift(giftId: String, recipientName: String, multiplier: Int = 1): Boolean {

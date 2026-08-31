@@ -73,8 +73,8 @@ fun LiveBroadcastDialog(
     isPremiumUser: Boolean = false,
     userBadges: List<BadgeType> = emptyList(),
     onSendGift: (giftId: String, multiplier: Int) -> Boolean = { _, _ -> false },
-    onBuyBundle: (GiftBundle, String) -> Unit = { _, _ -> },
-    onBuySingleGift: (GiftItem, Int, String) -> Unit = { _, _, _ -> },
+    onBuyBundle: (GiftBundle, String) -> Boolean = { _, _ -> false },
+    onBuySingleGift: (GiftItem, Int, String) -> Boolean = { _, _, _ -> false },
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
