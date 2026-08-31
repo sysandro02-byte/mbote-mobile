@@ -52,6 +52,7 @@ class MboteViewModel(
     suspend fun restoreCloudBackup(context: android.content.Context) =
         repository.restoreCloudBackup(context)
     val shortVideos = repository.shortVideos
+    val channels = repository.channels
     val isOffline = repository.isOffline
     val isAuthenticated = repository.isAuthenticated
 
@@ -126,6 +127,7 @@ class MboteViewModel(
         viewModelScope.launch {
             _isDataSyncing.value = true
             repository.syncAllFromBackend()
+            repository.refreshChannels()
             _isDataSyncing.value = false
         }
     }
@@ -165,6 +167,13 @@ class MboteViewModel(
 
     suspend fun register(request: com.loukatech.mbote.service.api.RegisterRequest): Result<com.loukatech.mbote.service.api.PendingOtpChallenge> {
         return repository.register(request)
+    }
+
+    fun toggleChannelSubscription(channelId: String, currentlySubscribed: Boolean) {
+        viewModelScope.launch {
+            repository.setChannelSubscription(channelId, !currentlySubscribed)
+                .onFailure { _publicationError.value = it.message }
+        }
     }
 
     suspend fun confirmDesktopQrLogin(qrPayload: String): Result<Unit> =

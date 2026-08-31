@@ -35,6 +35,9 @@ class MboteRepository(
     private val _userGiftState = MutableStateFlow(UserGiftState())
     val userGiftState: StateFlow<UserGiftState> = _userGiftState.asStateFlow()
 
+    private val _channels = MutableStateFlow<List<ChannelSummary>>(emptyList())
+    val channels: StateFlow<List<ChannelSummary>> = _channels.asStateFlow()
+
     private val _isAuthenticated = MutableStateFlow(false)
     val isAuthenticated: StateFlow<Boolean> = _isAuthenticated.asStateFlow()
 
@@ -1547,7 +1550,20 @@ class MboteRepository(
             )
         )
         _chats.update { listOf(newChannel) + it }
+        refreshChannels()
         return Result.success(channelId)
+    }
+
+    suspend fun refreshChannels(): Result<Unit> {
+        val result = apiService.fetchChannels()
+        result.getOrNull()?.let { _channels.value = it }
+        return result.map { Unit }
+    }
+
+    suspend fun setChannelSubscription(channelId: String, subscribe: Boolean): Result<Unit> {
+        val result = apiService.setChannelSubscription(channelId, subscribe)
+        if (result.isSuccess) refreshChannels()
+        return result
     }
 
     suspend fun addStatus(

@@ -52,6 +52,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import coil.compose.AsyncImage
 import com.loukatech.mbote.model.NewsPost
+import com.loukatech.mbote.model.ChannelSummary
 import com.loukatech.mbote.model.ShortVideo
 import com.loukatech.mbote.model.StatusItem
 import com.loukatech.mbote.ui.components.CreateChannelDialog
@@ -100,6 +101,7 @@ fun ActusScreen(
     statuses: List<StatusItem>,
     currentUserName: String = "",
     shortVideos: List<ShortVideo> = emptyList(),
+    channels: List<ChannelSummary> = emptyList(),
     isSyncing: Boolean = false,
     onLikeClick: (String) -> Unit,
     onShareClick: (String) -> Unit,
@@ -110,6 +112,7 @@ fun ActusScreen(
     onOpenCreatorProfile: (ShortVideo) -> Unit = {},
     onCreateShortVideoClick: () -> Unit = {},
     onCreateChannel: (String, String, Boolean, String) -> Unit = { _, _, _, _ -> },
+    onToggleChannelSubscription: (String, Boolean) -> Unit = { _, _ -> },
     onPublishNews: (title: String, content: String, mediaUri: android.net.Uri?, category: String, mediaType: String) -> Unit = { _, _, _, _, _ -> },
     onAuthorProfileClick: (String, String) -> Unit = { _, _ -> },
     onReportContent: (String, String) -> Unit = { _, _ -> },
@@ -139,109 +142,22 @@ fun ActusScreen(
 
     val displayShortVideos = shortVideos
 
-    val initialChannelsList = remember {
-        listOf(
+    var channelsList by remember(channels) {
+        mutableStateOf(channels.map { channel ->
             ChannelInfo(
-                id = "ch_1",
-                name = "MBoté Officiel",
-                bio = "Chaîne officielle d'informations, astuces et nouveautés exclusives sur l'application MBoté 🇨🇬💜.",
-                avatarLetter = "M",
-                isVerified = true,
-                category = "Officiel",
-                subscribersCount = 4820,
-                isSubscribed = false,
-                posts = listOf(
-                    ChannelPost(
-                        channelId = "ch_1",
-                        title = "🚀 Mise à jour MBoté v2.6 : Arrivée des Shorts & Réunions HD",
-                        content = "Découvrez dès aujourd'hui les Shorts MBoté directement dans votre barre de navigation ! Partagez vos vidéos créatives et recevez des pourboires Mobile Money en FCFA en direct.",
-                        timestamp = "Il y a 15 min",
-                        imageUrl = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80",
-                        likesCount = 142,
-                        commentsCount = 28,
-                        tags = listOf("MiseAJour", "Shorts", "Innovation", "Congo")
-                    ),
-                    ChannelPost(
-                        channelId = "ch_1",
-                        title = "💡 Astuce du jour : Partage de position en temps réel",
-                        content = "Vous pouvez désormais envoyer votre localisation GPS en direct à vos contacts avec calcul d'itinéraire optimisé pour Brazzaville et Pointe-Noire.",
-                        timestamp = "Hier à 18:30",
-                        likesCount = 89,
-                        commentsCount = 12,
-                        tags = listOf("Astuce", "Sécurité", "Brazzaville")
-                    )
-                )
-            ),
-            ChannelInfo(
-                id = "ch_2",
-                name = "Aventures & Découvertes",
-                bio = "Partage de voyages, safaris, fleuve Congo, gastronomie et trésors culturels africains.",
-                avatarLetter = "A",
-                isVerified = true,
-                category = "Tourisme",
-                subscribersCount = 2310,
-                isSubscribed = false,
-                posts = listOf(
-                    ChannelPost(
-                        channelId = "ch_2",
-                        title = "🌊 Les Chutes de Loufoulakari sous le soleil couchant",
-                        content = "Une merveille naturelle à moins de deux heures de Brazzaville. Venez admirer les chutes d'eau majestueuses et les paysages luxuriants du département du Pool.",
-                        timestamp = "Il y a 2h",
-                        imageUrl = "https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=600&auto=format&fit=crop&q=80",
-                        likesCount = 210,
-                        commentsCount = 35,
-                        tags = listOf("Tourisme", "Loufoulakari", "FleuveCongo")
-                    )
-                )
-            ),
-            ChannelInfo(
-                id = "ch_3",
-                name = "Tech Congo & Startups",
-                bio = "Actualités technologiques, fintechs, programmation, intelligence artificielle et opportunités tech en Afrique centrale.",
-                avatarLetter = "T",
-                isVerified = true,
-                category = "Technologie",
-                subscribersCount = 3150,
-                isSubscribed = false,
-                posts = listOf(
-                    ChannelPost(
-                        channelId = "ch_3",
-                        title = "📱 L'essor des paiements mobiles et des super-apps en zone CEMAC",
-                        content = "L'interopérabilité entre MTN MoMo, Airtel Money et les banques locales accélère la digitalisation de l'économie congolaise.",
-                        timestamp = "Il y a 4h",
-                        imageUrl = "https://images.unsplash.com/photo-1559526324-4b87b5e36e44?w=600&auto=format&fit=crop&q=80",
-                        likesCount = 98,
-                        commentsCount = 19,
-                        tags = listOf("Fintech", "MobileMoney", "TechCongo")
-                    )
-                )
-            ),
-            ChannelInfo(
-                id = "ch_4",
-                name = "Brazza & Kin Musique",
-                bio = "Rumba congolaise, Afrobeats, sorties d'albums et dates des concerts des deux rives 🇨🇬🇨🇩.",
-                avatarLetter = "B",
-                isVerified = true,
-                category = "Musique",
-                subscribersCount = 6840,
-                isSubscribed = true,
-                posts = listOf(
-                    ChannelPost(
-                        channelId = "ch_4",
-                        title = "🎵 Le festival panafricain de musique annonce sa programmation",
-                        content = "De grands artistes de Brazzaville, Kinshasa, Abidjan et Douala se réuniront sur la scène du bord du fleuve pour trois jours de célébration.",
-                        timestamp = "Il y a 1 jour",
-                        imageUrl = "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80",
-                        likesCount = 340,
-                        commentsCount = 67,
-                        tags = listOf("Musique", "Rumba", "Festival")
-                    )
-                )
+                id = channel.id,
+                name = channel.name,
+                bio = channel.description,
+                avatarLetter = channel.name.firstOrNull()?.uppercase() ?: "M",
+                isVerified = channel.canPublish,
+                category = channel.category,
+                subscribersCount = channel.subscriberCount,
+                isSubscribed = channel.subscribedByMe,
+                coverUrl = channel.bannerUrl,
+                posts = emptyList()
             )
-        )
+        })
     }
-
-    var channelsList by remember { mutableStateOf(initialChannelsList) }
     var selectedChannelForView by remember { mutableStateOf<ChannelInfo?>(null) }
     var channelFeedbackToast by remember { mutableStateOf<String?>(null) }
 
@@ -252,14 +168,8 @@ fun ActusScreen(
             onBack = { selectedChannelForView = null },
             onToggleSubscribe = { channelId ->
                 val channel = channelsList.find { it.id == channelId }
-                val isSupportedCategory = channel != null && (
-                    channel.category.contains("officiel", ignoreCase = true) ||
-                    channel.category.contains("entreprise", ignoreCase = true) ||
-                    channel.category.contains("official", ignoreCase = true)
-                )
-                if (channel != null && !channel.isSubscribed && !isSupportedCategory) {
-                    Toast.makeText(context, "⚠️ Abonnement restreint : Vous ne pouvez vous abonner qu'aux pages d'entreprises et pages officielles.", Toast.LENGTH_LONG).show()
-                } else {
+                if (channel != null) {
+                    onToggleChannelSubscription(channel.id, channel.isSubscribed)
                     channelsList = channelsList.map { ch ->
                         if (ch.id == channelId) {
                             val newSub = !ch.isSubscribed
@@ -688,21 +598,15 @@ fun ActusScreen(
                                 channel = channel,
                                 onOpen = { selectedChannelForView = channel },
                                 onSubscribe = {
-                                    val isSupportedCategory = channel.category.contains("officiel", ignoreCase = true) ||
-                                            channel.category.contains("entreprise", ignoreCase = true) ||
-                                            channel.category.contains("official", ignoreCase = true)
-                                    if (!isSupportedCategory) {
-                                        Toast.makeText(context, "⚠️ Abonnement restreint : Vous ne pouvez vous abonner qu'aux pages d'entreprises et pages officielles.", Toast.LENGTH_LONG).show()
-                                    } else {
+                                    onToggleChannelSubscription(channel.id, channel.isSubscribed)
                                         channelsList = channelsList.map { ch ->
                                             if (ch.id == channel.id) {
                                                 ch.copy(
-                                                    isSubscribed = true,
-                                                    subscribersCount = ch.subscribersCount + 1
+                                                    isSubscribed = !ch.isSubscribed,
+                                                    subscribersCount = if (ch.isSubscribed) (ch.subscribersCount - 1).coerceAtLeast(0) else ch.subscribersCount + 1
                                                 )
                                             } else ch
                                         }
-                                    }
                                 }
                             )
                         }

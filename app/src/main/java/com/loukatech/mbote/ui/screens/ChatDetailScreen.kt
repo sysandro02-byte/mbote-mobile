@@ -986,12 +986,12 @@ fun ChatDetailScreen(
                                     Tab(
                                         selected = emojiGifTab == 0,
                                         onClick = { emojiGifTab = 0 },
-                                        text = { Text("😊 Emojis (Hors-Ligne)", fontWeight = FontWeight.Bold, fontSize = 12.5.sp) }
+                                        text = { Text("😊 Emojis", fontWeight = FontWeight.Bold, fontSize = 12.5.sp) }
                                     )
                                     Tab(
                                         selected = emojiGifTab == 1,
                                         onClick = { emojiGifTab = 1 },
-                                        text = { Text("🖼️ GIFs & Stickers Hors-Ligne", fontWeight = FontWeight.Bold, fontSize = 12.5.sp) }
+                                        text = { Text("🖼️ GIFs & Stickers", fontWeight = FontWeight.Bold, fontSize = 12.5.sp) }
                                     )
                                 }
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -1026,76 +1026,17 @@ fun ChatDetailScreen(
                                         }
                                     }
                                 } else {
-                                    // Local Offline Vector/Gradient Stickers (100% visible without internet)
-                                    val offlineStickers = listOf(
-                                        Triple("Danse MBoté Chic", "🕺", Pair("🇨🇬", listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)))),
-                                        Triple("Congo Power", "🦁", Pair("🇨🇬", listOf(Color(0xFF059669), Color(0xFFEAB308), Color(0xFFDC2626)))),
-                                        Triple("Amour Kongo", "❤️", Pair("✨", listOf(Color(0xFFE11D48), Color(0xFFF43F5E)))),
-                                        Triple("C'est Chaud !", "🔥", Pair("⚡", listOf(Color(0xFFEA580C), Color(0xFFFACC15)))),
-                                        Triple("Ambiance Total", "🎉", Pair("🥳", listOf(Color(0xFF7C3AED), Color(0xFF06B6D4)))),
-                                        Triple("Bravo Sango", "👏", Pair("💯", listOf(Color(0xFF10B981), Color(0xFF3B82F6)))),
-                                        Triple("Causerie Café", "☕", Pair("💬", listOf(Color(0xFFD97706), Color(0xFFB45309)))),
-                                        Triple("Mort De Rire", "😂", Pair("🤣", listOf(Color(0xFFF59E0B), Color(0xFFFBBF24))))
-                                    )
-
-                                    androidx.compose.foundation.lazy.LazyRow(
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                        modifier = Modifier.fillMaxSize()
-                                    ) {
-                                        items(offlineStickers.size) { index ->
-                                            val (title, mainEmoji, meta) = offlineStickers[index]
-                                            val (badgeText, bgColors) = meta
-                                            Card(
-                                                shape = RoundedCornerShape(16.dp),
-                                                modifier = Modifier
-                                                    .width(125.dp)
-                                                    .fillMaxHeight()
-                                                    .clickable {
-                                                        onSendMediaMessage("", false, "[GIF] $mainEmoji $title")
-                                                        showEmojiGifPanel = false
-                                                    }
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxSize()
-                                                        .background(
-                                                            brush = androidx.compose.ui.graphics.Brush.linearGradient(bgColors)
-                                                        )
-                                                        .padding(8.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    // Badge top right
-                                                    Surface(
-                                                        shape = CircleShape,
-                                                        color = Color.Black.copy(alpha = 0.3f),
-                                                        modifier = Modifier
-                                                            .align(Alignment.TopEnd)
-                                                            .padding(2.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = badgeText,
-                                                            fontSize = 11.sp,
-                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                                                        )
-                                                    }
-
-                                                    // Center Big Emoji
-                                                    Column(
-                                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                                        verticalArrangement = Arrangement.Center
-                                                    ) {
-                                                        Text(text = mainEmoji, fontSize = 38.sp)
-                                                        Spacer(modifier = Modifier.height(4.dp))
-                                                        Text(
-                                                            text = title,
-                                                            color = Color.White,
-                                                            fontSize = 11.5.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            textAlign = TextAlign.Center
-                                                        )
-                                                    }
-                                                }
-                                            }
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Icon(Icons.Outlined.GifBox, contentDescription = null, tint = MbotePurplePrimary)
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text("Fournisseur GIF/stickers non configuré", fontWeight = FontWeight.Bold)
+                                            Text(
+                                                "Ajoutez GIPHY_API_KEY au fichier .env pour activer la recherche réelle.",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                textAlign = TextAlign.Center,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                         }
                                     }
                                 }

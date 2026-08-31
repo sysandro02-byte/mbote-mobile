@@ -85,6 +85,7 @@ class MainActivity : ComponentActivity() {
             val statuses by viewModel.statuses.collectAsStateWithLifecycle()
             val calls by viewModel.calls.collectAsStateWithLifecycle()
             val newsPosts by viewModel.newsPosts.collectAsStateWithLifecycle()
+            val channels by viewModel.channels.collectAsStateWithLifecycle()
             val meetings by viewModel.meetings.collectAsStateWithLifecycle()
             val jobs by viewModel.jobs.collectAsStateWithLifecycle()
             val discoverProfiles by viewModel.discoverProfiles.collectAsStateWithLifecycle()
@@ -630,6 +631,7 @@ class MainActivity : ComponentActivity() {
                                                         statuses = statuses,
                                                         currentUserName = userProfile.name,
                                                         shortVideos = shortVideos,
+                                                        channels = channels,
                                                         isSyncing = isDataSyncing,
                                                         onLikeClick = { postId -> viewModel.toggleNewsLike(postId) },
                                                         onShareClick = { postId -> viewModel.shareNewsPost(postId) },
@@ -641,6 +643,9 @@ class MainActivity : ComponentActivity() {
                                                         onCreateShortVideoClick = { viewModel.setShowCreateShortVideoDialog(true) },
                                                         onCreateChannel = { name, description, isPublic, initialPost ->
                                                             viewModel.createChannel(name, description, isPublic, initialPost)
+                                                        },
+                                                        onToggleChannelSubscription = { channelId, isSubscribed ->
+                                                            viewModel.toggleChannelSubscription(channelId, isSubscribed)
                                                         },
                                                         onPublishNews = { title, content, mediaUri, category, mediaType ->
                                                             viewModel.addNewsPost(context, title, content, mediaUri, category, mediaType)

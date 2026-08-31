@@ -248,6 +248,20 @@ private data class CreateChannelPostRequest(
 )
 
 @Serializable
+private data class BackendChannelDto(
+    val id: JsonElement,
+    val name: String = "",
+    val description: String = "",
+    val category: String? = null,
+    @SerialName("inferred_category") val inferredCategory: String? = null,
+    @SerialName("avatar_url") val avatarUrl: String? = null,
+    @SerialName("banner_url") val bannerUrl: String? = null,
+    @SerialName("subscriber_count") val subscriberCount: Int = 0,
+    @SerialName("subscribed_by_me") val subscribedByMe: Boolean = false,
+    @SerialName("can_publish") val canPublish: Boolean = false
+)
+
+@Serializable
 private data class ConfirmQrLoginRequest(val pairingToken: String)
 
 @Serializable
@@ -763,6 +777,31 @@ class MboteApiService {
         }
         return Result.success(channelId)
     }
+
+    suspend fun fetchChannels(): Result<List<ChannelSummary>> =
+        executeHttpRequest<Unit, List<ChannelSummary>>(endpoint = "/channels") { json ->
+            MboteBackendConfig.jsonParser.decodeFromString<List<BackendChannelDto>>(json).map { channel ->
+                ChannelSummary(
+                    id = channel.id.toString().trim('"'),
+                    name = channel.name,
+                    description = channel.description,
+                    category = channel.category?.takeIf(String::isNotBlank)
+                        ?: channel.inferredCategory?.takeIf(String::isNotBlank)
+                        ?: "Public",
+                    avatarUrl = channel.avatarUrl,
+                    bannerUrl = channel.bannerUrl,
+                    subscriberCount = channel.subscriberCount,
+                    subscribedByMe = channel.subscribedByMe,
+                    canPublish = channel.canPublish
+                )
+            }
+        }
+
+    suspend fun setChannelSubscription(channelId: String, subscribe: Boolean): Result<Unit> =
+        executeHttpRequest<Unit, Unit>(
+            endpoint = "/channels/$channelId/subscribe",
+            method = if (subscribe) "POST" else "DELETE"
+        ) { Unit }
 
     suspend fun fetchShortVideoComments(videoId: String): Result<List<ShortVideoComment>> =
         executeHttpRequest<Unit, List<ShortVideoComment>>("/short-videos/$videoId/comments?limit=100") { json ->
