@@ -110,6 +110,7 @@ class MboteViewModel(
 
     fun initializeCache(filesDir: java.io.File) {
         repository.initializeCache(filesDir)
+        triggerDataSync()
     }
 
     private val _isDataSyncing = MutableStateFlow(false)
@@ -133,14 +134,15 @@ class MboteViewModel(
     }
 
     fun triggerDataSync() {
-        if (!repository.isAuthenticated.value || com.loukatech.mbote.service.api.MboteBackendConfig.authToken.isNullOrBlank()) {
-            return
+        if (!com.loukatech.mbote.service.api.MboteBackendConfig.authToken.isNullOrBlank()) {
+            com.loukatech.mbote.service.MboteSocketManager.connect(forceResetAttempts = true)
         }
-        com.loukatech.mbote.service.MboteSocketManager.connect(forceResetAttempts = true)
         viewModelScope.launch {
             _isDataSyncing.value = true
             repository.syncAllFromBackend()
-            repository.refreshChannels()
+            if (repository.isAuthenticated.value) {
+                repository.refreshChannels()
+            }
             _isDataSyncing.value = false
         }
     }

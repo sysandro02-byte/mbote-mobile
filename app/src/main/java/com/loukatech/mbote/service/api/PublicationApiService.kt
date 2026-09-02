@@ -8,7 +8,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
@@ -105,7 +110,9 @@ class PublicationApiService {
         body: Req? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         val token = MboteBackendConfig.authToken?.trim().orEmpty()
-        if (token.isBlank()) return@withContext Result.failure(IllegalStateException("Session MBoté requise."))
+        if (token.isBlank() && method != "GET") {
+            return@withContext Result.failure(IllegalStateException("Session MBoté requise."))
+        }
         var connection: HttpURLConnection? = null
         try {
             connection = (URL("${MboteBackendConfig.baseUrl}$endpoint").openConnection() as HttpURLConnection).apply {
@@ -113,7 +120,9 @@ class PublicationApiService {
                 connectTimeout = 12_000
                 readTimeout = 20_000
                 setRequestProperty("Accept", "application/json")
-                setRequestProperty("Authorization", "Bearer $token")
+                if (token.isNotBlank()) {
+                    setRequestProperty("Authorization", "Bearer $token")
+                }
                 if (body != null) {
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=UTF-8")
@@ -141,9 +150,27 @@ class PublicationApiService {
         }
     }
 
+    private fun responseArray(payload: String, vararg keys: String): JsonArray {
+        val root = MboteBackendConfig.jsonParser.parseToJsonElement(payload)
+        if (root is JsonArray) return root
+        if (root is JsonObject) {
+            val lookupKeys = keys.toList() + listOf("data", "items", "results", "posts", "publications", "statuses")
+            lookupKeys.forEach { key ->
+                (root[key] as? JsonArray)?.let { return it }
+                (root[key] as? JsonObject)?.let { nested ->
+                    (nested["data"] as? JsonArray)?.let { return it }
+                    (nested["items"] as? JsonArray)?.let { return it }
+                }
+            }
+        }
+        return JsonArray(emptyList())
+    }
+
     suspend fun fetchActusPosts(): Result<List<NewsPost>> = request<Unit>("/actus/posts?limit=50")
         .mapCatching { payload ->
-            MboteBackendConfig.jsonParser.decodeFromString<List<ActusPostDto>>(payload).map(::mapActus)
+            responseArray(payload, "actus", "news", "posts").map {
+                mapActus(MboteBackendConfig.jsonParser.decodeFromJsonElement<ActusPostDto>(it))
+            }
         }
 
     suspend fun createActusPost(request: CreateActusPostRequest): Result<NewsPost> =
@@ -154,7 +181,8 @@ class PublicationApiService {
 
     suspend fun fetchActusComments(postId: String): Result<List<Comment>> =
         request<Unit>("/actus/posts/$postId/comments?limit=100").mapCatching { payload ->
-            MboteBackendConfig.jsonParser.decodeFromString<List<ActusCommentDto>>(payload).map { comment ->
+            responseArray(payload, "comments").map { rawComment ->
+                val comment = MboteBackendConfig.jsonParser.decodeFromJsonElement<ActusCommentDto>(rawComment)
                 Comment(
                     id = comment.id.asId(),
                     authorName = comment.userName.ifBlank { comment.authorName.ifBlank { "Utilisateur MBoté" } },
@@ -175,7 +203,9 @@ class PublicationApiService {
 
     suspend fun fetchStatuses(currentUserId: String): Result<List<StatusItem>> = request<Unit>("/status")
         .mapCatching { payload ->
-            MboteBackendConfig.jsonParser.decodeFromString<List<StatusDto>>(payload).map { mapStatus(it, currentUserId) }
+            responseArray(payload, "status", "statuses", "stories").map {
+                mapStatus(MboteBackendConfig.jsonParser.decodeFromJsonElement<StatusDto>(it), currentUserId)
+            }
         }
 
     suspend fun createStatus(request: CreateStatusRequest, currentUserId: String): Result<StatusItem> =

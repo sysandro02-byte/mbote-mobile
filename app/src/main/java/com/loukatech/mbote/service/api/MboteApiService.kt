@@ -19,6 +19,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -425,7 +426,27 @@ class MboteApiService {
         val root = MboteBackendConfig.jsonParser.parseToJsonElement(json)
         return when (root) {
             is JsonArray -> root
-            is JsonObject -> root["data"] as? JsonArray ?: JsonArray(emptyList())
+            is JsonObject -> {
+                val keys = listOf(
+                    "data",
+                    "items",
+                    "results",
+                    "chats",
+                    "messages",
+                    "shortVideos",
+                    "short_videos",
+                    "videos",
+                    "publications",
+                    "posts",
+                    "statuses"
+                )
+                keys.firstNotNullOfOrNull { key ->
+                    root[key] as? JsonArray
+                        ?: (root[key] as? JsonObject)?.let { nested ->
+                            nested["data"] as? JsonArray ?: nested["items"] as? JsonArray
+                        }
+                } ?: JsonArray(emptyList())
+            }
             else -> JsonArray(emptyList())
         }
     }
@@ -911,7 +932,9 @@ class MboteApiService {
             endpoint = "/short-videos?limit=40",
             method = "GET"
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<List<BackendShortVideoDto>>(json).map(::mapShortVideo)
+            responseArray(json).map {
+                mapShortVideo(MboteBackendConfig.jsonParser.decodeFromJsonElement<BackendShortVideoDto>(it))
+            }
         }
     }
 

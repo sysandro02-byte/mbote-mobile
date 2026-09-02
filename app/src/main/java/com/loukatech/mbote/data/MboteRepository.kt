@@ -12,6 +12,7 @@ import java.util.Locale
 import java.util.UUID
 import java.io.File
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -21,6 +22,13 @@ import kotlinx.serialization.json.put
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+
+@Serializable
+private data class CachedAuthSession(
+    val authToken: String,
+    val refreshToken: String? = null,
+    val userProfile: UserProfile
+)
 
 class MboteRepository(
     val apiService: MboteApiService = MboteApiService(),
@@ -97,6 +105,7 @@ class MboteRepository(
                 )
             }
             _isAuthenticated.value = true
+            saveCachedSession()
             Result.success(Unit)
         } else {
             Result.failure(result.exceptionOrNull() ?: Exception("Code OTP invalide"))
@@ -116,7 +125,9 @@ class MboteRepository(
     private fun loginFromAuthResponse(result: Result<AuthResponseData>): Result<Unit> = if (result.isSuccess) {
         val data = result.getOrNull()!!
         _userProfile.update { it.copy(id = data.userId, name = data.name, email = data.email, phone = data.phone, avatar = data.avatar, role = data.role, isVerified = data.isVerified) }
+        MboteBackendConfig.refreshToken = data.refreshToken
         _isAuthenticated.value = true
+        saveCachedSession()
         Result.success(Unit)
     } else Result.failure(result.exceptionOrNull() ?: Exception("Échec de l'authentification"))
 
@@ -144,7 +155,9 @@ class MboteRepository(
 
     fun logout() {
         MboteBackendConfig.authToken = null
+        MboteBackendConfig.refreshToken = null
         _isAuthenticated.value = false
+        clearCachedSession()
     }
 
     private val _notifications = MutableStateFlow<List<MboteNotification>>(emptyList())
@@ -504,8 +517,9 @@ class MboteRepository(
     }
 
     suspend fun syncAllFromBackend(): Result<Unit> {
+        val hasSession = !MboteBackendConfig.authToken.isNullOrBlank()
         // Asynchronously fetch Call History from real REST API
-        try {
+        if (hasSession) try {
             val callsResult = apiService.fetchCallHistory()
             if (callsResult.isSuccess) {
                 val remoteCalls = callsResult.getOrNull()
@@ -541,6 +555,11 @@ class MboteRepository(
 
         publicationApiService.fetchActusPosts().onSuccess { _newsPosts.value = it }
         publicationApiService.fetchStatuses(_userProfile.value.id).onSuccess { _statuses.value = it }
+
+        if (!hasSession) {
+            _messagingError.value = null
+            return Result.success(Unit)
+        }
 
         val chatsResult = apiService.fetchUserChats()
         if (chatsResult.isSuccess) {
@@ -2248,6 +2267,22 @@ class MboteRepository(
         }
 
         try {
+            val sessionFile = File(dir, "mbote_cached_session.json")
+            if (sessionFile.exists()) {
+                val sessionText = sessionFile.readText()
+                val cachedSession = json.decodeFromString(CachedAuthSession.serializer(), sessionText)
+                if (cachedSession.authToken.isNotBlank()) {
+                    MboteBackendConfig.authToken = cachedSession.authToken
+                    MboteBackendConfig.refreshToken = cachedSession.refreshToken
+                    _userProfile.value = cachedSession.userProfile
+                    _isAuthenticated.value = true
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        try {
             val chatsFile = File(dir, "mbote_cached_chats.json")
             if (chatsFile.exists()) {
                 val chatsText = chatsFile.readText()
@@ -2294,6 +2329,35 @@ class MboteRepository(
             val profileFile = File(dir, "mbote_cached_profile.json")
             val text = json.encodeToString(UserProfile.serializer(), _userProfile.value)
             profileFile.writeText(text)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun saveCachedSession() {
+        val dir = cacheDir ?: return
+        val token = MboteBackendConfig.authToken?.takeIf { it.isNotBlank() } ?: return
+        try {
+            val sessionFile = File(dir, "mbote_cached_session.json")
+            val text = json.encodeToString(
+                CachedAuthSession.serializer(),
+                CachedAuthSession(
+                    authToken = token,
+                    refreshToken = MboteBackendConfig.refreshToken,
+                    userProfile = _userProfile.value
+                )
+            )
+            sessionFile.writeText(text)
+            saveCachedUserProfile()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun clearCachedSession() {
+        val dir = cacheDir ?: return
+        try {
+            File(dir, "mbote_cached_session.json").delete()
         } catch (e: Exception) {
             e.printStackTrace()
         }
