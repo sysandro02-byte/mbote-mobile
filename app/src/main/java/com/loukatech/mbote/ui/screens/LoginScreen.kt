@@ -30,6 +30,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.util.Log
 import com.loukatech.mbote.service.api.AdminStatsData
 import com.loukatech.mbote.service.api.BusinessRegistrationRequest
 import com.loukatech.mbote.service.api.PendingOtpChallenge
@@ -125,6 +126,7 @@ fun LoginScreen(
     var registrationConfig by remember { mutableStateOf(RegistrationPublicConfig()) }
     var pendingChallenge by remember { mutableStateOf<PendingOtpChallenge?>(null) }
     var otpCode by remember { mutableStateOf("") }
+    var otpErrorMessage by remember { mutableStateOf<String?>(null) }
     var countryPrefix by remember { mutableStateOf("+242") }
     var showPassword by remember { mutableStateOf(false) }
     var rememberMe by remember { mutableStateOf(true) }
@@ -206,12 +208,44 @@ fun LoginScreen(
                     Text("Saisissez le code à 6 chiffres envoyé à ${challenge.target}.")
                     OutlinedTextField(
                         value = otpCode,
-                        onValueChange = { otpCode = it.filter(Char::isDigit).take(6) },
+                        onValueChange = {
+                            otpCode = it.filter(Char::isDigit).take(6)
+                            otpErrorMessage = null
+                        },
                         label = { Text("Code OTP") },
+                        supportingText = {
+                            Text(
+                                text = "${otpCode.length}/6 chiffres",
+                                color = if (otpCode.length == 6) Color(0xFF6EE7B7) else Color(0xFF94A3B8)
+                            )
+                        },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        isError = otpErrorMessage != null,
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth().testTag("registration_otp_input")
                     )
+                    otpErrorMessage?.let { error ->
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFEF4444).copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFCA5A5),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(error, color = Color(0xFFFCA5A5), fontSize = 12.sp)
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -219,26 +253,47 @@ fun LoginScreen(
                     enabled = otpCode.length == 6 && !isLoading,
                     onClick = {
                         isLoading = true
+                        otpErrorMessage = null
+                        errorMessage = null
                         coroutineScope.launch {
-                            val userId = challenge.pendingUserId.toString().trim('"')
+                            val userId = challenge.pendingUserId.toString().trim().trim('"')
+                            val currentOtp = otpCode.trim()
+                            Log.d("MboteLoginScreen", "Validation OTP flow=${challenge.flow}, pendingUserId=$userId")
                             val result = if (challenge.flow == "login") {
-                                onVerifyLoginOtp(userId, otpCode)
+                                onVerifyLoginOtp(userId, currentOtp)
                             } else {
-                                onVerifyRegistrationOtp(userId, otpCode)
+                                onVerifyRegistrationOtp(userId, currentOtp)
                             }
                             isLoading = false
                             if (result.isSuccess) {
                                 pendingChallenge = null
+                                otpCode = ""
+                                otpErrorMessage = null
                                 onLoginSuccess()
                             } else {
-                                errorMessage = result.exceptionOrNull()?.message ?: "Code OTP invalide"
+                                val message = result.exceptionOrNull()?.message ?: "Code OTP invalide ou expiré."
+                                otpErrorMessage = message
+                                Log.w("MboteLoginScreen", "Echec validation OTP: $message")
                             }
                         }
                     }
-                ) { Text("Valider") }
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Valider")
+                    }
+                }
             },
             dismissButton = {
-                TextButton(onClick = { pendingChallenge = null; otpCode = "" }) { Text("Annuler") }
+                TextButton(
+                    enabled = !isLoading,
+                    onClick = {
+                        pendingChallenge = null
+                        otpCode = ""
+                        otpErrorMessage = null
+                    }
+                ) { Text("Annuler") }
             }
         )
     }
@@ -919,6 +974,7 @@ fun LoginScreen(
                             if (result.isSuccess) {
                                 pendingChallenge = result.getOrNull()
                                 otpCode = result.getOrNull()?.devOtp.orEmpty()
+                                otpErrorMessage = null
                                 successToast = "Code de connexion envoyé."
                             } else {
                                 errorMessage = result.exceptionOrNull()?.message ?: "Identifiants incorrects"
@@ -979,6 +1035,7 @@ fun LoginScreen(
                             if (result.isSuccess) {
                                 pendingChallenge = result.getOrNull()
                                 otpCode = result.getOrNull()?.devOtp.orEmpty()
+                                otpErrorMessage = null
                                 successToast = "Compte créé. Vérifiez le code OTP envoyé."
                             } else {
                                 errorMessage = result.exceptionOrNull()?.message ?: "Erreur d'inscription"

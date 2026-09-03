@@ -688,7 +688,7 @@ class MboteApiService {
             endpoint = "/auth/verify-login-otp",
             method = "POST",
             requestBody = VerifyOtpRequest(pendingUserId, otp)
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<VerifiedAuthResponse>(json) }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<VerifiedAuthResponse>(responseObject(json)) }
         response.getOrNull()?.let { MboteBackendConfig.authToken = it.token }
         return response
     }
@@ -711,7 +711,7 @@ class MboteApiService {
             endpoint = "/auth/verify-registration-otp",
             method = "POST",
             requestBody = VerifyOtpRequest(pendingUserId, otp)
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<VerifiedAuthResponse>(json) }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<VerifiedAuthResponse>(responseObject(json)) }
         response.getOrNull()?.let { MboteBackendConfig.authToken = it.token }
         return response
     }
