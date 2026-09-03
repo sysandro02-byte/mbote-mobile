@@ -2,6 +2,7 @@ param(
   [string]$AvdName = "mbote_api26",
   [string]$AndroidSdkRoot = "D:\Android\Sdk",
   [string]$AndroidAvdHome = "D:\Android\Avd",
+  [string]$Locale = "fr-FR",
   [switch]$InstallDebugApk
 )
 
@@ -39,6 +40,25 @@ public static class MboteWindowNative {
     [MboteWindowNative]::ShowWindowAsync($emulatorWindow.MainWindowHandle, $restoreWindow) | Out-Null
     [MboteWindowNative]::SetForegroundWindow($emulatorWindow.MainWindowHandle) | Out-Null
   }
+}
+
+function Set-MboteEmulatorLocale {
+  if ([string]::IsNullOrWhiteSpace($Locale)) { return }
+
+  $currentLocale = (& $adbExe shell getprop persist.sys.locale 2>$null).Trim()
+  if ($currentLocale -eq $Locale) {
+    Write-Host "Langue Android deja configuree: $Locale" -ForegroundColor Green
+    return
+  }
+
+  Write-Host "Configuration de la langue Android: $Locale..." -ForegroundColor Cyan
+  & $adbExe root | Out-Null
+  Start-Sleep -Seconds 2
+  & $adbExe shell setprop persist.sys.locale $Locale | Out-Null
+  & $adbExe shell settings put system system_locales $Locale | Out-Null
+  & $adbExe shell setprop ctl.restart zygote | Out-Null
+  & $adbExe wait-for-device
+  Start-Sleep -Seconds 8
 }
 
 if (-not (Test-Path -LiteralPath $emulatorExe)) {
@@ -81,6 +101,7 @@ if (-not $runningDevice) {
 }
 
 Write-Host "Activation du clavier PC pour l'emulateur..." -ForegroundColor Cyan
+Set-MboteEmulatorLocale
 & $adbExe shell settings put secure show_ime_with_hard_keyboard 1 | Out-Null
 & $adbExe shell settings put system show_touches 1 | Out-Null
 

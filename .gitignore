@@ -15,6 +15,7 @@ local.properties
 .tools/
 .codex-remote-attachments/
 reports/
+captures/
 supabase/.temp/
 supabase/migrations/20260512024324_remote_schema.sql
 mbote-profile-flow-tested.png
