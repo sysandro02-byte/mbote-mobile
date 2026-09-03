@@ -13,8 +13,8 @@ $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $targetBat
 $shortcut.WorkingDirectory = $projectRoot
-$shortcut.Description = "Active Ctrl + I pour lancer l'emulateur Android MBote"
+$shortcut.Description = "Active Alt + I pour lancer l'emulateur Android MBote"
 $shortcut.Save()
 
 Write-Host "Raccourci de demarrage cree: $shortcutPath" -ForegroundColor Green
-Write-Host "Ctrl + I sera actif apres ouverture de session Windows." -ForegroundColor Green
+Write-Host "Alt + I sera actif apres ouverture de session Windows." -ForegroundColor Green

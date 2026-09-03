@@ -38,16 +38,16 @@ public struct MSG {
 Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue
 
 $hotkeyId = 0x4D42
-$modControl = 0x0002
+$modAlt = 0x0001
 $vkI = 0x49
 $wmHotkey = 0x0312
 
-if (-not [MboteHotkeyNative]::RegisterHotKey([IntPtr]::Zero, $hotkeyId, $modControl, $vkI)) {
+if (-not [MboteHotkeyNative]::RegisterHotKey([IntPtr]::Zero, $hotkeyId, $modAlt, $vkI)) {
   $lastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-  throw "Impossible d'enregistrer Ctrl + I. Il est probablement deja utilise par une autre application. Code Win32: $lastError"
+  throw "Impossible d'enregistrer Alt + I. Il est probablement deja utilise par une autre application. Code Win32: $lastError"
 }
 
-Write-Host "Raccourci MBote actif: Ctrl + I lance l'emulateur Android." -ForegroundColor Green
+Write-Host "Raccourci MBote actif: Alt + I lance l'emulateur Android." -ForegroundColor Green
 Write-Host "Laissez cette fenetre/processus actif, ou installez le raccourci au demarrage Windows." -ForegroundColor DarkGray
 
 try {
