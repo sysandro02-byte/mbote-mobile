@@ -1,5 +1,5 @@
 param(
-  [string]$LauncherPath = (Join-Path (Split-Path -Parent $PSScriptRoot) "start-mbote-emulator.bat")
+  [string]$LauncherPath = (Join-Path (Split-Path -Parent $PSScriptRoot) "start-mbote-emulator-hidden.vbs")
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,7 +59,7 @@ try {
     if ($result -eq 0) { break }
     if ($msg.message -eq $wmHotkey -and $msg.wParam.ToUInt32() -eq $hotkeyId) {
       Add-Content -LiteralPath $logPath -Value "$(Get-Date -Format o) Alt+I recu, lancement de $LauncherPath"
-      Start-Process -FilePath $LauncherPath -WorkingDirectory (Split-Path -Parent $LauncherPath)
+      Start-Process -FilePath "wscript.exe" -ArgumentList "`"$LauncherPath`"" -WorkingDirectory (Split-Path -Parent $LauncherPath)
     }
   }
 } finally {
