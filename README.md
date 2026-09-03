@@ -40,3 +40,15 @@ Application mobile native de messagerie intelligente, appels sécurisés et visi
 - **Architecture** : MVVM (Model-View-ViewModel) avec Kotlin Coroutines & StateFlow
 - **Design System** : Material You avec palette dynamique violette / améthyste
 - **Images** : Coil Compose
+
+## ▶️ Lancer l'émulateur Android
+
+Double-clique sur `start-mbote-emulator.bat` à la racine du projet Android pour démarrer l'émulateur MBoté.
+
+Le lanceur cherche d'abord l'AVD `mbote_api26`, puis utilise automatiquement le premier émulateur disponible si ce nom n'existe pas. Il active aussi le clavier du PC dans l'émulateur.
+
+Pour installer automatiquement l'APK debug après le démarrage :
+
+```powershell
+.\scripts\start-mbote-emulator.ps1 -InstallDebugApk
+```

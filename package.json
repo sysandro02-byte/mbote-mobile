@@ -4,6 +4,7 @@
   "private": true,
   "description": "MBoté Android native application",
   "scripts": {
-    "build": "echo 'Android project ready'"
+    "build": "echo 'Android project ready'",
+    "test:publications": "node scripts/test-publications-and-message.mjs"
   }
 }
