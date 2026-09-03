@@ -70,6 +70,7 @@ fun SettingsScreen(
     onToggleDarkMode: () -> Unit,
     onThemeModeChange: (AppThemeMode) -> Unit = {},
     onToggleNotifications: () -> Unit,
+    onToggleOfflineMode: () -> Unit = {},
     onJobsClick: () -> Unit,
     onSyncContactsClick: () -> Unit = {},
     onAronQuestionsClick: () -> Unit = {},
@@ -79,6 +80,7 @@ fun SettingsScreen(
     onLoginClick: () -> Unit = {},
     onAdminClick: () -> Unit = {},
     onLogoutClick: () -> Unit = {},
+    onDeleteAccountClick: ((Boolean, String) -> Unit) -> Unit = {},
     onUpdateBio: (String) -> Unit = {},
     onAccessRequestClick: () -> Unit = {},
     blockedContactIds: Set<String> = emptySet(),
@@ -301,7 +303,10 @@ fun SettingsScreen(
 
     // Sub-Settings Dialogs
     when (activeSubSetting) {
-        SettingSection.ACCOUNT -> AccountSubSettingsDialog(onDismiss = { activeSubSetting = null })
+        SettingSection.ACCOUNT -> AccountSubSettingsDialog(
+            onDeleteAccountClick = onDeleteAccountClick,
+            onDismiss = { activeSubSetting = null }
+        )
         SettingSection.PRIVACY -> PrivacySubSettingsDialog(
             blockedContactIds = blockedContactIds,
             onUnblockContact = onUnblockContact,
@@ -1207,6 +1212,7 @@ fun SettingsScreen(
                         isChecked = offlineModeEnabled,
                         onToggle = {
                             offlineModeEnabled = !offlineModeEnabled
+                            onToggleOfflineMode()
                             Toast.makeText(
                                 context,
                                 if (offlineModeEnabled) "Mode hors ligne activé" else "Mode hors ligne désactivé",
@@ -1616,10 +1622,59 @@ fun SubSettingOptionChoice(
 }
 
 @Composable
-fun AccountSubSettingsDialog(onDismiss: () -> Unit) {
+fun AccountSubSettingsDialog(
+    onDeleteAccountClick: ((Boolean, String) -> Unit) -> Unit = {},
+    onDismiss: () -> Unit
+) {
     val context = LocalContext.current
     var securityAlerts by remember { mutableStateOf(true) }
     var twoFactorAuth by remember { mutableStateOf(true) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var deleteInProgress by remember { mutableStateOf(false) }
+
+    if (showDeleteConfirmation) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!deleteInProgress) showDeleteConfirmation = false
+            },
+            icon = {
+                Icon(
+                    imageVector = Icons.Outlined.DeleteForever,
+                    contentDescription = null,
+                    tint = Color(0xFFEF4444)
+                )
+            },
+            title = { Text("Supprimer définitivement le compte ?") },
+            text = {
+                Text("Cette action supprime votre profil MBoté côté serveur et ferme la session sur cet appareil. Elle est irréversible.")
+            },
+            confirmButton = {
+                Button(
+                    enabled = !deleteInProgress,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                    onClick = {
+                        deleteInProgress = true
+                        onDeleteAccountClick { success, message ->
+                            deleteInProgress = false
+                            showDeleteConfirmation = false
+                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            if (success) onDismiss()
+                        }
+                    }
+                ) {
+                    Text(if (deleteInProgress) "Suppression..." else "Supprimer")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !deleteInProgress,
+                    onClick = { showDeleteConfirmation = false }
+                ) {
+                    Text("Annuler")
+                }
+            }
+        )
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -1686,9 +1741,7 @@ fun AccountSubSettingsDialog(onDismiss: () -> Unit) {
                         title = "Supprimer mon compte",
                         subtitle = "Effacer définitivement vos messages, groupes et profil MBoté",
                         iconColor = Color(0xFFEF4444),
-                        onClick = {
-                            Toast.makeText(context, "Pour supprimer votre compte, vérifiez par SMS", Toast.LENGTH_LONG).show()
-                        }
+                        onClick = { showDeleteConfirmation = true }
                     )
                 }
 

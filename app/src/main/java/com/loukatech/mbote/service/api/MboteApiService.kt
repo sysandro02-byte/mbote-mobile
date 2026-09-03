@@ -151,6 +151,24 @@ data class ResetPasswordConfirmRequest(
 )
 
 @Serializable
+data class ProfileUpdateRequest(
+    val name: String? = null,
+    val email: String? = null,
+    val bio: String? = null,
+    val avatar: String? = null,
+    val coverUrl: String? = null
+)
+
+@Serializable
+private data class UserSettingsRequest(val value: JsonObject)
+
+@Serializable
+private data class UserSettingsResponse(val value: JsonObject = JsonObject(emptyMap()))
+
+@Serializable
+private data class DeleteAccountResponse(val ok: Boolean = false)
+
+@Serializable
 data class AdminLoginRequest(
     val adminKey: String,
     val email: String,
@@ -697,6 +715,41 @@ class MboteApiService {
         response.getOrNull()?.let { MboteBackendConfig.authToken = it.token }
         return response
     }
+
+    suspend fun logoutCurrentSession(token: String? = MboteBackendConfig.authToken): Result<Boolean> =
+        executeHttpRequest<Unit, Boolean>(
+            endpoint = "/auth/logout",
+            method = "POST",
+            token = token
+        ) { true }
+
+    suspend fun updateMyProfile(request: ProfileUpdateRequest): Result<AuthUserData> =
+        executeHttpRequest(
+            endpoint = "/users/me/profile",
+            method = "PUT",
+            requestBody = request
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<AuthUserData>(json) }
+
+    suspend fun fetchMySettings(): Result<JsonObject> =
+        executeHttpRequest<Unit, JsonObject>(
+            endpoint = "/users/me/settings",
+            method = "GET"
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<UserSettingsResponse>(json).value }
+
+    suspend fun updateMySettings(settings: JsonObject): Result<JsonObject> =
+        executeHttpRequest(
+            endpoint = "/users/me/settings",
+            method = "PUT",
+            requestBody = UserSettingsRequest(settings)
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<UserSettingsResponse>(json).value }
+
+    suspend fun deleteMyAccount(): Result<Boolean> =
+        executeHttpRequest<Unit, Boolean>(
+            endpoint = "/users/me",
+            method = "DELETE"
+        ) { json ->
+            runCatching { MboteBackendConfig.jsonParser.decodeFromString<DeleteAccountResponse>(json).ok }.getOrDefault(true)
+        }
 
     /**
      * Google Sign-In API

@@ -246,6 +246,19 @@ class MboteViewModel(
         _showLoginScreen.value = true
     }
 
+    fun deleteMyAccount(onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            val result = repository.deleteMyAccount()
+            if (result.isSuccess) {
+                com.loukatech.mbote.service.MboteSocketManager.disconnect()
+                _showLoginScreen.value = true
+                onResult(true, "Compte supprimé avec succès.")
+            } else {
+                onResult(false, result.exceptionOrNull()?.message ?: "Suppression du compte impossible.")
+            }
+        }
+    }
+
     fun toggleOfflineMode() {
         repository.toggleOfflineMode()
     }

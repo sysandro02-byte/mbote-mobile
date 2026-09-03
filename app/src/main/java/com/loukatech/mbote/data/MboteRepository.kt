@@ -154,10 +154,27 @@ class MboteRepository(
     }
 
     fun logout() {
+        MboteBackendConfig.authToken?.takeIf { it.isNotBlank() }?.let { token ->
+            CoroutineScope(Dispatchers.IO).launch {
+                apiService.logoutCurrentSession(token)
+            }
+        }
         MboteBackendConfig.authToken = null
         MboteBackendConfig.refreshToken = null
         _isAuthenticated.value = false
         clearCachedSession()
+    }
+
+    suspend fun deleteMyAccount(): Result<Unit> {
+        val result = apiService.deleteMyAccount()
+        return if (result.isSuccess && result.getOrDefault(false)) {
+            logout()
+            _userProfile.value = UserProfile()
+            saveCachedUserProfile()
+            Result.success(Unit)
+        } else {
+            Result.failure(result.exceptionOrNull() ?: IllegalStateException("Suppression du compte impossible"))
+        }
     }
 
     private val _notifications = MutableStateFlow<List<MboteNotification>>(emptyList())
@@ -1869,6 +1886,9 @@ class MboteRepository(
                 city = city
             )
         }
+        saveCachedUserProfile()
+        syncProfileToBackend()
+        syncSettingsToBackend()
     }
 
     fun setThemeMode(mode: AppThemeMode) {
@@ -1878,6 +1898,8 @@ class MboteRepository(
                 darkModeEnabled = mode == AppThemeMode.DARK
             )
         }
+        saveCachedUserProfile()
+        syncSettingsToBackend()
     }
 
     fun toggleDarkMode() {
@@ -1888,10 +1910,14 @@ class MboteRepository(
                 themeMode = if (newDark) AppThemeMode.DARK else AppThemeMode.LIGHT
             )
         }
+        saveCachedUserProfile()
+        syncSettingsToBackend()
     }
 
     fun toggleNotifications() {
         _userProfile.update { it.copy(notificationsEnabled = !it.notificationsEnabled) }
+        saveCachedUserProfile()
+        syncSettingsToBackend()
     }
 
     private fun createInitialChats(): List<Chat> = emptyList()
@@ -2206,21 +2232,66 @@ class MboteRepository(
     fun updateLanguage(language: AppLanguage) {
         _userProfile.update { it.copy(language = language) }
         saveCachedUserProfile()
+        syncSettingsToBackend()
     }
 
     fun updateCurrency(currency: AppCurrency) {
         _userProfile.update { it.copy(currency = currency) }
         saveCachedUserProfile()
+        syncSettingsToBackend()
     }
 
     fun updateThemeMode(themeMode: AppThemeMode) {
         _userProfile.update { it.copy(themeMode = themeMode) }
         saveCachedUserProfile()
+        syncSettingsToBackend()
     }
 
     fun updateUserProfile(profile: UserProfile) {
         _userProfile.value = profile
         saveCachedUserProfile()
+        syncProfileToBackend()
+        syncSettingsToBackend()
+    }
+
+    private fun syncProfileToBackend() {
+        if (MboteBackendConfig.authToken.isNullOrBlank()) return
+        val profile = _userProfile.value
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.updateMyProfile(
+                ProfileUpdateRequest(
+                    name = profile.name.takeIf { it.isNotBlank() },
+                    email = profile.email.takeIf { it.isNotBlank() },
+                    bio = profile.bio,
+                    avatar = profile.avatar.takeIf { it.isNotBlank() },
+                    coverUrl = profile.coverUrl.takeIf { it.isNotBlank() }
+                )
+            )
+        }
+    }
+
+    private fun syncSettingsToBackend() {
+        if (MboteBackendConfig.authToken.isNullOrBlank()) return
+        val profile = _userProfile.value
+        val settings = buildJsonObject {
+            put("notificationsEnabled", profile.notificationsEnabled)
+            put("themeMode", profile.themeMode.name)
+            put("darkModeEnabled", profile.darkModeEnabled)
+            put("language", profile.language.name)
+            put("currency", profile.currency.name)
+            put("autoTranslateTo", profile.autoTranslateTo)
+            put("e2eEncryptionEnabled", profile.e2eEncryptionEnabled)
+            put("parentalControlActive", profile.parentalControlActive)
+            put("parentEmail", profile.parentEmail)
+            put("nightLockdownEnabled", profile.nightLockdownEnabled)
+            put("maxDailyScreenTimeMinutes", profile.maxDailyScreenTimeMinutes)
+            put("commentCurfewHour", profile.commentCurfewHour)
+            put("schoolHoursRestrictionEnabled", profile.schoolHoursRestrictionEnabled)
+            put("isChildAccountLinkedByQrScan", profile.isChildAccountLinkedByQrScan)
+        }
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.updateMySettings(settings)
+        }
     }
 
     private var cacheDir: File? = null
