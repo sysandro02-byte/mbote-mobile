@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
 import com.loukatech.mbote.R
 import com.loukatech.mbote.model.MboteNotification
 import com.loukatech.mbote.model.NotificationType
@@ -139,7 +138,7 @@ class AppUsageTrackingService : Service() {
                 val intent = Intent(context, AppUsageTrackingService::class.java).apply {
                     action = ACTION_START
                 }
-                ContextCompat.startForegroundService(context, intent)
+                context.startService(intent)
             } catch (e: Exception) {
                 Log.e(TAG, "Erreur lors du démarrage du service", e)
             }

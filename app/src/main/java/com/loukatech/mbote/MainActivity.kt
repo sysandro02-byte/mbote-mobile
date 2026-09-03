@@ -189,8 +189,25 @@ class MainActivity : ComponentActivity() {
             val showLoginScreen by viewModel.showLoginScreen.collectAsStateWithLifecycle()
             val showAdminLoginDialog by viewModel.showAdminLoginDialog.collectAsStateWithLifecycle()
             val showForgotPasswordDialog by viewModel.showForgotPasswordDialog.collectAsStateWithLifecycle()
+            val onboardingCompletedKey = "mbote.onboarding.completed.v1"
+            var showLaunchSplash by remember { mutableStateOf(true) }
+            var showLaunchOnboarding by remember { mutableStateOf(false) }
 
             val isSystemDark = isSystemInDarkTheme()
+
+            LaunchedEffect(isAuthenticated, showLoginScreen) {
+                if (showLaunchSplash) {
+                    delay(700)
+                    showLaunchSplash = false
+                }
+                showLaunchOnboarding = (!isAuthenticated || showLoginScreen) &&
+                    !sharedPrefs.getBoolean(onboardingCompletedKey, false)
+            }
+
+            val finishLaunchOnboarding = {
+                sharedPrefs.edit().putBoolean(onboardingCompletedKey, true).apply()
+                showLaunchOnboarding = false
+            }
 
             LaunchedEffect(publicationError) {
                 publicationError?.let {
@@ -209,7 +226,13 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    when {
+                        showLaunchSplash -> MboteLaunchSplashScreen()
+                        showLaunchOnboarding && (!isAuthenticated || showLoginScreen) -> MboteLaunchOnboardingScreen(
+                            onFinish = finishLaunchOnboarding,
+                            onSkip = finishLaunchOnboarding
+                        )
+                        else -> BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                         val isWideScreen = maxWidth >= 720.dp
                         when {
                         // 0. Login & Auth Screen (if logged out or explicitly opened)
@@ -1120,6 +1143,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
 }
 }
 
