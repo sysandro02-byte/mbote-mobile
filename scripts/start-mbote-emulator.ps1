@@ -1,6 +1,7 @@
 param(
   [string]$AvdName = "mbote_api26",
   [string]$AndroidSdkRoot = "D:\Android\Sdk",
+  [string]$AndroidAvdHome = "D:\Android\Avd",
   [switch]$InstallDebugApk
 )
 
@@ -9,6 +10,36 @@ $ErrorActionPreference = "Stop"
 $emulatorExe = Join-Path $AndroidSdkRoot "emulator\emulator.exe"
 $adbExe = Join-Path $AndroidSdkRoot "platform-tools\adb.exe"
 $apkPath = Join-Path (Split-Path -Parent $PSScriptRoot) "app\build\outputs\apk\debug\app-debug.apk"
+
+$env:ANDROID_SDK_ROOT = $AndroidSdkRoot
+$env:ANDROID_HOME = $AndroidSdkRoot
+$env:ANDROID_AVD_HOME = $AndroidAvdHome
+
+function Show-MboteEmulatorWindow {
+  $signature = @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class MboteWindowNative {
+  [DllImport("user32.dll")]
+  public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+  [DllImport("user32.dll")]
+  public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+
+  Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue
+  $restoreWindow = 9
+  $emulatorWindow = Get-Process emulator, qemu-system-x86_64 -ErrorAction SilentlyContinue |
+    Where-Object { $_.MainWindowHandle -ne 0 } |
+    Select-Object -First 1
+
+  if ($emulatorWindow) {
+    [MboteWindowNative]::ShowWindowAsync($emulatorWindow.MainWindowHandle, $restoreWindow) | Out-Null
+    [MboteWindowNative]::SetForegroundWindow($emulatorWindow.MainWindowHandle) | Out-Null
+  }
+}
 
 if (-not (Test-Path -LiteralPath $emulatorExe)) {
   throw "emulator.exe introuvable: $emulatorExe"
@@ -46,6 +77,7 @@ if (-not $runningDevice) {
   } while ($bootCompleted -ne "1")
 } else {
   Write-Host "Un appareil Android est deja connecte: $($runningDevice.Line.Trim())" -ForegroundColor Green
+  Show-MboteEmulatorWindow
 }
 
 Write-Host "Activation du clavier PC pour l'emulateur..." -ForegroundColor Cyan
@@ -62,3 +94,4 @@ if ($InstallDebugApk) {
 
 Write-Host "Emulateur pret. Le clavier PC est active." -ForegroundColor Green
 Write-Host "Astuce: double-clique start-mbote-emulator.bat pour relancer rapidement." -ForegroundColor DarkGray
+Show-MboteEmulatorWindow

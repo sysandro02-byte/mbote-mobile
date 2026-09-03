@@ -3,6 +3,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$logPath = Join-Path $env:TEMP "mbote-emulator-hotkey.log"
 
 if (-not (Test-Path -LiteralPath $LauncherPath)) {
   throw "Lanceur introuvable: $LauncherPath"
@@ -49,6 +50,7 @@ if (-not [MboteHotkeyNative]::RegisterHotKey([IntPtr]::Zero, $hotkeyId, $modAlt,
 
 Write-Host "Raccourci MBote actif: Alt + I lance l'emulateur Android." -ForegroundColor Green
 Write-Host "Laissez cette fenetre/processus actif, ou installez le raccourci au demarrage Windows." -ForegroundColor DarkGray
+Add-Content -LiteralPath $logPath -Value "$(Get-Date -Format o) Alt+I watcher actif"
 
 try {
   while ($true) {
@@ -56,6 +58,7 @@ try {
     $result = [MboteHotkeyNative]::GetMessage([ref]$msg, [IntPtr]::Zero, 0, 0)
     if ($result -eq 0) { break }
     if ($msg.message -eq $wmHotkey -and $msg.wParam.ToUInt32() -eq $hotkeyId) {
+      Add-Content -LiteralPath $logPath -Value "$(Get-Date -Format o) Alt+I recu, lancement de $LauncherPath"
       Start-Process -FilePath $LauncherPath -WorkingDirectory (Split-Path -Parent $LauncherPath)
     }
   }
