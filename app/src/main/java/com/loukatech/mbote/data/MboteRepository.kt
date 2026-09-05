@@ -41,6 +41,9 @@ class MboteRepository(
     }
 
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    private val maxInlineStatusImageBytes = 2 * 1024 * 1024
+    private val maxInlineStatusAudioBytes = 4 * 1024 * 1024
+    private val maxInlineActusImageBytes = 2 * 1024 * 1024
 
     private val _userProfile = MutableStateFlow(UserProfile())
     val userProfile: StateFlow<UserProfile> = _userProfile.asStateFlow()
@@ -1649,7 +1652,8 @@ class MboteRepository(
         visibility: String = "friends"
     ): Result<StatusItem> {
         val dataUrl = if (mediaUri != null && mediaType != "text") {
-            contentUriToDataUrl(context, mediaUri, 12 * 1024 * 1024).getOrElse { return Result.failure(it) }
+            val inlineLimit = if (mediaType == "audio") maxInlineStatusAudioBytes else maxInlineStatusImageBytes
+            contentUriToDataUrl(context, mediaUri, inlineLimit).getOrElse { return Result.failure(it) }
         } else null
         return addStatus(text, dataUrl, mediaType, background, visibility)
     }
@@ -1702,7 +1706,7 @@ class MboteRepository(
         val media = when {
             mediaUri == null || mediaType == "text" -> null
             mediaType == "video" -> apiService.uploadPublicationVideo(context, mediaUri, "actus-videos").getOrElse { return Result.failure(it) }
-            else -> contentUriToDataUrl(context, mediaUri, 12 * 1024 * 1024).getOrElse { return Result.failure(it) }
+            else -> contentUriToDataUrl(context, mediaUri, maxInlineActusImageBytes).getOrElse { return Result.failure(it) }
         }
         return publishPostApi(title, content, media, category, mediaType)
     }

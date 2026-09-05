@@ -105,24 +105,39 @@ private data class StatusDto(
 /** REST client for the canonical MBoté publication APIs. */
 class PublicationApiService {
     private val maxJsonResponseChars = 2_000_000
+    private val maxErrorResponseChars = 64_000
 
-    private fun readHttpText(inputStream: java.io.InputStream?, endpoint: String): String {
+    private fun readHttpText(
+        inputStream: java.io.InputStream?,
+        endpoint: String,
+        maxChars: Int = maxJsonResponseChars,
+        failOnLimit: Boolean = true
+    ): String {
         if (inputStream == null) return ""
         val buffer = CharArray(16 * 1024)
         val response = StringBuilder()
+        var truncated = false
         BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).use { reader ->
             while (true) {
                 val read = reader.read(buffer)
                 if (read < 0) break
-                if (response.length + read > maxJsonResponseChars) {
-                    val remaining = maxJsonResponseChars - response.length
+                if (response.length + read > maxChars) {
+                    val remaining = maxChars - response.length
                     if (remaining > 0) response.append(buffer, 0, remaining)
-                    throw IllegalStateException("Réponse serveur trop volumineuse pour $endpoint")
+                    if (failOnLimit) {
+                        throw IllegalStateException("Réponse serveur anormalement volumineuse pour $endpoint")
+                    }
+                    truncated = true
+                    break
                 }
                 response.append(buffer, 0, read)
             }
         }
-        return response.toString()
+        return if (truncated) {
+            "${response}\n[réponse serveur tronquée côté application]"
+        } else {
+            response.toString()
+        }
     }
 
     private suspend inline fun <reified Req> request(
@@ -155,12 +170,17 @@ class PublicationApiService {
                 }
             }
             val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val response = readHttpText(stream, endpoint)
             if (code !in 200..299) {
+                val response = readHttpText(
+                    connection.errorStream ?: connection.inputStream,
+                    endpoint,
+                    maxErrorResponseChars,
+                    failOnLimit = false
+                )
                 val error = runCatching { MboteBackendConfig.jsonParser.decodeFromString<PublicationErrorResponse>(response) }.getOrNull()
                 return@withContext Result.failure(IllegalStateException(error?.error ?: error?.message ?: "API HTTP $code"))
             }
+            val response = readHttpText(connection.inputStream, endpoint)
             Result.success(response)
         } catch (error: Exception) {
             Result.failure(error)

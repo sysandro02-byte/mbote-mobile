@@ -481,10 +481,18 @@ class MboteApiService {
         }
     }
 
-    private fun readHttpText(inputStream: java.io.InputStream?, endpoint: String, maxChars: Int = maxJsonResponseChars): String {
+    private val maxErrorResponseChars = 64_000
+
+    private fun readHttpText(
+        inputStream: java.io.InputStream?,
+        endpoint: String,
+        maxChars: Int = maxJsonResponseChars,
+        failOnLimit: Boolean = true
+    ): String {
         if (inputStream == null) return ""
         val buffer = CharArray(16 * 1024)
         val response = StringBuilder()
+        var truncated = false
         BufferedReader(InputStreamReader(inputStream, "UTF-8")).use { reader ->
             while (true) {
                 val read = reader.read(buffer)
@@ -492,12 +500,20 @@ class MboteApiService {
                 if (response.length + read > maxChars) {
                     val remaining = maxChars - response.length
                     if (remaining > 0) response.append(buffer, 0, remaining)
-                    throw IllegalStateException("Réponse serveur trop volumineuse pour $endpoint")
+                    if (failOnLimit) {
+                        throw IllegalStateException("Réponse serveur anormalement volumineuse pour $endpoint")
+                    }
+                    truncated = true
+                    break
                 }
                 response.append(buffer, 0, read)
             }
         }
-        return response.toString()
+        return if (truncated) {
+            "${response}\n[réponse serveur tronquée côté application]"
+        } else {
+            response.toString()
+        }
     }
 
     private fun logHttpResponse(method: String, endpoint: String, responseCode: Int, responseText: String) {
@@ -629,19 +645,19 @@ class MboteApiService {
             }
 
             val responseCode = connection.responseCode
-            val inputStream = if (responseCode in 200..299) {
-                connection.inputStream
-            } else {
-                connection.errorStream ?: connection.inputStream
-            }
-
-            val responseText = readHttpText(inputStream, endpoint, maxResponseChars)
-            logHttpResponse(method, endpoint, responseCode, responseText)
-
             if (responseCode in 200..299) {
+                val responseText = readHttpText(connection.inputStream, endpoint, maxResponseChars)
+                logHttpResponse(method, endpoint, responseCode, responseText)
                 val result = deserialize(responseText)
                 Result.success(result)
             } else {
+                val responseText = readHttpText(
+                    connection.errorStream ?: connection.inputStream,
+                    endpoint,
+                    maxErrorResponseChars,
+                    failOnLimit = false
+                )
+                logHttpResponse(method, endpoint, responseCode, responseText)
                 val serverError = runCatching {
                     MboteBackendConfig.jsonParser.decodeFromString<ApiErrorResponse>(responseText).let { it.error ?: it.message }
                 }.getOrNull()
@@ -1203,7 +1219,12 @@ class MboteApiService {
             } ?: return@withContext Result.failure(IllegalStateException("Vidéo Android inaccessible."))
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val response = readHttpText(stream, "/uploads/$safeSurface")
+            val response = readHttpText(
+                stream,
+                "/uploads/$safeSurface",
+                if (code in 200..299) maxJsonResponseChars else maxErrorResponseChars,
+                failOnLimit = code in 200..299
+            )
             if (code !in 200..299) {
                 val error = runCatching { MboteBackendConfig.jsonParser.decodeFromString<ApiErrorResponse>(response) }.getOrNull()
                 Result.failure(IllegalStateException(error?.error ?: error?.message ?: "Upload HTTP $code"))
