@@ -429,6 +429,7 @@ private data class CreateShortCommentRequest(val content: String)
  */
 class MboteApiService {
     private val maxJsonResponseChars = 2_000_000
+    private val maxAuthResponseChars = 12_000_000
     private val maxLogBodyChars = 1_200
 
     private fun JsonObject.element(vararg keys: String): JsonElement? =
@@ -480,7 +481,7 @@ class MboteApiService {
         }
     }
 
-    private fun readHttpText(inputStream: java.io.InputStream?, endpoint: String): String {
+    private fun readHttpText(inputStream: java.io.InputStream?, endpoint: String, maxChars: Int = maxJsonResponseChars): String {
         if (inputStream == null) return ""
         val buffer = CharArray(16 * 1024)
         val response = StringBuilder()
@@ -488,8 +489,8 @@ class MboteApiService {
             while (true) {
                 val read = reader.read(buffer)
                 if (read < 0) break
-                if (response.length + read > maxJsonResponseChars) {
-                    val remaining = maxJsonResponseChars - response.length
+                if (response.length + read > maxChars) {
+                    val remaining = maxChars - response.length
                     if (remaining > 0) response.append(buffer, 0, remaining)
                     throw IllegalStateException("Réponse serveur trop volumineuse pour $endpoint")
                 }
@@ -600,6 +601,7 @@ class MboteApiService {
         method: String = "GET",
         requestBody: Req? = null,
         token: String? = MboteBackendConfig.authToken,
+        maxResponseChars: Int = maxJsonResponseChars,
         crossinline deserialize: (String) -> Res
     ): Result<Res> = withContext(Dispatchers.IO) {
         var connection: HttpURLConnection? = null
@@ -633,7 +635,7 @@ class MboteApiService {
                 connection.errorStream ?: connection.inputStream
             }
 
-            val responseText = readHttpText(inputStream, endpoint)
+            val responseText = readHttpText(inputStream, endpoint, maxResponseChars)
             logHttpResponse(method, endpoint, responseCode, responseText)
 
             if (responseCode in 200..299) {
@@ -718,7 +720,8 @@ class MboteApiService {
         val response = executeHttpRequest(
             endpoint = "/auth/verify-login-otp",
             method = "POST",
-            requestBody = VerifyOtpRequest(pendingUserId, otp)
+            requestBody = VerifyOtpRequest(pendingUserId, otp),
+            maxResponseChars = maxAuthResponseChars
         ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<VerifiedAuthResponse>(responseObject(json)) }
         response.getOrNull()?.let { MboteBackendConfig.authToken = it.token }
         return response
@@ -741,7 +744,8 @@ class MboteApiService {
         val response = executeHttpRequest(
             endpoint = "/auth/verify-registration-otp",
             method = "POST",
-            requestBody = VerifyOtpRequest(pendingUserId, otp)
+            requestBody = VerifyOtpRequest(pendingUserId, otp),
+            maxResponseChars = maxAuthResponseChars
         ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<VerifiedAuthResponse>(responseObject(json)) }
         response.getOrNull()?.let { MboteBackendConfig.authToken = it.token }
         return response
