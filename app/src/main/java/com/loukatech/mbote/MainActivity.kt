@@ -194,7 +194,6 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(isAuthenticated) {
                 if (isAuthenticated && !usageTrackingStarted) {
                     com.loukatech.mbote.service.AppUsageTrackingService.start(applicationContext)
-                    viewModel.checkAndRunAutoBackup(applicationContext)
                     usageTrackingStarted = true
                 } else if (!isAuthenticated && usageTrackingStarted) {
                     com.loukatech.mbote.service.AppUsageTrackingService.stop(applicationContext)

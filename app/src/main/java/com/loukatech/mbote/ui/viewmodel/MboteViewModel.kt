@@ -139,11 +139,16 @@ class MboteViewModel(
         }
         viewModelScope.launch {
             _isDataSyncing.value = true
-            repository.syncAllFromBackend()
-            if (repository.isAuthenticated.value) {
-                repository.refreshChannels()
+            try {
+                repository.syncAllFromBackend()
+                if (repository.isAuthenticated.value) {
+                    repository.refreshChannels()
+                }
+            } catch (error: Throwable) {
+                _publicationError.value = error.message ?: "Synchronisation MBoté interrompue."
+            } finally {
+                _isDataSyncing.value = false
             }
-            _isDataSyncing.value = false
         }
     }
 

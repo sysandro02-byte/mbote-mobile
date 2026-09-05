@@ -428,6 +428,9 @@ private data class CreateShortCommentRequest(val content: String)
  * Performs real HTTP REST calls with JSON payloads, Bearer Authorization, and error handling.
  */
 class MboteApiService {
+    private val maxJsonResponseChars = 2_000_000
+    private val maxLogBodyChars = 1_200
+
     private fun JsonObject.element(vararg keys: String): JsonElement? =
         keys.firstNotNullOfOrNull { key -> this[key]?.takeUnless { it is JsonNull } }
 
@@ -475,6 +478,34 @@ class MboteApiService {
             is JsonObject -> (root["data"] as? JsonObject) ?: root
             else -> throw IllegalStateException("Réponse serveur invalide")
         }
+    }
+
+    private fun readHttpText(inputStream: java.io.InputStream?, endpoint: String): String {
+        if (inputStream == null) return ""
+        val buffer = CharArray(16 * 1024)
+        val response = StringBuilder()
+        BufferedReader(InputStreamReader(inputStream, "UTF-8")).use { reader ->
+            while (true) {
+                val read = reader.read(buffer)
+                if (read < 0) break
+                if (response.length + read > maxJsonResponseChars) {
+                    val remaining = maxJsonResponseChars - response.length
+                    if (remaining > 0) response.append(buffer, 0, remaining)
+                    throw IllegalStateException("Réponse serveur trop volumineuse pour $endpoint")
+                }
+                response.append(buffer, 0, read)
+            }
+        }
+        return response.toString()
+    }
+
+    private fun logHttpResponse(method: String, endpoint: String, responseCode: Int, responseText: String) {
+        val preview = responseText
+            .replace("\n", " ")
+            .replace("\r", " ")
+            .take(maxLogBodyChars)
+        val suffix = if (responseText.length > maxLogBodyChars) "…(${responseText.length} chars)" else ""
+        Log.d(tag, "HTTP $method $endpoint ($responseCode): $preview$suffix")
     }
 
     private fun parseChatDto(element: JsonElement): ChatDto {
@@ -602,8 +633,8 @@ class MboteApiService {
                 connection.errorStream ?: connection.inputStream
             }
 
-            val responseText = BufferedReader(InputStreamReader(inputStream, "UTF-8")).use { it.readText() }
-            Log.d(tag, "HTTP $method $endpoint ($responseCode): $responseText")
+            val responseText = readHttpText(inputStream, endpoint)
+            logHttpResponse(method, endpoint, responseCode, responseText)
 
             if (responseCode in 200..299) {
                 val result = deserialize(responseText)
@@ -982,7 +1013,7 @@ class MboteApiService {
      */
     suspend fun fetchShortVideos(): Result<List<ShortVideo>> {
         return executeHttpRequest<Unit, List<ShortVideo>>(
-            endpoint = "/short-videos?limit=40",
+            endpoint = "/short-videos?limit=12",
             method = "GET"
         ) { json ->
             responseArray(json).map {
@@ -1168,7 +1199,7 @@ class MboteApiService {
             } ?: return@withContext Result.failure(IllegalStateException("Vidéo Android inaccessible."))
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val response = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            val response = readHttpText(stream, "/uploads/$safeSurface")
             if (code !in 200..299) {
                 val error = runCatching { MboteBackendConfig.jsonParser.decodeFromString<ApiErrorResponse>(response) }.getOrNull()
                 Result.failure(IllegalStateException(error?.error ?: error?.message ?: "Upload HTTP $code"))

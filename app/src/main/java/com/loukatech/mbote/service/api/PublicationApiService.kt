@@ -104,6 +104,27 @@ private data class StatusDto(
 
 /** REST client for the canonical MBoté publication APIs. */
 class PublicationApiService {
+    private val maxJsonResponseChars = 2_000_000
+
+    private fun readHttpText(inputStream: java.io.InputStream?, endpoint: String): String {
+        if (inputStream == null) return ""
+        val buffer = CharArray(16 * 1024)
+        val response = StringBuilder()
+        BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).use { reader ->
+            while (true) {
+                val read = reader.read(buffer)
+                if (read < 0) break
+                if (response.length + read > maxJsonResponseChars) {
+                    val remaining = maxJsonResponseChars - response.length
+                    if (remaining > 0) response.append(buffer, 0, remaining)
+                    throw IllegalStateException("Réponse serveur trop volumineuse pour $endpoint")
+                }
+                response.append(buffer, 0, read)
+            }
+        }
+        return response.toString()
+    }
+
     private suspend inline fun <reified Req> request(
         endpoint: String,
         method: String = "GET",
@@ -135,9 +156,7 @@ class PublicationApiService {
             }
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val response = stream?.let { input ->
-                BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { it.readText() }
-            }.orEmpty()
+            val response = readHttpText(stream, endpoint)
             if (code !in 200..299) {
                 val error = runCatching { MboteBackendConfig.jsonParser.decodeFromString<PublicationErrorResponse>(response) }.getOrNull()
                 return@withContext Result.failure(IllegalStateException(error?.error ?: error?.message ?: "API HTTP $code"))
@@ -166,7 +185,7 @@ class PublicationApiService {
         return JsonArray(emptyList())
     }
 
-    suspend fun fetchActusPosts(): Result<List<NewsPost>> = request<Unit>("/actus/posts?limit=50")
+    suspend fun fetchActusPosts(): Result<List<NewsPost>> = request<Unit>("/actus/posts?limit=20")
         .mapCatching { payload ->
             responseArray(payload, "actus", "news", "posts").map {
                 mapActus(MboteBackendConfig.jsonParser.decodeFromJsonElement<ActusPostDto>(it))
@@ -180,7 +199,7 @@ class PublicationApiService {
         request("/actus/posts/$postId/reactions", "POST", ReactionRequest(reaction)).map { Unit }
 
     suspend fun fetchActusComments(postId: String): Result<List<Comment>> =
-        request<Unit>("/actus/posts/$postId/comments?limit=100").mapCatching { payload ->
+        request<Unit>("/actus/posts/$postId/comments?limit=30").mapCatching { payload ->
             responseArray(payload, "comments").map { rawComment ->
                 val comment = MboteBackendConfig.jsonParser.decodeFromJsonElement<ActusCommentDto>(rawComment)
                 Comment(
