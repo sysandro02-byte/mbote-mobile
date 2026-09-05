@@ -64,7 +64,6 @@ class MainActivity : ComponentActivity() {
         viewModel.initializeCache(applicationContext.filesDir)
         com.loukatech.mbote.service.MboteI18nService.initialize(this)
         com.loukatech.mbote.service.MboteNotificationManager.initNotificationChannels(this)
-        com.loukatech.mbote.service.AppUsageTrackingService.start(this)
         enableEdgeToEdge()
 
         setContent {
@@ -99,10 +98,6 @@ class MainActivity : ComponentActivity() {
             val sharedPrefs = remember { context.getSharedPreferences("mbote_prefs", android.content.Context.MODE_PRIVATE) }
             val isBiometricEnabled = remember { sharedPrefs.getBoolean("biometric_enabled", false) }
             var isAppUnlocked by remember { mutableStateOf(!isBiometricEnabled) }
-
-            LaunchedEffect(Unit) {
-                viewModel.checkAndRunAutoBackup(context)
-            }
 
             if (isBiometricEnabled && !isAppUnlocked) {
                 BiometricLockOverlay(
@@ -189,11 +184,23 @@ class MainActivity : ComponentActivity() {
             val showLoginScreen by viewModel.showLoginScreen.collectAsStateWithLifecycle()
             val showAdminLoginDialog by viewModel.showAdminLoginDialog.collectAsStateWithLifecycle()
             val showForgotPasswordDialog by viewModel.showForgotPasswordDialog.collectAsStateWithLifecycle()
+            var usageTrackingStarted by remember { mutableStateOf(false) }
             val onboardingCompletedKey = "mbote.onboarding.completed.v1"
             var showLaunchSplash by remember { mutableStateOf(true) }
             var showLaunchOnboarding by remember { mutableStateOf(false) }
 
             val isSystemDark = isSystemInDarkTheme()
+
+            LaunchedEffect(isAuthenticated) {
+                if (isAuthenticated && !usageTrackingStarted) {
+                    com.loukatech.mbote.service.AppUsageTrackingService.start(applicationContext)
+                    viewModel.checkAndRunAutoBackup(applicationContext)
+                    usageTrackingStarted = true
+                } else if (!isAuthenticated && usageTrackingStarted) {
+                    com.loukatech.mbote.service.AppUsageTrackingService.stop(applicationContext)
+                    usageTrackingStarted = false
+                }
+            }
 
             LaunchedEffect(isAuthenticated, showLoginScreen) {
                 if (showLaunchSplash) {
