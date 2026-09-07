@@ -3,6 +3,7 @@ package com.loukatech.mbote.service.api
 import com.loukatech.mbote.model.Comment
 import com.loukatech.mbote.model.NewsPost
 import com.loukatech.mbote.model.StatusItem
+import com.loukatech.mbote.model.JobOffer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -57,6 +58,31 @@ private data class PublicationErrorResponse(val error: String? = null, val messa
 private data class PublicationShareResponse(val shareCount: Int = 0)
 
 @Serializable
+private data class JobDto(
+    val id: String,
+    val title: String,
+    val company: String,
+    val location: String = "",
+    val type: String = "",
+    val description: String = "",
+    val activityDomain: String = "",
+    val duration: String = "",
+    val salary: String = "",
+    val publishedAt: String = "",
+    val expiresAt: String = "",
+    val url: String = "",
+    val imageUrl: String? = null
+) {
+    fun toOffer() = JobOffer(
+        id = id, title = title, company = company, location = location,
+        companyLogo = imageUrl, type = type, contractType = duration.ifBlank { type },
+        workMode = "", experienceLevel = "", salary = salary, duration = duration,
+        domain = activityDomain, description = description, postedDate = publishedAt,
+        deadline = expiresAt, applicantsCount = 0, likesCount = 0, applyUrl = url
+    )
+}
+
+@Serializable
 private data class ActusPostDto(
     val id: JsonElement,
     @SerialName("author_id") val authorId: JsonElement? = null,
@@ -106,6 +132,19 @@ private data class StatusDto(
 class PublicationApiService {
     private val maxJsonResponseChars = 2_000_000
     private val maxErrorResponseChars = 64_000
+
+    suspend fun fetchJobs(): Result<List<JobOffer>> = request<Unit>("/jobs").mapCatching { payload ->
+        responseArray(payload, "jobs").map { MboteBackendConfig.jsonParser.decodeFromJsonElement<JobDto>(it).toOffer() }
+    }
+
+    suspend fun createJob(fields: Map<String, String>): Result<JobOffer> =
+        request("/jobs", "POST", fields).mapCatching { payload ->
+            val root = MboteBackendConfig.jsonParser.parseToJsonElement(payload).jsonObject
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<JobDto>(root.getValue("job")).toOffer()
+        }
+
+    suspend fun applyToJob(jobId: String, cvUrl: String = ""): Result<Unit> =
+        request("/jobs/$jobId/apply", "POST", mapOf("cvUrl" to cvUrl)).map { Unit }
 
     private fun readHttpText(
         inputStream: java.io.InputStream?,

@@ -757,6 +757,7 @@ class MboteViewModel(
     }
 
     fun postStatus(context: android.content.Context, text: String, mediaUri: android.net.Uri? = null, mediaType: String = "text", background: String? = null, visibility: String = "friends") {
+        if (_isPublishing.value) return
         if (text.isBlank() && mediaUri == null) return
         viewModelScope.launch {
             _isPublishing.value = true
@@ -800,11 +801,15 @@ class MboteViewModel(
         }
     }
 
-    fun addNewsPost(context: android.content.Context, title: String, content: String, mediaUri: android.net.Uri? = null, category: String = "Communauté", mediaType: String = "text") {
+    fun addNewsPost(context: android.content.Context, title: String, content: String, mediaUri: android.net.Uri? = null, category: String = "Communauté", mediaType: String = "text", onComplete: (Boolean) -> Unit = {}) {
+        if (_isPublishing.value) { onComplete(false); return }
         viewModelScope.launch {
             _isPublishing.value = true
-            repository.publishPostFromDevice(context, title, content, mediaUri, category, mediaType).onFailure { _publicationError.value = it.message }
+            _publicationError.value = null
+            val result = repository.publishPostFromDevice(context, title, content, mediaUri, category, mediaType)
+            result.onFailure { _publicationError.value = it.message }
             _isPublishing.value = false
+            onComplete(result.isSuccess)
         }
     }
 
@@ -824,8 +829,12 @@ class MboteViewModel(
         repository.toggleJobBookmark(jobId)
     }
 
-    fun applyToJob(jobId: String): Boolean {
-        return repository.applyToJob(jobId)
+    fun applyToJob(jobId: String, onComplete: (Boolean) -> Unit = {}, cvUrl: String = "") {
+        viewModelScope.launch {
+            val result = repository.applyToJob(jobId, cvUrl)
+            result.onFailure { _publicationError.value = it.message }
+            onComplete(result.isSuccess)
+        }
     }
 
     fun postJobOffer(
@@ -838,9 +847,11 @@ class MboteViewModel(
         salary: String,
         description: String,
         requirements: List<String> = emptyList(),
-        benefits: List<String> = emptyList()
-    ): JobOffer {
-        return repository.postJobOffer(
+        benefits: List<String> = emptyList(),
+        onComplete: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+        val result = repository.postJobOffer(
             title = title,
             company = company,
             location = location,
@@ -852,6 +863,9 @@ class MboteViewModel(
             requirements = requirements,
             benefits = benefits
         )
+        result.onFailure { _publicationError.value = it.message }
+        onComplete(result.isSuccess)
+        }
     }
 
     fun updateUserProfile(name: String, bio: String, phone: String, city: String) {
@@ -936,6 +950,9 @@ class MboteViewModel(
 
     fun setShowJobsScreen(show: Boolean) {
         _showJobsScreen.value = show
+        if (show) viewModelScope.launch {
+            repository.refreshJobs().onFailure { _publicationError.value = it.message }
+        }
     }
 
     fun setShowAronQuestionsSheet(show: Boolean) {
@@ -1147,11 +1164,14 @@ class MboteViewModel(
         musicTitle: String,
         musicArtist: String,
         thumbnailUrl: String,
-        location: String? = null
+        location: String? = null,
+        visibility: String = "public"
     ) {
+        if (_isPublishing.value) return
         viewModelScope.launch {
             _isPublishing.value = true
-            val result = repository.createShortVideo(context, videoUri, durationSeconds, caption, hashtags, musicTitle, musicArtist, thumbnailUrl, location)
+            _publicationError.value = null
+            val result = repository.createShortVideo(context, videoUri, durationSeconds, caption, hashtags, musicTitle, musicArtist, thumbnailUrl, location, visibility)
             _isPublishing.value = false
             if (result.isSuccess) _showCreateShortVideoDialog.value = false
             else _publicationError.value = result.exceptionOrNull()?.message ?: "Publication ShortMBoté impossible."

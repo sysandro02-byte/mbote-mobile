@@ -1045,14 +1045,15 @@ class MboteApiService {
     /**
      * Create a new Short video on backend server
      */
-    suspend fun createShortVideoApi(video: ShortVideo): Result<ShortVideo> {
+    suspend fun createShortVideoApi(video: ShortVideo, visibility: String = "public"): Result<ShortVideo> {
         val request = CreateShortVideoRequest(
             caption = video.caption,
             videoUrl = video.videoPlaybackUrl,
             durationSeconds = video.durationFormatted.substringBefore(':').toIntOrNull()?.times(60)
                 ?.plus(video.durationFormatted.substringAfter(':').toIntOrNull() ?: 0) ?: 0,
             musicName = video.musicTitle,
-            thumbnailUrl = video.videoThumbnailUrl
+            thumbnailUrl = video.videoThumbnailUrl,
+            visibility = visibility
         )
         return executeHttpRequest<CreateShortVideoRequest, ShortVideo>(
             endpoint = "/short-videos",

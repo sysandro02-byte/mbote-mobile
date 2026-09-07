@@ -71,6 +71,7 @@ fun ShortVideosScreen(
     val selectedVideoForTip by viewModel.selectedShortVideoForTip.collectAsState()
     val selectedCreatorProfile by viewModel.selectedCreatorProfile.collectAsState()
     val showCreateDialog by viewModel.showCreateShortVideoDialog.collectAsState()
+    val isPublishing by viewModel.isPublishing.collectAsState()
     val userProfile by viewModel.userProfile.collectAsState()
     val userGiftState by viewModel.userGiftState.collectAsState()
     val chats by viewModel.chats.collectAsState()
@@ -363,9 +364,10 @@ fun ShortVideosScreen(
 
         if (showCreateDialog) {
             CreateShortVideoDialog(
+                isPublishing = isPublishing,
                 onDismiss = { viewModel.setShowCreateShortVideoDialog(false) },
-                onPublish = { videoUri, duration, caption, hashtags, musicTitle, musicArtist, thumb, loc ->
-                    viewModel.createShortVideo(context, videoUri, duration, caption, hashtags, musicTitle, musicArtist, thumb, loc)
+                onPublish = { videoUri, duration, caption, hashtags, musicTitle, musicArtist, thumb, loc, visibility ->
+                    viewModel.createShortVideo(context, videoUri, duration, caption, hashtags, musicTitle, musicArtist, thumb, loc, visibility)
                 }
             )
         }

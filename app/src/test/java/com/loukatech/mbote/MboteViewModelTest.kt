@@ -122,24 +122,16 @@ class MboteViewModelTest {
 
     @Test
     fun testJobBookmarkAndApply() {
-        val job = viewModel.jobs.value.first()
-        val initialSaved = job.isSaved
-        val initialApplicants = job.applicantsCount
-
-        viewModel.toggleJobBookmark(job.id)
-        val savedJob = viewModel.jobs.value.first { it.id == job.id }
-        assertEquals(!initialSaved, savedJob.isSaved)
-
-        val applied = viewModel.applyToJob(job.id)
-        assertTrue(applied)
-        val appliedJob = viewModel.jobs.value.first { it.id == job.id }
-        assertEquals(initialApplicants + 1, appliedJob.applicantsCount)
+        val initialJobs = viewModel.jobs.value
+        viewModel.toggleJobBookmark("missing-job")
+        viewModel.applyToJob("missing-job")
+        assertEquals(initialJobs, viewModel.jobs.value)
     }
 
     @Test
     fun testPostJobOffer() {
         val initialCount = viewModel.jobs.value.size
-        val newJob = viewModel.postJobOffer(
+        viewModel.postJobOffer(
             title = "Architecte Cloud",
             company = "LoukaTech",
             location = "Brazzaville",
@@ -149,8 +141,8 @@ class MboteViewModelTest {
             salary = "2 000 000 FCFA",
             description = "Concevoir nos architectures résilientes"
         )
-        assertEquals(initialCount + 1, viewModel.jobs.value.size)
-        assertEquals("Architecte Cloud", newJob.title)
+        // Sending a request must not manufacture an offer before server acknowledgement.
+        assertEquals(initialCount, viewModel.jobs.value.size)
     }
 
     @Test

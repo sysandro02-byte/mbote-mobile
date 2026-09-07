@@ -211,10 +211,10 @@ data class JobOffer(
     val requirements: List<String> = emptyList(),
     val benefits: List<String> = emptyList(),
     val postedDate: String = "Aujourd'hui",
-    val deadline: String = "30 Septembre 2026",
-    val applicantsCount: Int = 3,
-    val applyUrl: String = "https://mbote.app/jobs",
-    val likesCount: Int = 12,
+    val deadline: String = "",
+    val applicantsCount: Int = 0,
+    val applyUrl: String = "",
+    val likesCount: Int = 0,
     val isLiked: Boolean = false,
     val isSaved: Boolean = false
 )

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,7 +43,7 @@ fun JobsScreen(
     onBackClick: () -> Unit,
     onLikeJob: (String) -> Unit,
     onBookmarkJob: (String) -> Unit = {},
-    onApplyJob: (String) -> Unit = {},
+    onApplyJob: (String, String, (Boolean) -> Unit) -> Unit = { _, _, done -> done(false) },
     onPostJob: (
         title: String,
         company: String,
@@ -53,8 +54,9 @@ fun JobsScreen(
         salary: String,
         description: String,
         requirements: List<String>,
-        benefits: List<String>
-    ) -> Unit = { _, _, _, _, _, _, _, _, _, _ -> },
+        benefits: List<String>,
+        onComplete: (Boolean) -> Unit
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, done -> done(false) },
     onShareJob: (JobOffer) -> Unit = {},
     onReportJob: (JobOffer) -> Unit = {},
     modifier: Modifier = Modifier
@@ -67,18 +69,34 @@ fun JobsScreen(
     var selectedJobForDetails by remember { mutableStateOf<JobOffer?>(null) }
     var appliedJobTitle by remember { mutableStateOf<String?>(null) }
     var showPostJobDialog by remember { mutableStateOf(false) }
+    var submittingJob by remember { mutableStateOf(false) }
+    var applyingJob by remember { mutableStateOf(false) }
+    var cvUrl by remember { mutableStateOf("") }
+    var showCvDialog by remember { mutableStateOf(false) }
+    if (showCvDialog) {
+        AlertDialog(
+            onDismissRequest = { showCvDialog = false },
+            title = { Text("Joindre un lien de CV") },
+            text = {
+                OutlinedTextField(
+                    value = cvUrl, onValueChange = { cvUrl = it.trim() },
+                    label = { Text("Lien HTTPS de votre CV") },
+                    supportingText = { Text("Ce lien sera transmis au recruteur avec votre candidature MBoté.") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showCvDialog = false }, enabled = cvUrl.isBlank() ||
+                    (android.net.Uri.parse(cvUrl).scheme == "https" && !android.net.Uri.parse(cvUrl).host.isNullOrBlank())) {
+                    Text("Utiliser ce CV")
+                }
+            }
+        )
+    }
 
-    val domains = listOf(
-        "Tous",
-        "Ingénierie Logicielle",
-        "Télécoms & Réseaux",
-        "Design & Ergonomie",
-        "Finance & Fintech",
-        "IA & Data",
-        "Marketing & Ventes"
-    )
+    val domains = listOf("Tous") + jobs.map { it.domain }.filter(String::isNotBlank).distinct().sorted()
 
-    val contractTypes = listOf("Tous", "CDI", "CDD", "Stage", "Freelance", "Télétravail")
+    val contractTypes = listOf("Tous") + jobs.map { it.contractType }.filter(String::isNotBlank).distinct().sorted()
 
     val filteredJobs = jobs.filter { job ->
         val matchesDomain = (selectedDomain == "Tous" || job.domain == selectedDomain)
@@ -145,10 +163,16 @@ fun JobsScreen(
 
     if (showPostJobDialog) {
         PostJobOfferDialog(
+            isSubmitting = submittingJob,
             onDismiss = { showPostJobDialog = false },
             onPost = { title, company, location, domain, contractType, workMode, salary, description, reqs, bens ->
-                onPostJob(title, company, location, domain, contractType, workMode, salary, description, reqs, bens)
-                showPostJobDialog = false
+                if (!submittingJob) {
+                    submittingJob = true
+                    onPostJob(title, company, location, domain, contractType, workMode, salary, description, reqs, bens) { success ->
+                        submittingJob = false
+                        if (success) showPostJobDialog = false
+                    }
+                }
             }
         )
     }
@@ -255,7 +279,7 @@ fun JobsScreen(
                                     }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("🔖 Mes candidatures enregistrées") },
+                                    text = { Text("🔖 Mes offres favorites") },
                                     leadingIcon = { Icon(Icons.Outlined.Bookmark, contentDescription = null) },
                                     onClick = {
                                         showHeaderJobsMenu = false
@@ -263,20 +287,21 @@ fun JobsScreen(
                                     }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("📄 Importer mon CV MBoté (PDF)") },
+                                    text = { Text("📄 Joindre un lien de CV") },
                                     leadingIcon = { Icon(Icons.Outlined.FileUpload, contentDescription = null) },
                                     onClick = {
                                         showHeaderJobsMenu = false
-                                        android.widget.Toast.makeText(context, "CV MBoté prêt pour la postulation en 1-clic", android.widget.Toast.LENGTH_SHORT).show()
+                                        showCvDialog = true
                                     }
                                 )
                                 HorizontalDivider()
                                 DropdownMenuItem(
-                                    text = { Text("🔔 Configurer les alertes emploi") },
+                                    text = { Text("🔔 Réglages des notifications MBoté") },
                                     leadingIcon = { Icon(Icons.Outlined.NotificationsActive, contentDescription = null) },
                                     onClick = {
                                         showHeaderJobsMenu = false
-                                        android.widget.Toast.makeText(context, "Alertes activées pour vos domaines préférés", android.widget.Toast.LENGTH_SHORT).show()
+                                        context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName))
                                     }
                                 )
                             }
@@ -525,8 +550,13 @@ fun JobsScreen(
                         onLike = { onLikeJob(job.id) },
                         onBookmark = { onBookmarkJob(job.id) },
                         onApply = {
-                            onApplyJob(job.id)
-                            appliedJobTitle = job.title
+                            if (!applyingJob) {
+                                applyingJob = true
+                                onApplyJob(job.id, cvUrl) { success ->
+                                    applyingJob = false
+                                    if (success) appliedJobTitle = job.title
+                                }
+                            }
                         },
                         onShare = { onShareJob(job) },
                         onReport = { onReportJob(job) }
@@ -543,8 +573,13 @@ fun JobsScreen(
                 onLike = { onLikeJob(job.id) },
                 onBookmark = { onBookmarkJob(job.id) },
                 onApply = {
-                    onApplyJob(job.id)
-                    appliedJobTitle = job.title
+                    if (!applyingJob) {
+                        applyingJob = true
+                        onApplyJob(job.id, cvUrl) { success ->
+                            applyingJob = false
+                            if (success) appliedJobTitle = job.title
+                        }
+                    }
                     selectedJobForDetails = null
                 },
                 onShare = { onShareJob(job) }
@@ -1086,6 +1121,7 @@ private fun InfoBox(
 @Composable
 fun PostJobOfferDialog(
     onDismiss: () -> Unit,
+    isSubmitting: Boolean = false,
     onPost: (
         title: String,
         company: String,
@@ -1101,16 +1137,17 @@ fun PostJobOfferDialog(
 ) {
     var title by remember { mutableStateOf("") }
     var company by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("Brazzaville, Congo") }
-    var domain by remember { mutableStateOf("Ingénierie Logicielle") }
+    var location by remember { mutableStateOf("") }
+    var domain by remember { mutableStateOf("") }
     var contractType by remember { mutableStateOf("CDI") }
     var workMode by remember { mutableStateOf("Hybride") }
     var salary by remember { mutableStateOf("Selon profil (FCFA)") }
     var description by remember { mutableStateOf("") }
     var requirementsText by remember { mutableStateOf("") }
+    var benefitsText by remember { mutableStateOf("") }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
         title = {
             Text("Publier une offre d'emploi", fontWeight = FontWeight.Bold, fontSize = 17.sp)
         },
@@ -1118,6 +1155,7 @@ fun PostJobOfferDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -1166,6 +1204,24 @@ fun PostJobOfferDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
+                    value = location,
+                    onValueChange = { location = it },
+                    label = { Text("Lieu de travail *") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = domain,
+                    onValueChange = { domain = it },
+                    label = { Text("Domaine d'activité") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = benefitsText,
+                    onValueChange = { benefitsText = it },
+                    label = { Text("Avantages (séparés par des virgules)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
                     value = requirementsText,
                     onValueChange = { requirementsText = it },
                     label = { Text("Compétences requises (séparées par des virgules)") },
@@ -1189,18 +1245,18 @@ fun PostJobOfferDialog(
                             salary,
                             description,
                             reqs,
-                            listOf("Mutuelle santé", "Cadre de travail stimulant")
+                            benefitsText.split(",").map { it.trim() }.filter(String::isNotBlank)
                         )
                     }
                 },
-                enabled = title.isNotBlank() && company.isNotBlank() && description.isNotBlank(),
+                enabled = !isSubmitting && title.isNotBlank() && company.isNotBlank() && location.isNotBlank() && description.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary)
             ) {
-                Text("Publier l'offre")
+                Text(if (isSubmitting) "Publication…" else "Publier l'offre")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) {
                 Text("Annuler")
             }
         }

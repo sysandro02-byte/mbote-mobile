@@ -446,6 +446,7 @@ fun NewChatDialog(
 @Composable
 fun AddStatusDialog(
     onDismiss: () -> Unit,
+    isPublishing: Boolean = false,
     onConfirm: (text: String, mediaUri: android.net.Uri?, mediaType: String, background: String?, visibility: String) -> Unit
 ) {
     var text by remember { mutableStateOf("") }
@@ -734,7 +735,7 @@ fun AddStatusDialog(
                             onConfirm(text.trim(), selectedMediaUri, type, background, visibility)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                        enabled = text.isNotBlank() || selectedMediaUri != null,
+                        enabled = !isPublishing && (if (statusMode == "Texte") text.isNotBlank() else selectedMediaUri != null),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .weight(1.4f)
@@ -748,7 +749,7 @@ fun AddStatusDialog(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Publier le statut",
+                            text = if (isPublishing) "Publication en cours…" else "Publier le statut",
                             fontWeight = FontWeight.Bold
                         )
                     }

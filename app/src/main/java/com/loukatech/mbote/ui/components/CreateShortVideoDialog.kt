@@ -46,6 +46,7 @@ import com.loukatech.mbote.ui.theme.MbotePurpleSoft
 @Composable
 fun CreateShortVideoDialog(
     onDismiss: () -> Unit,
+    isPublishing: Boolean = false,
     onPublish: (
         videoUri: android.net.Uri,
         durationSeconds: Int,
@@ -54,7 +55,8 @@ fun CreateShortVideoDialog(
         musicTitle: String,
         musicArtist: String,
         thumbnailUrl: String,
-        location: String
+        location: String,
+        visibility: String
     ) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -80,7 +82,6 @@ fun CreateShortVideoDialog(
     var privacySetting by remember { mutableStateOf("Public - visible par tous") }
     var allowComments by remember { mutableStateOf(true) }
     var draftCount by remember { mutableIntStateOf(0) }
-    var isPublishing by remember { mutableStateOf(false) }
     var publishError by remember { mutableStateOf<String?>(null) }
 
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -299,7 +300,6 @@ fun CreateShortVideoDialog(
                         } else if (currentStep < 3) {
                             currentStep++
                         } else {
-                            isPublishing = true
                             onPublish(
                                 selectedVideoUri!!,
                                 (endTimeSec - startTimeSec).toInt().coerceIn(1, 120),
@@ -308,7 +308,12 @@ fun CreateShortVideoDialog(
                                 selectedMusicObj.title,
                                 selectedMusicObj.artist,
                                 "",
-                                ""
+                                "",
+                                when (privacySetting) {
+                                    "Amis uniquement" -> "friends"
+                                    "Privé - moi uniquement" -> "private"
+                                    else -> "public"
+                                }
                             )
                         }
                     },
@@ -316,6 +321,7 @@ fun CreateShortVideoDialog(
                         .fillMaxWidth()
                         .height(52.dp)
                         .testTag("step_next_button"),
+                    enabled = !isPublishing,
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.Transparent

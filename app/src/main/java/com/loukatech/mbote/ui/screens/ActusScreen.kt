@@ -113,7 +113,7 @@ fun ActusScreen(
     onCreateShortVideoClick: () -> Unit = {},
     onCreateChannel: (String, String, Boolean, String) -> Unit = { _, _, _, _ -> },
     onToggleChannelSubscription: (String, Boolean) -> Unit = { _, _ -> },
-    onPublishNews: (title: String, content: String, mediaUri: android.net.Uri?, category: String, mediaType: String) -> Unit = { _, _, _, _, _ -> },
+    onPublishNews: (title: String, content: String, mediaUri: android.net.Uri?, category: String, mediaType: String, onComplete: (Boolean) -> Unit) -> Unit = { _, _, _, _, _, done -> done(false) },
     onAuthorProfileClick: (String, String) -> Unit = { _, _ -> },
     onReportContent: (String, String) -> Unit = { _, _ -> },
     onRefresh: () -> Unit = {},
@@ -126,6 +126,7 @@ fun ActusScreen(
     var showCreateChannelDialog by remember { mutableStateOf(false) }
     var showPublishTypeMenu by remember { mutableStateOf(false) }
     var showNewActusModal by remember { mutableStateOf(false) }
+    var submittingActus by remember { mutableStateOf(false) }
     var initialMediaType by remember { mutableStateOf("Photo") }
     var isRefreshing by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
@@ -719,11 +720,17 @@ fun ActusScreen(
         // Nouvel Actus Creation Modal
         if (showNewActusModal) {
             NewActusModal(
+                isPublishing = submittingActus,
                 initialMediaType = initialMediaType,
                 onDismiss = { showNewActusModal = false },
                 onPublish = { title, content, mediaUri, category, mediaType ->
-                    onPublishNews(title, content, mediaUri, category, mediaType)
-                    showNewActusModal = false
+                    if (!submittingActus) {
+                        submittingActus = true
+                        onPublishNews(title, content, mediaUri, category, mediaType) { success ->
+                            submittingActus = false
+                            if (success) showNewActusModal = false
+                        }
+                    }
                 }
             )
         }
@@ -810,6 +817,7 @@ private fun PublishTypeMenuItem(
 @Composable
 fun NewActusModal(
     initialMediaType: String = "Photo",
+    isPublishing: Boolean = false,
     onDismiss: () -> Unit,
     onPublish: (title: String, content: String, mediaUri: android.net.Uri?, category: String, mediaType: String) -> Unit
 ) {
@@ -887,6 +895,7 @@ fun NewActusModal(
                             }
 
                             Button(
+                                enabled = !isPublishing && (contentText.isNotBlank() || titleText.isNotBlank() || attachedMediaUri != null),
                                 onClick = {
                                     onPublish(
                                         titleText.trim(),
@@ -901,7 +910,7 @@ fun NewActusModal(
                                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 4.dp),
                                 modifier = Modifier.height(34.dp)
                             ) {
-                                Text("Publier", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text(if (isPublishing) "Envoi…" else "Publier", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             }
                         }
                     }
@@ -1377,13 +1386,13 @@ fun NewActusModal(
                         },
                         shape = RoundedCornerShape(24.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary),
-                        enabled = contentText.isNotBlank() || titleText.isNotBlank() || attachedMediaUri != null,
+                        enabled = !isPublishing && (contentText.isNotBlank() || titleText.isNotBlank() || attachedMediaUri != null),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(48.dp)
                     ) {
                         Text(
-                            text = "Suivant : Détails >",
+                            text = if (isPublishing) "Publication en cours…" else "Publier",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White

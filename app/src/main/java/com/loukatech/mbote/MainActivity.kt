@@ -181,6 +181,7 @@ class MainActivity : ComponentActivity() {
             val isAuthenticated by viewModel.isAuthenticated.collectAsStateWithLifecycle()
             val isDataSyncing by viewModel.isDataSyncing.collectAsStateWithLifecycle()
             val publicationError by viewModel.publicationError.collectAsStateWithLifecycle()
+            val isPublishing by viewModel.isPublishing.collectAsStateWithLifecycle()
             val showLoginScreen by viewModel.showLoginScreen.collectAsStateWithLifecycle()
             val showAdminLoginDialog by viewModel.showAdminLoginDialog.collectAsStateWithLifecycle()
             val showForgotPasswordDialog by viewModel.showForgotPasswordDialog.collectAsStateWithLifecycle()
@@ -360,8 +361,18 @@ class MainActivity : ComponentActivity() {
                                 onBackClick = { viewModel.setShowJobsScreen(false) },
                                 onLikeJob = { jobId -> viewModel.toggleJobLike(jobId) },
                                 onBookmarkJob = { jobId -> viewModel.toggleJobBookmark(jobId) },
-                                onApplyJob = { jobId -> viewModel.applyToJob(jobId) },
-                                onPostJob = { title, company, location, domain, contractType, workMode, salary, description, reqs, bens ->
+                                onApplyJob = { jobId, cvUrl, done ->
+                                    val job = jobs.firstOrNull { it.id == jobId }
+                                    if (job != null && !jobId.startsWith("mbote-")) {
+                                        val uri = android.net.Uri.parse(job.applyUrl)
+                                        if (uri.scheme in listOf("https", "http", "mailto")) {
+                                            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
+                                                .onFailure { android.widget.Toast.makeText(context, "Aucune application pour ouvrir ce lien.", android.widget.Toast.LENGTH_LONG).show() }
+                                        }
+                                        done(false)
+                                    } else viewModel.applyToJob(jobId, done, cvUrl)
+                                },
+                                onPostJob = { title, company, location, domain, contractType, workMode, salary, description, reqs, bens, done ->
                                     viewModel.postJobOffer(
                                         title = title,
                                         company = company,
@@ -372,16 +383,16 @@ class MainActivity : ComponentActivity() {
                                         salary = salary,
                                         description = description,
                                         requirements = reqs,
-                                        benefits = bens
+                                        benefits = bens,
+                                        onComplete = done
                                     )
                                 },
                                 onShareJob = { job ->
-                                    activeChat?.let { chat ->
-                                        viewModel.sendMessage(
-                                            chatId = chat.id,
-                                            text = "💼 Opportunité d'emploi MBoté : ${job.title} chez ${job.company} (${job.salary}) - ${job.location}"
-                                        )
+                                    val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(android.content.Intent.EXTRA_TEXT, "${job.title} — ${job.company}\n${job.location}\n${job.applyUrl}")
                                     }
+                                    context.startActivity(android.content.Intent.createChooser(shareIntent, "Partager l'offre"))
                                 },
                                 onReportJob = { job -> viewModel.submitReport("Offre Emploi", job.title) }
                             )
@@ -678,8 +689,8 @@ class MainActivity : ComponentActivity() {
                                                         onToggleChannelSubscription = { channelId, isSubscribed ->
                                                             viewModel.toggleChannelSubscription(channelId, isSubscribed)
                                                         },
-                                                        onPublishNews = { title, content, mediaUri, category, mediaType ->
-                                                            viewModel.addNewsPost(context, title, content, mediaUri, category, mediaType)
+                                                        onPublishNews = { title, content, mediaUri, category, mediaType, done ->
+                                                            viewModel.addNewsPost(context, title, content, mediaUri, category, mediaType, done)
                                                         },
                                                         onRefresh = { viewModel.triggerDataSync() },
                                                         onAuthorProfileClick = { name, avatar -> showProfileForUser(name, avatar) },
@@ -908,8 +919,9 @@ class MainActivity : ComponentActivity() {
 
                     if (showCreateShortVideoDialog) {
                         CreateShortVideoDialog(
+                            isPublishing = isPublishing,
                             onDismiss = { viewModel.setShowCreateShortVideoDialog(false) },
-                            onPublish = { videoUri, duration, caption, hashtags, musicTitle, musicArtist, thumbnailUrl, location ->
+                            onPublish = { videoUri, duration, caption, hashtags, musicTitle, musicArtist, thumbnailUrl, location, visibility ->
                                 viewModel.createShortVideo(
                                     context = context,
                                     videoUri = videoUri,
@@ -919,7 +931,8 @@ class MainActivity : ComponentActivity() {
                                     musicTitle = musicTitle,
                                     musicArtist = musicArtist,
                                     thumbnailUrl = thumbnailUrl,
-                                    location = location
+                                    location = location,
+                                    visibility = visibility
                                 )
                             }
                         )
@@ -1021,6 +1034,7 @@ class MainActivity : ComponentActivity() {
 
                     if (showAddStatusDialog) {
                         AddStatusDialog(
+                            isPublishing = isPublishing,
                             onDismiss = { viewModel.setShowAddStatusDialog(false) },
                             onConfirm = { text, mediaUri, mediaType, background, visibility ->
                                 viewModel.postStatus(context, text, mediaUri, mediaType, background, visibility)

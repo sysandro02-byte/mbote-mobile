@@ -1093,7 +1093,8 @@ class MboteRepository(
         musicTitle: String,
         musicArtist: String,
         thumbnailUrl: String,
-        location: String? = null
+        location: String? = null,
+        visibility: String = "public"
     ): Result<ShortVideo> {
         val uploaded = apiService.uploadPublicationVideo(context, videoUri, "short-videos")
         if (uploaded.isFailure) return Result.failure(uploaded.exceptionOrNull()!!)
@@ -1122,7 +1123,7 @@ class MboteRepository(
             timestamp = "À l'instant",
             comments = emptyList()
         )
-        val created = apiService.createShortVideoApi(newShort)
+        val created = apiService.createShortVideoApi(newShort, visibility)
         if (created.isFailure) return Result.failure(created.exceptionOrNull()!!)
         val published = created.getOrThrow()
         _shortVideos.update { listOf(published) + it.filterNot { video -> video.id == published.id } }
@@ -1835,20 +1836,12 @@ class MboteRepository(
         }
     }
 
-    fun applyToJob(jobId: String): Boolean {
-        var applied = false
-        _jobs.update { jobList ->
-            jobList.map { job ->
-                if (job.id == jobId) {
-                    applied = true
-                    job.copy(applicantsCount = job.applicantsCount + 1)
-                } else job
-            }
-        }
-        return applied
-    }
+    suspend fun refreshJobs(): Result<Unit> = publicationApiService.fetchJobs()
+        .onSuccess { _jobs.value = it }.map { Unit }
 
-    fun postJobOffer(
+    suspend fun applyToJob(jobId: String, cvUrl: String = ""): Result<Unit> = publicationApiService.applyToJob(jobId, cvUrl)
+
+    suspend fun postJobOffer(
         title: String,
         company: String,
         location: String,
@@ -1859,26 +1852,16 @@ class MboteRepository(
         description: String,
         requirements: List<String> = emptyList(),
         benefits: List<String> = emptyList()
-    ): JobOffer {
-        val newJob = JobOffer(
-            title = title,
-            company = company,
-            location = location,
-            domain = domain,
-            contractType = contractType,
-            duration = contractType,
-            workMode = workMode,
-            salary = if (salary.isBlank()) "Selon profil (FCFA)" else salary,
-            description = description,
-            requirements = requirements,
-            benefits = benefits,
-            postedDate = "À l'instant",
-            deadline = "30 jours",
-            applicantsCount = 1,
-            likesCount = 1
-        )
-        _jobs.update { listOf(newJob) + it }
-        return newJob
+    ): Result<JobOffer> {
+        val details = listOf(description, workMode,
+            requirements.joinToString(", "), benefits.joinToString(", "))
+            .filter(String::isNotBlank).joinToString("\n")
+        return publicationApiService.createJob(mapOf(
+            "title" to title.trim(), "company" to company.trim(), "location" to location.trim(),
+            "activityDomain" to domain.trim(), "type" to contractType, "duration" to contractType,
+            "salary" to salary.trim(), "description" to details,
+            "applyEmail" to _userProfile.value.email.trim()
+        )).onSuccess { newJob -> _jobs.update { listOf(newJob) + it } }
     }
 
     fun updateUserProfile(name: String, bio: String, phone: String, city: String) {
@@ -2029,159 +2012,6 @@ class MboteRepository(
         )
     }
 
-    private fun createInitialJobs(): List<JobOffer> {
-        return listOf(
-            JobOffer(
-                id = "job_1",
-                title = "Développeur Mobile Android Senior (Kotlin / Jetpack Compose)",
-                company = "LoukaTech R&D",
-                companyLogo = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80",
-                location = "Brazzaville, Congo (Hybride)",
-                type = "Temps plein",
-                contractType = "CDI",
-                workMode = "Hybride",
-                experienceLevel = "Senior (4+ ans)",
-                salary = "1 200 000 - 1 800 000 FCFA / mois",
-                duration = "CDI",
-                domain = "Ingénierie Logicielle",
-                description = "Rejoignez l'équipe d'ingénierie centrale de MBoté pour concevoir, optimiser et déployer les fonctionnalités temps réel, le chiffrement de bout en bout et les expériences immersives sur Android.",
-                requirements = listOf(
-                    "Maîtrise avancée de Kotlin et Jetpack Compose (Clean Architecture, M3)",
-                    "Expérience avec WebRTC, Coroutines / Flow et Room Database",
-                    "Sens aigu de l'ergonomie, de l'accessibilité et de la fluidité à 60/120 FPS",
-                    "Capacité à travailler en équipe agile et esprit d'innovation africaine"
-                ),
-                benefits = listOf(
-                    "Assurance santé à 100% (salarié et famille)",
-                    "Ordinateur portable pro dernière génération + budget équipement",
-                    "Primes semestrielles de performance & intéressement",
-                    "Horaires flexibles et 2 jours de télétravail par semaine"
-                ),
-                postedDate = "Il y a 2 h",
-                deadline = "15 Octobre 2026",
-                applicantsCount = 14,
-                likesCount = 38,
-                isLiked = true,
-                isSaved = true
-            ),
-            JobOffer(
-                id = "job_2",
-                title = "Ingénieur Télécoms & Infrastructure WebRTC Temps Réel",
-                company = "MBoté Networks & Cloud",
-                companyLogo = "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=150&auto=format&fit=crop&q=80",
-                location = "Pointe-Noire, Congo",
-                type = "Temps plein",
-                contractType = "CDI",
-                workMode = "Présentiel",
-                experienceLevel = "Intermédiaire (2-4 ans)",
-                salary = "950 000 - 1 400 000 FCFA / mois",
-                duration = "CDI",
-                domain = "Télécoms & Réseaux",
-                description = "Optimisation des flux audio et vidéo peer-to-peer à travers les réseaux 3G/4G/5G africains. Gestion des serveurs STUN/TURN, SFU et résilience aux coupures réseau.",
-                requirements = listOf(
-                    "Connaissances solides des protocoles SIP, WebRTC, RTP/RTCP et Codecs Opus/VP8",
-                    "Expérience Linux serveur, Docker et monitoring réseau",
-                    "Diplôme d'Ingénieur en Télécoms ou Réseaux & Systèmes"
-                ),
-                benefits = listOf(
-                    "Prise en charge forfait connexion haut débit",
-                    "Couverture médicale complète",
-                    "Plan de formation internationale certifiante"
-                ),
-                postedDate = "Aujourd'hui",
-                deadline = "30 Septembre 2026",
-                applicantsCount = 8,
-                likesCount = 19
-            ),
-            JobOffer(
-                id = "job_3",
-                title = "Product Designer UI/UX Mobile & Web",
-                company = "Studio Créatif Mbote",
-                companyLogo = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-                location = "Kinshasa / Télétravail complet",
-                type = "Temps plein",
-                contractType = "CDI",
-                workMode = "Télétravail",
-                experienceLevel = "Intermédiaire",
-                salary = "800 000 - 1 250 000 FCFA / mois",
-                duration = "CDI",
-                domain = "Design & Ergonomie",
-                description = "Création des interfaces utilisateur intuitives, de micro-interactions fluides et de design systems pour MBoté, MBoté Shorts et l'écosystème pro.",
-                requirements = listOf(
-                    "Excellente maîtrise de Figma, Material Design 3 et design tokens",
-                    "Portfolio mobile démontrant une attention rigoureuse aux détails",
-                    "Sensibilité pour l'accessibilité et la diversité culturelle"
-                ),
-                benefits = listOf(
-                    "Télétravail 100% avec indemnité d'installation",
-                    "Abonnements outils de design et bibliothèques d'assets",
-                    "Participation aux événements tech continentaux"
-                ),
-                postedDate = "Il y a 1 jour",
-                deadline = "20 Octobre 2026",
-                applicantsCount = 22,
-                likesCount = 45
-            ),
-            JobOffer(
-                id = "job_4",
-                title = "Responsable Partenariats Mobile Money & Fintech",
-                company = "MBoté Pay Solutions",
-                companyLogo = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
-                location = "Brazzaville, Congo",
-                type = "Temps plein",
-                contractType = "CDI",
-                workMode = "Présentiel",
-                experienceLevel = "Senior (5+ ans)",
-                salary = "1 100 000 - 1 600 000 FCFA / mois",
-                duration = "CDI",
-                domain = "Finance & Fintech",
-                description = "Développement des intégrations bancaires et Mobile Money (MTN MoMo, Airtel Money) pour les paiements in-app, les transferts P2P et les pourboires créateurs.",
-                requirements = listOf(
-                    "Expérience réussie dans le secteur bancaire ou Mobile Money en zone CEMAC",
-                    "Excellentes compétences en négociation B2B et régulation financière",
-                    "Bac+5 en Gestion, Finance ou Économie"
-                ),
-                benefits = listOf(
-                    "Véhicule de fonction ou indemnité transport",
-                    "Assurance santé groupe",
-                    "Prime d'objectifs trimestrielle"
-                ),
-                postedDate = "Il y a 2 jours",
-                deadline = "10 Octobre 2026",
-                applicantsCount = 11,
-                likesCount = 27
-            ),
-            JobOffer(
-                id = "job_5",
-                title = "Stagiaire Ingénieur Backend Cloud & IA (Python / Go)",
-                company = "LoukaTech Innovation Lab",
-                companyLogo = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                location = "Brazzaville, Congo (Hybride)",
-                type = "Temps plein",
-                contractType = "Stage",
-                workMode = "Hybride",
-                experienceLevel = "Junior / Étudiant fin de cycle",
-                salary = "350 000 FCFA / mois",
-                duration = "Stage (6 mois, pré-embauche)",
-                domain = "IA & Data",
-                description = "Participez au développement des microservices de traitement de texte et de transcription vocale locale (Lingala, Kituba, Français) intégrés à MBoté.",
-                requirements = listOf(
-                    "Bonnes bases en Python ou Go et bases de données relationnelles",
-                    "Curiosité pour le Machine Learning et les LLMs",
-                    "Étudiant en Master ou dernière année d'école d'ingénieurs"
-                ),
-                benefits = listOf(
-                    "Indemnité de stage très attractive avec opportunité d'embauche en CDI",
-                    "Encadrement par des ingénieurs seniors",
-                    "Repas pris en charge au bureau"
-                ),
-                postedDate = "Il y a 3 jours",
-                deadline = "30 Septembre 2026",
-                applicantsCount = 35,
-                likesCount = 52
-            )
-        )
-    }
 
     // --- Notification System Methods ---
 
