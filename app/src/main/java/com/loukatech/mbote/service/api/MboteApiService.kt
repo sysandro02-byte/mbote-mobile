@@ -974,6 +974,19 @@ class MboteApiService {
         ) { true }
     }
 
+    suspend fun submitReportApi(targetType: String, targetId: String, reason: String): Result<String> =
+        executeHttpRequest(
+            endpoint = "/reports",
+            method = "POST",
+            requestBody = mapOf("targetType" to targetType, "targetId" to targetId, "reason" to reason)
+        ) { json -> responseObject(json).string("id") }
+
+    suspend fun setUserBlockedApi(userId: String, blocked: Boolean): Result<Unit> =
+        executeHttpRequest<Unit, Unit>(
+            endpoint = "/users/$userId/block",
+            method = if (blocked) "POST" else "DELETE"
+        ) { Unit }
+
     /**
      * Fetch call history from the backend server
      */
