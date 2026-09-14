@@ -78,8 +78,60 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     const result = await db.query('SELECT * FROM users WHERE id = $1', [req.user.userId]);
     return result.rowCount ? success(res, publicUser(result.rows[0])) : failure(res, 401, 'Compte introuvable');
   }));
-  // OAuth remains unavailable until a server-side provider is configured.
-  app.post('/v1/auth/google', (_req, res) => failure(res, 501, 'Google OAuth doit être configuré côté serveur'));
+  app.post('/v1/auth/google', route(async (req, res) => {
+    const idToken = text(req.body.idToken, 'Jeton Google', 10000);
+    if (!process.env.GOOGLE_CLIENT_ID) return failure(res, 503, 'Google OAuth n’est pas configuré');
+    const verify = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+    if (!verify.ok) return failure(res, 401, 'Jeton Google invalide');
+    const identity = await verify.json();
+    if (identity.aud !== process.env.GOOGLE_CLIENT_ID || identity.email_verified !== 'true') {
+      return failure(res, 401, 'Identité Google non vérifiée');
+    }
+    const email = String(identity.email).toLowerCase();
+    const result = await db.query(
+      `INSERT INTO users (email, full_name, avatar_url, is_verified)
+       VALUES ($1, $2, $3, true)
+       ON CONFLICT (email) DO UPDATE SET
+         full_name = EXCLUDED.full_name,
+         avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
+         is_verified = true,
+         updated_at = NOW()
+       RETURNING *`,
+      [email, String(identity.name || email).slice(0, 255), identity.picture || null],
+    );
+    const user = result.rows[0];
+    success(res, { token: tokenFor(user), refreshToken: null, userId: user.id, ...publicUser(user) });
+  }));
+
+  app.post('/v1/auth/github', route(async (req, res) => {
+    const accessToken = text(req.body.accessToken, 'Jeton GitHub', 1000);
+    if (!process.env.GITHUB_CLIENT_ID) return failure(res, 503, 'GitHub OAuth n’est pas configuré');
+    const headers = { authorization: `Bearer ${accessToken}`, accept: 'application/vnd.github+json', 'user-agent': 'MBote-Mobile' };
+    const [profileResponse, emailsResponse] = await Promise.all([
+      fetch('https://api.github.com/user', { headers }),
+      fetch('https://api.github.com/user/emails', { headers }),
+    ]);
+    if (!profileResponse.ok || !emailsResponse.ok) return failure(res, 401, 'Jeton GitHub invalide');
+    const profile = await profileResponse.json();
+    const emails = await emailsResponse.json();
+    const primary = emails.find((item) => item.primary && item.verified) || emails.find((item) => item.verified);
+    if (!primary?.email) return failure(res, 401, 'Adresse GitHub vérifiée requise');
+    const email = String(primary.email).toLowerCase();
+    const result = await db.query(
+      `INSERT INTO users (email, full_name, username, avatar_url, is_verified)
+       VALUES ($1, $2, $3, $4, true)
+       ON CONFLICT (email) DO UPDATE SET
+         full_name = EXCLUDED.full_name,
+         username = COALESCE(users.username, EXCLUDED.username),
+         avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
+         is_verified = true,
+         updated_at = NOW()
+       RETURNING *`,
+      [email, String(profile.name || profile.login).slice(0, 255), String(profile.login).slice(0, 100), profile.avatar_url || null],
+    );
+    const user = result.rows[0];
+    success(res, { token: tokenFor(user), refreshToken: null, userId: user.id, ...publicUser(user) });
+  }));
 
   app.post('/v1/auth/forgot-password', route(async (req, res) => {
     const email = text(req.body.email, 'Email', 255).toLowerCase();
