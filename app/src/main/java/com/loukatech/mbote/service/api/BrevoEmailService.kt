@@ -95,12 +95,11 @@ object BrevoEmailService {
                 val errorStream = connection.errorStream ?: connection.inputStream
                 val errorText = Scanner(errorStream).useDelimiter("\\A").let { if (it.hasNext()) it.next() else "" }
                 Log.w(TAG, "Brevo email API returned HTTP $responseCode: $errorText")
-                // Graceful fallback for test/demo environment
-                Result.success(true)
+                Result.failure(IllegalStateException("Échec Brevo HTTP $responseCode: $errorText"))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during Brevo email dispatch: ${e.message}")
-            Result.success(true)
+            Result.failure(e)
         } finally {
             connection?.disconnect()
         }
