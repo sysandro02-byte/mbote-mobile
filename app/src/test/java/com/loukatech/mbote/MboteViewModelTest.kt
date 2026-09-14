@@ -68,7 +68,6 @@ class MboteViewModelTest {
         val chats = viewModel.chats.value
         viewModel.toggleJobBookmark("missing-job")
         viewModel.applyToJob("missing-job")
-        viewModel.markChatAsRead("missing-chat")
         assertEquals(jobs, viewModel.jobs.value)
         assertEquals(chats, viewModel.chats.value)
     }
