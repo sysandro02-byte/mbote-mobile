@@ -237,6 +237,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   }));
   app.post('/v1/messages/:messageId/star', auth, route(async (req, res) => {
     const changed = await db.query('INSERT INTO message_stars (message_id, user_id) VALUES ($1, $2) ON CONFLICT (message_id, user_id) DO NOTHING RETURNING message_id', [req.params.messageId, req.user.userId]);
+    if (!changed.rowCount) await db.query('DELETE FROM message_stars WHERE message_id = $1 AND user_id = $2', [req.params.messageId, req.user.userId]);
     success(res, changed.rowCount > 0);
   }));
 
@@ -261,6 +262,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   }));
   app.post('/v1/publications/:postId/like', auth, route(async (req, res) => {
     const changed = await db.query('INSERT INTO news_post_likes (news_post_id, user_id) VALUES ($1, $2) ON CONFLICT (news_post_id, user_id) DO NOTHING RETURNING news_post_id', [req.params.postId, req.user.userId]);
+    if (!changed.rowCount) await db.query('DELETE FROM news_post_likes WHERE news_post_id = $1 AND user_id = $2', [req.params.postId, req.user.userId]);
     const count = await db.query('SELECT COUNT(*)::int AS count FROM news_post_likes WHERE news_post_id = $1', [req.params.postId]);
     await db.query('UPDATE news_posts SET likes_count = $2 WHERE id = $1', [req.params.postId, count.rows[0].count]);
     success(res, { postId: req.params.postId, isLiked: changed.rowCount > 0, totalLikes: count.rows[0].count });
