@@ -45,3 +45,22 @@ test('registration validates password strength before querying PostgreSQL', asyn
     assert.equal(response.status, 400);
   });
 });
+
+test('password recovery never simulates email delivery when Brevo is unavailable', async () => {
+  const previousKey = process.env.BREVO_API_KEY;
+  delete process.env.BREVO_API_KEY;
+  const db = { query: async () => { throw new Error('database must not be queried without email configuration'); } };
+  try {
+    await withServer(createApp({ db, jwtSecret: secret }), async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/v1/auth/forgot-password`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'test@example.com' }),
+      });
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).success, false);
+    });
+  } finally {
+    if (previousKey === undefined) delete process.env.BREVO_API_KEY;
+    else process.env.BREVO_API_KEY = previousKey;
+  }
+});
