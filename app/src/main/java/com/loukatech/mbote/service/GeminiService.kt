@@ -1,7 +1,7 @@
 package com.loukatech.mbote.service
 
 import android.util.Log
-import com.loukatech.mbote.data.supabase.MboteBackendConfig
+import com.loukatech.mbote.service.api.MboteBackendConfig
 import com.loukatech.mbote.model.Message
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
