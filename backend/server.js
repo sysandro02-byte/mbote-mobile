@@ -257,6 +257,147 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res, result.rows);
   }));
 
+  app.get('/v1/users/public', auth, route(async (req, res) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const result = await db.query(
+      `SELECT u.id, u.full_name AS name, COALESCE(u.username, '') AS username,
+              COALESCE(u.avatar_url, '') AS avatar, COALESCE(u.bio, '') AS bio,
+              COALESCE(u.city, '') AS city, COALESCE(u.country, '') AS country,
+              EXISTS(SELECT 1 FROM blocked_users b WHERE b.blocker_id = $1 AND b.blocked_id = u.id) AS "blockedByMe"
+         FROM users u WHERE u.id <> $1
+           AND NOT EXISTS(SELECT 1 FROM blocked_users b WHERE b.blocker_id = u.id AND b.blocked_id = $1)
+        ORDER BY u.created_at DESC LIMIT $2`,
+      [req.user.userId, limit],
+    );
+    success(res, result.rows);
+  }));
+
+  app.get('/v1/users/me/settings', auth, route(async (req, res) => {
+    const result = await db.query('SELECT value FROM user_settings WHERE user_id = $1', [req.user.userId]);
+    success(res, { value: result.rows[0]?.value || {} });
+  }));
+  app.put('/v1/users/me/settings', auth, route(async (req, res) => {
+    const value = req.body?.value;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return failure(res, 400, 'Paramètres invalides');
+    const result = await db.query(
+      `INSERT INTO user_settings (user_id, value) VALUES ($1, $2)
+       ON CONFLICT (user_id) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+       RETURNING value`, [req.user.userId, value],
+    );
+    success(res, { value: result.rows[0].value });
+  }));
+
+  app.get('/v1/users/me/blocks', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT u.id, u.full_name AS name, COALESCE(u.avatar_url, '') AS avatar
+         FROM blocked_users b JOIN users u ON u.id = b.blocked_id
+        WHERE b.blocker_id = $1 ORDER BY b.created_at DESC`, [req.user.userId],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/users/:userId/block', auth, route(async (req, res) => {
+    await db.query('INSERT INTO blocked_users (blocker_id, blocked_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.user.userId, req.params.userId]);
+    success(res, true);
+  }));
+  app.delete('/v1/users/:userId/block', auth, route(async (req, res) => {
+    await db.query('DELETE FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2', [req.user.userId, req.params.userId]);
+    success(res, true);
+  }));
+
+  app.post('/v1/reports', auth, route(async (req, res) => {
+    const targetType = text(req.body.targetType, 'Type de cible', 50);
+    const targetId = text(req.body.targetId, 'Cible', 255);
+    const reason = text(req.body.reason, 'Motif', 2000);
+    const result = await db.query(
+      'INSERT INTO reports (reporter_id, target_type, target_id, reason) VALUES ($1, $2, $3, $4) RETURNING *',
+      [req.user.userId, targetType, targetId, reason],
+    );
+    success(res, result.rows[0], 201);
+  }));
+  app.get('/v1/reports/mine', auth, route(async (req, res) => {
+    const result = await db.query('SELECT * FROM reports WHERE reporter_id = $1 ORDER BY created_at DESC', [req.user.userId]);
+    success(res, result.rows);
+  }));
+
+  app.get('/v1/calls/history', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT c.id, c.peer_user_id AS "peerUserId", COALESCE(u.full_name, 'Utilisateur') AS name,
+              COALESCE(u.avatar_url, '') AS avatar, c.direction AS type,
+              c.media_type = 'VIDEO' AS "isVideo", c.started_at AS timestamp,
+              c.duration_seconds AS "durationSeconds", c.status
+         FROM call_history c LEFT JOIN users u ON u.id = c.peer_user_id
+        WHERE c.user_id = $1 ORDER BY c.started_at DESC LIMIT 200`, [req.user.userId],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/calls/log', auth, route(async (req, res) => {
+    const direction = text(req.body.direction || req.body.type, 'Direction', 20).toUpperCase();
+    const mediaType = (req.body.isVideo ? 'VIDEO' : String(req.body.mediaType || 'AUDIO')).toUpperCase();
+    const status = String(req.body.status || 'COMPLETED').toUpperCase().slice(0, 20);
+    const duration = Math.max(0, Number(req.body.durationSeconds) || 0);
+    const result = await db.query(
+      `INSERT INTO call_history (user_id, peer_user_id, direction, media_type, status, duration_seconds)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [req.user.userId, req.body.peerUserId || null, direction, mediaType, status, duration],
+    );
+    success(res, result.rows[0], 201);
+  }));
+
+  app.get('/v1/meetings', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT m.*, u.full_name AS "hostName",
+              (SELECT COUNT(*)::int FROM meeting_participants p WHERE p.meeting_id = m.id) AS "participantsCount"
+         FROM meetings m JOIN users u ON u.id = m.host_id
+        WHERE m.host_id = $1 OR EXISTS (SELECT 1 FROM meeting_participants p WHERE p.meeting_id = m.id AND p.user_id = $1)
+        ORDER BY m.scheduled_at NULLS FIRST, m.created_at DESC`, [req.user.userId],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/meetings', auth, route(async (req, res) => {
+    const title = text(req.body.title, 'Titre', 255);
+    const code = crypto.randomBytes(5).toString('hex').toUpperCase();
+    const result = await db.query(
+      `INSERT INTO meetings (host_id, title, code, scheduled_at, duration_minutes)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.user.userId, title, code, req.body.scheduledAt || null, Math.min(Math.max(Number(req.body.durationMinutes) || 30, 5), 1440)],
+    );
+    await db.query('INSERT INTO meeting_participants (meeting_id, user_id) VALUES ($1, $2)', [result.rows[0].id, req.user.userId]);
+    success(res, result.rows[0], 201);
+  }));
+  app.post('/v1/meetings/:code/join', auth, route(async (req, res) => {
+    const meeting = await db.query('SELECT * FROM meetings WHERE code = $1', [req.params.code.toUpperCase()]);
+    if (!meeting.rowCount) return failure(res, 404, 'Réunion introuvable');
+    await db.query('INSERT INTO meeting_participants (meeting_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [meeting.rows[0].id, req.user.userId]);
+    success(res, meeting.rows[0]);
+  }));
+
+  app.get('/v1/statuses', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT s.*, u.full_name AS "authorName", COALESCE(u.avatar_url, '') AS "authorAvatar",
+              EXISTS(SELECT 1 FROM status_views v WHERE v.status_id = s.id AND v.viewer_id = $1) AS "viewedByMe",
+              (SELECT COUNT(*)::int FROM status_views v WHERE v.status_id = s.id) AS "viewsCount"
+         FROM statuses s JOIN users u ON u.id = s.author_id
+        WHERE s.expires_at > NOW() ORDER BY s.created_at DESC`, [req.user.userId],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/statuses', auth, route(async (req, res) => {
+    const mediaType = String(req.body.mediaType || 'TEXT').toUpperCase().slice(0, 20);
+    const bodyText = typeof req.body.text === 'string' ? req.body.text.trim().slice(0, 5000) : null;
+    const mediaUrl = typeof req.body.mediaUrl === 'string' ? req.body.mediaUrl.trim().slice(0, 2000) : null;
+    if (!bodyText && !mediaUrl) return failure(res, 400, 'Contenu du statut requis');
+    const result = await db.query(
+      `INSERT INTO statuses (author_id, media_type, media_url, text, background_color)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [req.user.userId, mediaType, mediaUrl, bodyText, req.body.backgroundColor || null],
+    );
+    success(res, result.rows[0], 201);
+  }));
+  app.post('/v1/statuses/:statusId/view', auth, route(async (req, res) => {
+    await db.query('INSERT INTO status_views (status_id, viewer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.params.statusId, req.user.userId]);
+    success(res, true);
+  }));
+
   app.post('/v1/ai/smart-replies', auth, route(async (req, res) => {
     if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_MODEL) {
       return failure(res, 503, 'L’assistant IA est temporairement indisponible');
