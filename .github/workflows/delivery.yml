@@ -43,6 +43,7 @@ jobs:
   android:
     name: Android lint and tests
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,17 +56,22 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
-      - name: Run lint, unit tests, and build debug APK
-        env:
-          MBOTE_API_BASE_URL: https://example.invalid/api
+      - name: Compile and build debug APK
+        env: &android-test-env
+          MBOTE_API_BASE_URL: https://example.invalid/v1
           VITE_SOCKET_URL: https://example.invalid
           VITE_SUPABASE_URL: https://example.invalid
           VITE_SUPABASE_ANON_KEY: test-anon-key
           GOOGLE_CLIENT_ID: test-google-client-id
           GITHUB_CLIENT_ID: test-github-client-id
-          BREVO_API_KEY: test-brevo-key
-          GEMINI_API_KEY: test-gemini-key
-        run: gradle --no-daemon --stacktrace lintDebug testDebugUnitTest assembleDebug
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx2g
+        run: gradle --no-daemon --max-workers=2 --stacktrace assembleDebug
+      - name: Run Android unit tests
+        env: *android-test-env
+        run: gradle --no-daemon --max-workers=2 --stacktrace testDebugUnitTest
+      - name: Run Android lint
+        env: *android-test-env
+        run: gradle --no-daemon --max-workers=2 --stacktrace lintDebug
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
