@@ -1,5 +1,8 @@
 package com.loukatech.mbote
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+
 import com.loukatech.mbote.data.MboteRepository
 import com.loukatech.mbote.model.MediaType
 import com.loukatech.mbote.model.MessageStatus
@@ -238,7 +241,7 @@ class MboteViewModelTest {
         val chatId = "chat_grace"
         val initialMessagesCount = viewModel.chats.value.first { it.id == chatId }.messages.size
 
-        viewModel.sendVoiceMessage(chatId, "/tmp/sample_audio.m4a", 15)
+        viewModel.sendVoiceMessage(ApplicationProvider.getApplicationContext<Context>(), chatId, "/tmp/sample_audio.m4a", 15)
         advanceUntilIdle()
 
         val updatedChat = viewModel.chats.value.first { it.id == chatId }
