@@ -236,7 +236,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     return result.rowCount ? success(res, true) : failure(res, 404, 'Message introuvable ou non modifiable');
   }));
   app.post('/v1/messages/:messageId/star', auth, route(async (req, res) => {
-    const changed = await db.query('INSERT INTO message_stars (message_id, user_id) VALUES ($1, $2) ON CONFLICT (message_id, user_id) DO DELETE RETURNING message_id', [req.params.messageId, req.user.userId]);
+    const changed = await db.query('INSERT INTO message_stars (message_id, user_id) VALUES ($1, $2) ON CONFLICT (message_id, user_id) DO NOTHING RETURNING message_id', [req.params.messageId, req.user.userId]);
     success(res, changed.rowCount > 0);
   }));
 
@@ -260,7 +260,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res, { id: post.id, authorName: user.rows[0].full_name, authorAvatar: user.rows[0].avatar_url || '', authorTitle: user.rows[0].bio || 'Membre MBoté', contentText: post.content, mediaUrl: post.image_url, mediaType: post.media_type, timestamp: post.created_at, likesCount: 0, commentsCount: 0, sharesCount: 0, isLikedByMe: false, category: post.category }, 201);
   }));
   app.post('/v1/publications/:postId/like', auth, route(async (req, res) => {
-    const changed = await db.query('INSERT INTO news_post_likes (news_post_id, user_id) VALUES ($1, $2) ON CONFLICT (news_post_id, user_id) DO DELETE RETURNING news_post_id', [req.params.postId, req.user.userId]);
+    const changed = await db.query('INSERT INTO news_post_likes (news_post_id, user_id) VALUES ($1, $2) ON CONFLICT (news_post_id, user_id) DO NOTHING RETURNING news_post_id', [req.params.postId, req.user.userId]);
     const count = await db.query('SELECT COUNT(*)::int AS count FROM news_post_likes WHERE news_post_id = $1', [req.params.postId]);
     await db.query('UPDATE news_posts SET likes_count = $2 WHERE id = $1', [req.params.postId, count.rows[0].count]);
     success(res, { postId: req.params.postId, isLiked: changed.rowCount > 0, totalLikes: count.rows[0].count });
@@ -270,6 +270,115 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     const user = await db.query('SELECT full_name, avatar_url FROM users WHERE id = $1', [req.user.userId]);
     await db.query('UPDATE news_posts SET comments_count = (SELECT COUNT(*) FROM news_post_comments WHERE news_post_id = $1) WHERE id = $1', [req.params.postId]);
     success(res, { id: created.rows[0].id, postId: req.params.postId, authorName: user.rows[0].full_name, authorAvatar: user.rows[0].avatar_url || '', commentText: created.rows[0].text, timestamp: created.rows[0].created_at }, 201);
+  }));
+
+  app.get('/v1/short-videos', auth, route(async (req, res) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 12, 1), 50);
+    const result = await db.query(
+      `SELECT s.id, s.creator_id AS user_id, u.full_name AS user_name,
+              COALESCE(u.username, '') AS user_username, COALESCE(u.avatar_url, '') AS user_avatar,
+              COALESCE(s.caption, '') AS caption, s.video_url, s.thumbnail_url,
+              s.music_track AS music_name, s.duration_seconds,
+              (SELECT COUNT(*)::int FROM short_video_reactions r WHERE r.short_video_id = s.id) AS like_count,
+              EXISTS(SELECT 1 FROM short_video_reactions r WHERE r.short_video_id = s.id AND r.user_id = $1) AS liked_by_me,
+              (SELECT COUNT(*)::int FROM short_video_comments c WHERE c.short_video_id = s.id) AS comment_count,
+              (SELECT COUNT(*)::int FROM short_video_shares sh WHERE sh.short_video_id = s.id) AS share_count,
+              (SELECT COUNT(*)::int FROM short_video_bookmarks b WHERE b.short_video_id = s.id) AS bookmark_count,
+              EXISTS(SELECT 1 FROM short_video_bookmarks b WHERE b.short_video_id = s.id AND b.user_id = $1) AS saved_by_me,
+              EXISTS(SELECT 1 FROM user_follows f WHERE f.follower_id = $1 AND f.followed_id = s.creator_id) AS followed_by_me,
+              (SELECT COUNT(*)::int FROM short_video_views v WHERE v.short_video_id = s.id) AS view_count,
+              s.created_at
+         FROM short_videos s JOIN users u ON u.id = s.creator_id
+        WHERE s.visibility = 'public' OR s.creator_id = $1
+        ORDER BY s.created_at DESC LIMIT $2`, [req.user.userId, limit],
+    );
+    success(res, result.rows);
+  }));
+
+  app.post('/v1/short-videos', auth, route(async (req, res) => {
+    const videoUrl = text(req.body.videoUrl, 'URL de vidéo', 2000);
+    const result = await db.query(
+      `INSERT INTO short_videos
+         (creator_id, video_url, thumbnail_url, caption, music_track, duration_seconds, visibility)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [req.user.userId, videoUrl, req.body.thumbnailUrl || null, req.body.caption || null,
+       req.body.musicName || null, Math.max(Number(req.body.durationSeconds) || 0, 0),
+       req.body.visibility === 'private' ? 'private' : 'public'],
+    );
+    const user = await db.query('SELECT full_name, username, avatar_url FROM users WHERE id = $1', [req.user.userId]);
+    const row = result.rows[0];
+    success(res, {
+      id: row.id, user_id: req.user.userId, user_name: user.rows[0].full_name,
+      user_username: user.rows[0].username || '', user_avatar: user.rows[0].avatar_url || '',
+      caption: row.caption || '', video_url: row.video_url, thumbnail_url: row.thumbnail_url,
+      music_name: row.music_track, duration_seconds: row.duration_seconds, like_count: 0,
+      liked_by_me: false, comment_count: 0, share_count: 0, bookmark_count: 0,
+      saved_by_me: false, followed_by_me: false, view_count: 0, created_at: row.created_at,
+    }, 201);
+  }));
+
+  app.post('/v1/short-videos/:videoId/likes', auth, route(async (req, res) => {
+    const inserted = await db.query(
+      `INSERT INTO short_video_reactions (short_video_id, user_id, emoji)
+       VALUES ($1, $2, '❤️') ON CONFLICT (short_video_id, user_id) DO NOTHING RETURNING id`,
+      [req.params.videoId, req.user.userId],
+    );
+    if (!inserted.rowCount) await db.query('DELETE FROM short_video_reactions WHERE short_video_id = $1 AND user_id = $2', [req.params.videoId, req.user.userId]);
+    const count = await db.query('SELECT COUNT(*)::int AS count FROM short_video_reactions WHERE short_video_id = $1', [req.params.videoId]);
+    await db.query('UPDATE short_videos SET likes_count = $2 WHERE id = $1', [req.params.videoId, count.rows[0].count]);
+    success(res, { likeCount: count.rows[0].count, likedByMe: inserted.rowCount > 0 });
+  }));
+
+  app.get('/v1/short-videos/:videoId/comments', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT c.id, u.full_name AS user_name, COALESCE(u.avatar_url, '') AS user_avatar,
+              c.text AS content, c.created_at
+         FROM short_video_comments c JOIN users u ON u.id = c.author_id
+        WHERE c.short_video_id = $1 ORDER BY c.created_at ASC LIMIT 100`, [req.params.videoId],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/short-videos/:videoId/comments', auth, route(async (req, res) => {
+    const content = text(req.body.content, 'Commentaire', 2000);
+    const created = await db.query(
+      'INSERT INTO short_video_comments (short_video_id, author_id, text) VALUES ($1, $2, $3) RETURNING *',
+      [req.params.videoId, req.user.userId, content],
+    );
+    const user = await db.query('SELECT full_name, avatar_url FROM users WHERE id = $1', [req.user.userId]);
+    success(res, { id: created.rows[0].id, user_name: user.rows[0].full_name, user_avatar: user.rows[0].avatar_url || '', content, created_at: created.rows[0].created_at }, 201);
+  }));
+
+  app.post('/v1/short-videos/:videoId/bookmarks', auth, route(async (req, res) => {
+    const inserted = await db.query(
+      'INSERT INTO short_video_bookmarks (short_video_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING short_video_id',
+      [req.params.videoId, req.user.userId],
+    );
+    if (!inserted.rowCount) await db.query('DELETE FROM short_video_bookmarks WHERE short_video_id = $1 AND user_id = $2', [req.params.videoId, req.user.userId]);
+    const count = await db.query('SELECT COUNT(*)::int AS count FROM short_video_bookmarks WHERE short_video_id = $1', [req.params.videoId]);
+    await db.query('UPDATE short_videos SET bookmarks_count = $2 WHERE id = $1', [req.params.videoId, count.rows[0].count]);
+    success(res, { bookmarkCount: count.rows[0].count, savedByMe: inserted.rowCount > 0 });
+  }));
+
+  app.post('/v1/short-videos/authors/:authorId/follow', auth, route(async (req, res) => {
+    const inserted = await db.query(
+      'INSERT INTO user_follows (follower_id, followed_id) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING followed_id',
+      [req.user.userId, req.params.authorId],
+    );
+    if (!inserted.rowCount) await db.query('DELETE FROM user_follows WHERE follower_id = $1 AND followed_id = $2', [req.user.userId, req.params.authorId]);
+    const count = await db.query('SELECT COUNT(*)::int AS count FROM user_follows WHERE followed_id = $1', [req.params.authorId]);
+    success(res, { followerCount: count.rows[0].count, followedByMe: inserted.rowCount > 0 });
+  }));
+
+  app.post('/v1/short-videos/:videoId/shares', auth, route(async (req, res) => {
+    await db.query('INSERT INTO short_video_shares (short_video_id, user_id, target_chat_id) VALUES ($1, $2, $3)', [req.params.videoId, req.user.userId, req.body.targetChatId || null]);
+    const count = await db.query('SELECT COUNT(*)::int AS count FROM short_video_shares WHERE short_video_id = $1', [req.params.videoId]);
+    await db.query('UPDATE short_videos SET shares_count = $2 WHERE id = $1', [req.params.videoId, count.rows[0].count]);
+    success(res, { shareCount: count.rows[0].count });
+  }));
+
+  app.post('/v1/short-videos/:videoId/views', auth, route(async (req, res) => {
+    await db.query('INSERT INTO short_video_views (short_video_id, viewer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.params.videoId, req.user.userId]);
+    success(res, true);
   }));
 
   app.get('/v1/shorts/videos', auth, route(async (_req, res) => {
