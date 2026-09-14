@@ -138,11 +138,10 @@ class MboteRepository(
         return apiService.requestForgotPassword(email)
     }
 
-    suspend fun confirmPasswordReset(email: String, code: String, newPass: String): Result<Boolean> {
-        val supabaseProvider = com.loukatech.mbote.data.supabase.SupabaseServiceProvider()
-        supabaseProvider.confirmPasswordReset(email, code, newPass)
-        return apiService.confirmResetPassword(ResetPasswordConfirmRequest(email = email, resetCode = code, newPassword = newPass))
-    }
+    suspend fun confirmPasswordReset(email: String, code: String, newPass: String): Result<Boolean> =
+        apiService.confirmResetPassword(
+            ResetPasswordConfirmRequest(email = email, resetCode = code, newPassword = newPass)
+        )
 
     suspend fun loginAdmin(key: String, email: String, pass: String): Result<AdminStatsData> {
         return apiService.loginAdmin(AdminLoginRequest(adminKey = key, email = email, password = pass))
