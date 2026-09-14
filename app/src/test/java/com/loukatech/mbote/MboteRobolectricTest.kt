@@ -198,7 +198,7 @@ class MboteRobolectricTest {
         val chat = viewModel.chats.value.first { !it.isAI }
         val initialCount = chat.messages.size
 
-        viewModel.sendVoiceMessage(context, chat.id, "/cache/voice_notes/test.m4a", 12, null)
+        viewModel.sendVoiceMessage(ApplicationProvider.getApplicationContext<Context>(), chat.id, "/cache/voice_notes/test.m4a", 12, null)
         advanceUntilIdle()
 
         val updatedChat = viewModel.chats.value.find { it.id == chat.id }
