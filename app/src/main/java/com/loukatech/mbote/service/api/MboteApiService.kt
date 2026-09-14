@@ -1066,7 +1066,7 @@ class MboteApiService {
             endpoint = "/short-videos",
             method = "POST",
             requestBody = request
-        ) { json -> mapShortVideo(MboteBackendConfig.jsonParser.decodeFromString(json)) }
+        ) { json -> mapShortVideo(MboteBackendConfig.jsonParser.decodeFromJsonElement(responseObject(json))) }
     }
 
     /**
@@ -1077,7 +1077,7 @@ class MboteApiService {
             endpoint = "/short-videos/$videoId/likes",
             method = "POST"
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<ShortLikeResponse>(json).likedByMe
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<ShortLikeResponse>(responseObject(json)).likedByMe
         }
     }
 
@@ -1089,7 +1089,7 @@ class MboteApiService {
             endpoint = "/short-videos/$videoId/comments",
             method = "POST",
             requestBody = CreateShortCommentRequest(comment.text)
-        ) { json -> mapShortComment(MboteBackendConfig.jsonParser.decodeFromString(json)) }
+        ) { json -> mapShortComment(MboteBackendConfig.jsonParser.decodeFromJsonElement(responseObject(json))) }
     }
 
     suspend fun confirmDesktopQrLogin(pairingToken: String): Result<Unit> =
@@ -1179,18 +1179,18 @@ class MboteApiService {
 
     suspend fun fetchShortVideoComments(videoId: String): Result<List<ShortVideoComment>> =
         executeHttpRequest<Unit, List<ShortVideoComment>>("/short-videos/$videoId/comments?limit=100") { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<List<BackendShortCommentDto>>(json).map(::mapShortComment)
+            responseArray(json).map { MboteBackendConfig.jsonParser.decodeFromJsonElement<BackendShortCommentDto>(it) }.map(::mapShortComment)
         }
 
     suspend fun toggleShortBookmark(videoId: String): Result<Pair<Int, Boolean>> =
         executeHttpRequest<Unit, Pair<Int, Boolean>>("/short-videos/$videoId/bookmarks", "POST") { json ->
-            val response = MboteBackendConfig.jsonParser.decodeFromString<ShortBookmarkResponse>(json)
+            val response = MboteBackendConfig.jsonParser.decodeFromJsonElement<ShortBookmarkResponse>(responseObject(json))
             response.bookmarkCount to response.savedByMe
         }
 
     suspend fun toggleShortFollow(authorId: String): Result<Pair<Int, Boolean>> =
         executeHttpRequest<Unit, Pair<Int, Boolean>>("/short-videos/authors/$authorId/follow", "POST") { json ->
-            val response = MboteBackendConfig.jsonParser.decodeFromString<ShortFollowResponse>(json)
+            val response = MboteBackendConfig.jsonParser.decodeFromJsonElement<ShortFollowResponse>(responseObject(json))
             response.followerCount to response.followedByMe
         }
 
@@ -1199,7 +1199,7 @@ class MboteApiService {
             endpoint = "/short-videos/$videoId/shares",
             method = "POST",
             requestBody = mapOf("targetChatId" to targetChatId)
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<ShortShareResponse>(json).shareCount }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<ShortShareResponse>(responseObject(json)).shareCount }
 
     suspend fun markShortViewed(videoId: String): Result<Unit> =
         executeHttpRequest<Unit, Unit>("/short-videos/$videoId/views", "POST") { Unit }
