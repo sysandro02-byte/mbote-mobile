@@ -262,3 +262,42 @@ CREATE INDEX IF NOT EXISTS idx_calls_user_started ON call_history(user_id, start
 CREATE INDEX IF NOT EXISTS idx_meetings_scheduled ON meetings(scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_statuses_expiry ON statuses(expires_at);
 
+
+ALTER TABLE short_videos ADD COLUMN IF NOT EXISTS duration_seconds INT NOT NULL DEFAULT 0;
+ALTER TABLE short_videos ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) NOT NULL DEFAULT 'public';
+
+CREATE TABLE IF NOT EXISTS short_video_bookmarks (
+    short_video_id UUID REFERENCES short_videos(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (short_video_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_follows (
+    follower_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    followed_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (follower_id, followed_id),
+    CHECK (follower_id <> followed_id)
+);
+
+CREATE TABLE IF NOT EXISTS short_video_views (
+    short_video_id UUID REFERENCES short_videos(id) ON DELETE CASCADE,
+    viewer_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    viewed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (short_video_id, viewer_id)
+);
+
+CREATE TABLE IF NOT EXISTS short_video_shares (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    short_video_id UUID REFERENCES short_videos(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    target_chat_id UUID REFERENCES chats(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_short_bookmarks_user ON short_video_bookmarks(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_follows_followed ON user_follows(followed_id);
+CREATE INDEX IF NOT EXISTS idx_short_views_video ON short_video_views(short_video_id);
+CREATE INDEX IF NOT EXISTS idx_short_shares_video ON short_video_shares(short_video_id);
+
