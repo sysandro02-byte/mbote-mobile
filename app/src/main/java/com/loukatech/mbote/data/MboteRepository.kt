@@ -213,16 +213,22 @@ class MboteRepository(
     val reports: StateFlow<List<com.loukatech.mbote.model.ReportItem>> = _reports.asStateFlow()
 
     fun submitReport(type: String, targetName: String) {
-        val newReport = com.loukatech.mbote.model.ReportItem(
-            id = "rep_" + java.util.UUID.randomUUID().toString().take(6),
-            type = type,
-            targetName = targetName,
-            reporterName = _userProfile.value.name,
-            reason = "Signalement de contenu suspect ou inapproprié",
-            status = "Envoyé à l'Admin",
-            timestamp = "À l'instant"
-        )
-        _reports.update { listOf(newReport) + it }
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.submitReportApi(type, targetName, "Signalement de contenu suspect ou inapproprié")
+                .onSuccess { remoteId ->
+                    val report = com.loukatech.mbote.model.ReportItem(
+                        id = remoteId,
+                        type = type,
+                        targetName = targetName,
+                        reporterName = _userProfile.value.name,
+                        reason = "Signalement de contenu suspect ou inapproprié",
+                        status = "PENDING",
+                        timestamp = "À l'instant"
+                    )
+                    _reports.update { listOf(report) + it }
+                }
+                .onFailure { _messagingError.value = it.message ?: "Le signalement n’a pas pu être envoyé." }
+        }
     }
 
     fun updateReportStatus(reportId: String, newStatus: String) {
@@ -248,10 +254,22 @@ class MboteRepository(
 
     fun blockContact(contactId: String) {
         _blockedContactIds.update { it + contactId }
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.setUserBlockedApi(contactId, true).onFailure {
+                _blockedContactIds.update { ids -> ids - contactId }
+                _messagingError.value = it.message ?: "Le contact n’a pas pu être bloqué."
+            }
+        }
     }
 
     fun unblockContact(contactId: String) {
         _blockedContactIds.update { it - contactId }
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.setUserBlockedApi(contactId, false).onFailure {
+                _blockedContactIds.update { ids -> ids + contactId }
+                _messagingError.value = it.message ?: "Le contact n’a pas pu être débloqué."
+            }
+        }
     }
 
     fun isContactBlocked(contactId: String): Boolean {
