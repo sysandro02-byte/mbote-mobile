@@ -53,11 +53,6 @@ android {
         buildConfigField("String", "VITE_SUPABASE_ANON_KEY", "\"$viteSupabaseAnonKey\"")
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"$githubClientId\"")
-        buildConfigField("String", "BREVO_API_KEY", "\"$brevoApiKey\"")
-        buildConfigField("String", "BREVO_API_URL", "\"$brevoApiUrl\"")
-        buildConfigField("String", "BREVO_SENDER_EMAIL", "\"$brevoSenderEmail\"")
-        buildConfigField("String", "BREVO_SENDER_NAME", "\"$brevoSenderName\"")
-        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
     }
 
     buildTypes {
