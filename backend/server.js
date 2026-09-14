@@ -257,6 +257,44 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res, result.rows);
   }));
 
+  app.post('/v1/ai/smart-replies', auth, route(async (req, res) => {
+    if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_MODEL) {
+      return failure(res, 503, 'L’assistant IA est temporairement indisponible');
+    }
+    const messages = Array.isArray(req.body.messages) ? req.body.messages.slice(-6) : [];
+    if (!messages.length) return failure(res, 400, 'Historique de conversation requis');
+    const history = messages.map((item) => {
+      const body = typeof item?.text === 'string' ? item.text.trim().slice(0, 1000) : '';
+      const sender = item?.isMine ? 'Moi' : String(item?.senderName || 'Contact').slice(0, 80);
+      return body ? `${sender}: ${body}` : '';
+    }).filter(Boolean).join('\n');
+    if (!history) return failure(res, 400, 'Historique de conversation invalide');
+
+    const style = ['Brief', 'Balanced', 'Elaborate'].includes(req.body.conciseness)
+      ? req.body.conciseness : 'Balanced';
+    const upstream = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(process.env.GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `Conversation récente :\n${history}\n\nPropose exactement trois réponses adaptées.` }] }],
+          systemInstruction: { parts: [{ text: `Tu aides un utilisateur de MBoté. Style: ${style}. Réponds uniquement avec un tableau JSON de trois chaînes courtes.` }] },
+          generationConfig: { temperature: 0.5, responseMimeType: 'application/json' },
+        }),
+      },
+    );
+    if (!upstream.ok) throw Object.assign(new Error('Le fournisseur IA n’a pas répondu'), { status: 502 });
+    const payload = await upstream.json();
+    const raw = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
+    let suggestions;
+    try { suggestions = JSON.parse(raw); } catch { suggestions = []; }
+    if (!Array.isArray(suggestions) || !suggestions.length) {
+      throw Object.assign(new Error('Réponse IA invalide'), { status: 502 });
+    }
+    success(res, { suggestions: suggestions.filter((item) => typeof item === 'string' && item.trim()).slice(0, 3) });
+  }));
+
   app.use((error, _req, res, _next) => { if (error.status) return failure(res, error.status, error.message); console.error('[mbote-api]', error); return failure(res, 500, 'Erreur interne du serveur'); });
   return app;
 }
