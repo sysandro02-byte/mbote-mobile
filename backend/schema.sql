@@ -26,6 +26,17 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+
+-- One active password-reset challenge per account. Only a SHA-256 hash is stored.
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    code_hash CHAR(64) NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    attempts SMALLINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_password_reset_expiry ON password_reset_tokens(expires_at);
+
 -- 2. CHATS & CONVERSATIONS
 CREATE TABLE IF NOT EXISTS chats (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -170,3 +181,123 @@ CREATE TABLE IF NOT EXISTS admin_logs (
     details JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- 10. USER-OWNED APPLICATION STATE
+CREATE TABLE IF NOT EXISTS user_settings (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    value JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS blocked_users (
+    blocker_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (blocker_id, blocked_id),
+    CHECK (blocker_id <> blocked_id)
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    reporter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target_type VARCHAR(50) NOT NULL,
+    target_id VARCHAR(255) NOT NULL,
+    reason TEXT NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS call_history (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    peer_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    direction VARCHAR(20) NOT NULL,
+    media_type VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    duration_seconds INT NOT NULL DEFAULT 0,
+    CHECK (duration_seconds >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS meetings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    host_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    code VARCHAR(32) UNIQUE NOT NULL,
+    scheduled_at TIMESTAMP WITH TIME ZONE,
+    duration_minutes INT NOT NULL DEFAULT 30,
+    status VARCHAR(20) NOT NULL DEFAULT 'SCHEDULED',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS meeting_participants (
+    meeting_id UUID REFERENCES meetings(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (meeting_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS statuses (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    author_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    media_type VARCHAR(20) NOT NULL,
+    media_url TEXT,
+    text TEXT,
+    background_color VARCHAR(20),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT (NOW() + INTERVAL '24 hours'),
+    CHECK (media_url IS NOT NULL OR text IS NOT NULL)
+);
+
+CREATE TABLE IF NOT EXISTS status_views (
+    status_id UUID REFERENCES statuses(id) ON DELETE CASCADE,
+    viewer_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    viewed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (status_id, viewer_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reports_status_created ON reports(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_calls_user_started ON call_history(user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_meetings_scheduled ON meetings(scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_statuses_expiry ON statuses(expires_at);
+
+
+ALTER TABLE short_videos ADD COLUMN IF NOT EXISTS duration_seconds INT NOT NULL DEFAULT 0;
+ALTER TABLE short_videos ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) NOT NULL DEFAULT 'public';
+
+CREATE TABLE IF NOT EXISTS short_video_bookmarks (
+    short_video_id UUID REFERENCES short_videos(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (short_video_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_follows (
+    follower_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    followed_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (follower_id, followed_id),
+    CHECK (follower_id <> followed_id)
+);
+
+CREATE TABLE IF NOT EXISTS short_video_views (
+    short_video_id UUID REFERENCES short_videos(id) ON DELETE CASCADE,
+    viewer_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    viewed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (short_video_id, viewer_id)
+);
+
+CREATE TABLE IF NOT EXISTS short_video_shares (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    short_video_id UUID REFERENCES short_videos(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    target_chat_id UUID REFERENCES chats(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_short_bookmarks_user ON short_video_bookmarks(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_follows_followed ON user_follows(followed_id);
+CREATE INDEX IF NOT EXISTS idx_short_views_video ON short_video_views(short_video_id);
+CREATE INDEX IF NOT EXISTS idx_short_shares_video ON short_video_shares(short_video_id);
+

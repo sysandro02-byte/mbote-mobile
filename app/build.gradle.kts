@@ -18,7 +18,7 @@ if (envFile.exists()) {
 }
 val mboteApiBaseUrl = envProps.getProperty("MBOTE_API_BASE_URL")
     ?: System.getenv("MBOTE_API_BASE_URL")
-    ?: "https://mbote-backend.onrender.com/api"
+    ?: "https://mbote-backend.onrender.com/v1"
 val viteSocketUrl = envProps.getProperty("VITE_SOCKET_URL")
     ?: System.getenv("VITE_SOCKET_URL")
     ?: "https://mbote-backend.onrender.com"
@@ -35,22 +35,6 @@ val googleClientId = envProps.getProperty("GOOGLE_CLIENT_ID")
 val githubClientId = envProps.getProperty("GITHUB_CLIENT_ID")
     ?: System.getenv("GITHUB_CLIENT_ID")
     ?: "Iv1.mbote_github_oauth_client_id"
-val brevoApiKey = envProps.getProperty("BREVO_API_KEY")
-    ?: System.getenv("BREVO_API_KEY")
-    ?: "xkeysib-brevo-api-key-placeholder"
-val brevoApiUrl = envProps.getProperty("BREVO_API_URL")
-    ?: System.getenv("BREVO_API_URL")
-    ?: "https://api.brevo.com/v3/smtp/email"
-val brevoSenderEmail = envProps.getProperty("BREVO_SENDER_EMAIL")
-    ?: System.getenv("BREVO_SENDER_EMAIL")
-    ?: "noreply@loukatech.com"
-val brevoSenderName = envProps.getProperty("BREVO_SENDER_NAME")
-    ?: System.getenv("BREVO_SENDER_NAME")
-    ?: "MBoté Sécurité"
-val geminiApiKey = envProps.getProperty("GEMINI_API_KEY")
-    ?: System.getenv("GEMINI_API_KEY")
-    ?: "gemini-api-key-placeholder"
-
 android {
     namespace = "com.loukatech.mbote"
     compileSdk = 36
@@ -69,11 +53,6 @@ android {
         buildConfigField("String", "VITE_SUPABASE_ANON_KEY", "\"$viteSupabaseAnonKey\"")
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"$githubClientId\"")
-        buildConfigField("String", "BREVO_API_KEY", "\"$brevoApiKey\"")
-        buildConfigField("String", "BREVO_API_URL", "\"$brevoApiUrl\"")
-        buildConfigField("String", "BREVO_SENDER_EMAIL", "\"$brevoSenderEmail\"")
-        buildConfigField("String", "BREVO_SENDER_NAME", "\"$brevoSenderName\"")
-        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
     }
 
     buildTypes {
@@ -142,6 +121,7 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

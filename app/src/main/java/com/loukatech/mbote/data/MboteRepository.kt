@@ -138,11 +138,10 @@ class MboteRepository(
         return apiService.requestForgotPassword(email)
     }
 
-    suspend fun confirmPasswordReset(email: String, code: String, newPass: String): Result<Boolean> {
-        val supabaseProvider = com.loukatech.mbote.data.supabase.SupabaseServiceProvider()
-        supabaseProvider.confirmPasswordReset(email, code, newPass)
-        return apiService.confirmResetPassword(ResetPasswordConfirmRequest(email = email, resetCode = code, newPassword = newPass))
-    }
+    suspend fun confirmPasswordReset(email: String, code: String, newPass: String): Result<Boolean> =
+        apiService.confirmResetPassword(
+            ResetPasswordConfirmRequest(email = email, resetCode = code, newPassword = newPass)
+        )
 
     suspend fun loginAdmin(key: String, email: String, pass: String): Result<AdminStatsData> {
         return apiService.loginAdmin(AdminLoginRequest(adminKey = key, email = email, password = pass))
@@ -213,16 +212,22 @@ class MboteRepository(
     val reports: StateFlow<List<com.loukatech.mbote.model.ReportItem>> = _reports.asStateFlow()
 
     fun submitReport(type: String, targetName: String) {
-        val newReport = com.loukatech.mbote.model.ReportItem(
-            id = "rep_" + java.util.UUID.randomUUID().toString().take(6),
-            type = type,
-            targetName = targetName,
-            reporterName = _userProfile.value.name,
-            reason = "Signalement de contenu suspect ou inapproprié",
-            status = "Envoyé à l'Admin",
-            timestamp = "À l'instant"
-        )
-        _reports.update { listOf(newReport) + it }
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.submitReportApi(type, targetName, "Signalement de contenu suspect ou inapproprié")
+                .onSuccess { remoteId ->
+                    val report = com.loukatech.mbote.model.ReportItem(
+                        id = remoteId,
+                        type = type,
+                        targetName = targetName,
+                        reporterName = _userProfile.value.name,
+                        reason = "Signalement de contenu suspect ou inapproprié",
+                        status = "PENDING",
+                        timestamp = "À l'instant"
+                    )
+                    _reports.update { listOf(report) + it }
+                }
+                .onFailure { _messagingError.value = it.message ?: "Le signalement n’a pas pu être envoyé." }
+        }
     }
 
     fun updateReportStatus(reportId: String, newStatus: String) {
@@ -248,10 +253,22 @@ class MboteRepository(
 
     fun blockContact(contactId: String) {
         _blockedContactIds.update { it + contactId }
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.setUserBlockedApi(contactId, true).onFailure {
+                _blockedContactIds.update { ids -> ids - contactId }
+                _messagingError.value = it.message ?: "Le contact n’a pas pu être bloqué."
+            }
+        }
     }
 
     fun unblockContact(contactId: String) {
         _blockedContactIds.update { it - contactId }
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.setUserBlockedApi(contactId, false).onFailure {
+                _blockedContactIds.update { ids -> ids + contactId }
+                _messagingError.value = it.message ?: "Le contact n’a pas pu être débloqué."
+            }
+        }
     }
 
     fun isContactBlocked(contactId: String): Boolean {
@@ -1921,96 +1938,9 @@ class MboteRepository(
         return chat.id in demoIds || chat.name in demoNames || chat.messages.any { it.id.startsWith("m_th_") || it.id.startsWith("m_g_") || it.id.startsWith("m_y_") || it.id.startsWith("m_ai_") }
     }
 
-    private fun createInitialCalls(): List<CallItem> {
-        return listOf(
-            CallItem(
-                name = "Grace Makiese",
-                avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                type = CallType.INCOMING,
-                isVideo = true,
-                timestamp = "Aujourd'hui à 14:10",
-                durationText = "12 min 30 s",
-                phoneNumber = "+242 06 555 4321"
-            ),
-            CallItem(
-                name = "Tech Hub Brazzaville",
-                avatar = "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150&auto=format&fit=crop&q=80",
-                type = CallType.OUTGOING,
-                isVideo = false,
-                timestamp = "Hier à 18:45",
-                durationText = "34 min 12 s",
-                phoneNumber = "+242 05 777 8899"
-            ),
-            CallItem(
-                name = "Grace Makiese",
-                avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                type = CallType.OUTGOING,
-                isVideo = true,
-                timestamp = "Hier à 11:20",
-                durationText = "5 min 45 s",
-                phoneNumber = "+242 06 555 4321"
-            ),
-            CallItem(
-                name = "Aron Loutala",
-                avatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-                type = CallType.INCOMING,
-                isVideo = false,
-                timestamp = "22 Août à 16:30",
-                durationText = "8 min 14 s",
-                phoneNumber = "+242 06 111 2233"
-            ),
-            CallItem(
-                name = "Audrey Matondo",
-                avatar = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80",
-                type = CallType.OUTGOING,
-                isVideo = true,
-                timestamp = "21 Août à 20:05",
-                durationText = "19 min 02 s",
-                phoneNumber = "+242 06 888 9900"
-            ),
-            CallItem(
-                name = "Yannick Nguesso",
-                avatar = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
-                type = CallType.MISSED,
-                isVideo = true,
-                timestamp = "20 Août à 09:15",
-                durationText = "Manqué",
-                phoneNumber = "+242 06 444 3322"
-            )
-        )
-    }
+    private fun createInitialCalls(): List<CallItem> = emptyList()
 
-    private fun createInitialMeetings(): List<MeetingItem> {
-        return listOf(
-            MeetingItem(
-                title = "Point Quotidien - Équipe Ingénierie",
-                hostName = "Marc Loutala",
-                code = "MB-2026-ENG",
-                scheduledTime = "Aujourd'hui à 15:00",
-                durationMinutes = 30,
-                isLive = true,
-                participantsCount = 6
-            ),
-            MeetingItem(
-                title = "Revue de Conception Mobile & IA",
-                hostName = "Grace Makiese",
-                code = "MB-DESIGN-REV",
-                scheduledTime = "Demain à 10:30",
-                durationMinutes = 45,
-                isLive = false,
-                participantsCount = 4
-            ),
-            MeetingItem(
-                title = "Partenariats Télécoms & Connectivité",
-                hostName = "Yannick Nguesso",
-                code = "MB-TELCO-PNT",
-                scheduledTime = "Jeudi à 14:00",
-                durationMinutes = 60,
-                isLive = false,
-                participantsCount = 8
-            )
-        )
-    }
+    private fun createInitialMeetings(): List<MeetingItem> = emptyList()
 
 
     // --- Notification System Methods ---
@@ -2035,33 +1965,7 @@ class MboteRepository(
         _notifications.value = emptyList()
     }
 
-    private fun createInitialNotifications(): List<MboteNotification> {
-        return listOf(
-            MboteNotification(
-                type = NotificationType.MESSAGE,
-                title = "💬 Grace Ondongo",
-                body = "Nouveau message : Salut ! As-tu vu l'offre d'emploi Senior Android Dev chez LoukaTech ?",
-                timestamp = "Il y a 5 min",
-                isRead = false,
-                senderAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
-            ),
-            MboteNotification(
-                type = NotificationType.JOB_APPLICATION,
-                title = "💼 Nouvelle Candidature Reçue",
-                body = "Patrick Mabiala a postulé au poste de Développeur Mobile Senior (CDI).",
-                timestamp = "Il y a 15 min",
-                isRead = false,
-                actionText = "Voir la candidature"
-            ),
-            MboteNotification(
-                type = NotificationType.VIDEO_LIKE,
-                title = "❤️ Nouveau Like sur MBoté Reel",
-                body = "Merveille K. et 14 autres personnes ont aimé votre vidéo 'Couché de soleil sur la Corniche de Brazzaville'.",
-                timestamp = "Il y a 1h",
-                isRead = true
-            )
-        )
-    }
+    private fun createInitialNotifications(): List<MboteNotification> = emptyList()
 
     fun updateLanguage(language: AppLanguage) {
         _userProfile.update { it.copy(language = language) }
