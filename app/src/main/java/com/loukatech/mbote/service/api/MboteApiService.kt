@@ -982,10 +982,8 @@ class MboteApiService {
             endpoint = "/calls/history",
             method = "GET"
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<CallItem>>>(json).data ?: emptyList()
-            } catch (e: Exception) {
-                emptyList()
+            responseArray(json).map { element ->
+                MboteBackendConfig.jsonParser.decodeFromJsonElement<CallItem>(element)
             }
         }
     }
@@ -999,11 +997,7 @@ class MboteApiService {
             method = "POST",
             requestBody = callItem
         ) { json ->
-            try {
-                MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<CallItem>>(json).data!!
-            } catch (e: Exception) {
-                callItem
-            }
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<CallItem>(responseObject(json))
         }
     }
 
@@ -1015,7 +1009,7 @@ class MboteApiService {
             endpoint = "/users/public?limit=100",
             method = "GET"
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<List<PublicMastaUserDto>>(json).map { user ->
+            responseArray(json).map { MboteBackendConfig.jsonParser.decodeFromJsonElement<PublicMastaUserDto>(it) }.map { user ->
                 MastaUser(
                     id = user.id.toString().trim('"'),
                     name = user.name.ifBlank { user.username },
