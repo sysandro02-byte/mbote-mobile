@@ -4,6 +4,7 @@ const cors = require('cors');
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const crypto = require('node:crypto');
 const { Pool } = require('pg');
 
 const PORT = Number(process.env.PORT || 8080);
@@ -77,8 +78,76 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     const result = await db.query('SELECT * FROM users WHERE id = $1', [req.user.userId]);
     return result.rowCount ? success(res, publicUser(result.rows[0])) : failure(res, 401, 'Compte introuvable');
   }));
-  // No account, password-reset code, or OAuth session is invented when a provider is absent.
-  app.post(['/v1/auth/google', '/v1/auth/forgot-password', '/v1/auth/reset-password-confirm'], (_req, res) => failure(res, 501, 'Ce fournisseur d’identité doit être configuré côté serveur'));
+  // OAuth remains unavailable until a server-side provider is configured.
+  app.post('/v1/auth/google', (_req, res) => failure(res, 501, 'Google OAuth doit être configuré côté serveur'));
+
+  app.post('/v1/auth/forgot-password', route(async (req, res) => {
+    const email = text(req.body.email, 'Email', 255).toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(email)) return failure(res, 400, 'Email invalide');
+    if (!process.env.BREVO_API_KEY) return failure(res, 503, 'Le service e-mail est temporairement indisponible');
+
+    const found = await db.query('SELECT id FROM users WHERE email = $1', [email]);
+    // Always return the same public response to prevent account enumeration.
+    if (!found.rowCount) return success(res, { message: 'Si ce compte existe, un code a été envoyé.' });
+
+    const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+    await db.query(
+      `INSERT INTO password_reset_tokens (user_id, code_hash, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '15 minutes')
+       ON CONFLICT (user_id) DO UPDATE SET code_hash = EXCLUDED.code_hash, expires_at = EXCLUDED.expires_at, attempts = 0`,
+      [found.rows[0].id, codeHash],
+    );
+
+    const mailResponse = await fetch(process.env.BREVO_API_URL || 'https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'api-key': process.env.BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({
+        sender: { name: process.env.BREVO_SENDER_NAME || 'MBoté Sécurité', email: process.env.BREVO_SENDER_EMAIL || 'noreply@loukatech.com' },
+        to: [{ email }],
+        subject: 'Code de réinitialisation MBoté',
+        htmlContent: `<p>Votre code MBoté est <strong>${code}</strong>.</p><p>Il expire dans 15 minutes.</p>`,
+      }),
+    });
+    if (!mailResponse.ok) {
+      await db.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [found.rows[0].id]);
+      throw Object.assign(new Error('Le code n’a pas pu être envoyé'), { status: 502 });
+    }
+    return success(res, { message: 'Si ce compte existe, un code a été envoyé.' });
+  }));
+
+  app.post('/v1/auth/reset-password-confirm', route(async (req, res) => {
+    const email = text(req.body.email, 'Email', 255).toLowerCase();
+    const code = text(req.body.resetCode || req.body.code, 'Code', 6);
+    const newPassword = text(req.body.newPassword, 'Nouveau mot de passe', 256);
+    if (!/^\d{6}$/.test(code)) return failure(res, 400, 'Code invalide');
+    if (newPassword.length < 12) return failure(res, 400, 'Le mot de passe doit contenir au moins 12 caractères');
+
+    const result = await db.query(
+      `SELECT pr.user_id, pr.code_hash, pr.attempts
+         FROM password_reset_tokens pr JOIN users u ON u.id = pr.user_id
+        WHERE u.email = $1 AND pr.expires_at > NOW()`,
+      [email],
+    );
+    const token = result.rows[0];
+    const submittedHash = crypto.createHash('sha256').update(code).digest('hex');
+    if (!token || token.attempts >= 5 || token.code_hash.length !== submittedHash.length ||
+        !crypto.timingSafeEqual(Buffer.from(token.code_hash), Buffer.from(submittedHash))) {
+      if (token) await db.query('UPDATE password_reset_tokens SET attempts = attempts + 1 WHERE user_id = $1', [token.user_id]);
+      return failure(res, 400, 'Code expiré ou invalide');
+    }
+
+    await db.query('BEGIN');
+    try {
+      await db.query('UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1', [token.user_id, await bcrypt.hash(newPassword, 12)]);
+      await db.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [token.user_id]);
+      await db.query('COMMIT');
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
+    return success(res, true);
+  }));
 
   app.get('/v1/chats', auth, route(async (req, res) => {
     const result = await db.query(
