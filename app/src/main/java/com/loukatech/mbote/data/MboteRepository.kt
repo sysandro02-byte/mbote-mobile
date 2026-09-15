@@ -663,10 +663,11 @@ class MboteRepository(
     }
 
     suspend fun refreshMastaFromBackend() {
+        apiService.fetchDiscoverProfiles().onSuccess { _discoverProfiles.value = it }
         val result = apiService.fetchMastaUsers()
         if (result.isSuccess) {
             val remoteMasta = result.getOrNull()
-            if (remoteMasta != null && remoteMasta.isNotEmpty()) {
+            if (remoteMasta != null) {
                 _mastaUsers.value = remoteMasta
             }
         }
@@ -676,7 +677,7 @@ class MboteRepository(
         val result = apiService.fetchShortVideos()
         if (result.isSuccess) {
             val remoteShorts = result.getOrNull()
-            if (remoteShorts != null && remoteShorts.isNotEmpty()) {
+            if (remoteShorts != null) {
                 _shortVideos.value = remoteShorts
             }
         }
@@ -1519,8 +1520,8 @@ class MboteRepository(
     suspend fun createDirectChat(name: String, initialMessage: String): Result<Chat> {
         val contact = _mastaUsers.value.firstOrNull { it.name.equals(name, ignoreCase = true) }
             ?: return Result.failure(IllegalArgumentException("Sélectionnez un utilisateur MBoté réel dans Masta."))
-        val participantId = contact.id.toIntOrNull()
-            ?: return Result.failure(IllegalArgumentException("Ce profil n’est pas encore relié au serveur MBoté."))
+        val participantId = contact.id.takeIf(String::isNotBlank)
+            ?: return Result.failure(IllegalArgumentException("Ce profil n’est pas relié au serveur MBoté."))
         val dto = apiService.createDirectChatApi(participantId).getOrElse { return Result.failure(it) }
         val participants = dto.participants.map {
             Participant(it.id, it.name, it.avatar, it.isOnline, it.role)
@@ -1549,8 +1550,8 @@ class MboteRepository(
         avatar: String? = null,
         initialMessage: String = ""
     ): Result<Chat> {
-        val participantIds = members.mapNotNull { it.id.toIntOrNull() }.distinct()
-        if (members.isNotEmpty() && participantIds.isEmpty()) {
+        val participantIds = members.map { it.id }.filter(String::isNotBlank).distinct()
+        if (members.isNotEmpty() && participantIds.size != members.size) {
             return Result.failure(IllegalArgumentException("Sélectionnez des contacts MBoté synchronisés avec le serveur."))
         }
         val createdId = apiService.createGroupApi(groupName, participantIds).getOrElse {
