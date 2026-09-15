@@ -1122,6 +1122,20 @@ class MboteApiService {
         ) { json -> mapShortComment(MboteBackendConfig.jsonParser.decodeFromJsonElement(responseObject(json))) }
     }
 
+    suspend fun consumeParentChildQr(qrPayload: String): Result<LinkedChildInfo> =
+        executeHttpRequest(
+            endpoint = "/parental/links/consume",
+            method = "POST",
+            requestBody = mapOf("qrPayload" to qrPayload)
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<LinkedChildInfo>(responseObject(json)) }
+
+    suspend fun sendParentalSos(reason: String): Result<Unit> =
+        executeHttpRequest(
+            endpoint = "/parental/sos",
+            method = "POST",
+            requestBody = mapOf("reason" to reason)
+        ) { Unit }
+
     suspend fun registerPushToken(token: String): Result<Unit> =
         executeHttpRequest(
             endpoint = "/devices/push-token",
