@@ -44,6 +44,48 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   const member = async (chatId, userId) => (await db.query('SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2', [chatId, userId])).rowCount > 0;
   const messageDto = (row, userId) => ({ id: row.id, chatId: row.chat_id, senderId: row.sender_id, senderName: row.sender_name, senderAvatar: row.sender_avatar || '', text: row.text || '', timestamp: row.created_at, mediaType: row.media_type || 'NONE', mediaUrl: row.media_url, isStarred: Boolean(row.is_starred), isMine: row.sender_id === userId });
 
+  const sendOtpEmail = async (email, code, flow) => {
+    if (!process.env.BREVO_API_KEY) throw Object.assign(new Error('Le service e-mail est temporairement indisponible'), { status: 503 });
+    const response = await fetch(process.env.BREVO_API_URL || 'https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'api-key': process.env.BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({
+        sender: { name: process.env.BREVO_SENDER_NAME || 'MBoté Sécurité', email: process.env.BREVO_SENDER_EMAIL || 'noreply@loukatech.com' },
+        to: [{ email }],
+        subject: flow === 'REGISTER' ? 'Confirmez votre compte MBoté' : 'Confirmez votre connexion MBoté',
+        htmlContent: `<p>Votre code de sécurité MBoté est <strong>${code}</strong>.</p><p>Il expire dans 10 minutes. Ne le communiquez à personne.</p>`,
+      }),
+    });
+    if (!response.ok) throw Object.assign(new Error('Le code de sécurité n’a pas pu être envoyé'), { status: 502 });
+  };
+  const createAuthChallenge = async ({ flow, email, userId = null, payload = {} }) => {
+    const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+    const result = await db.query(
+      `INSERT INTO auth_challenges (flow, user_id, email, code_hash, payload, expires_at)
+       VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '10 minutes') RETURNING id`,
+      [flow, userId, email, codeHash, payload],
+    );
+    try { await sendOtpEmail(email, code, flow); }
+    catch (error) { await db.query('DELETE FROM auth_challenges WHERE id = $1', [result.rows[0].id]); throw error; }
+    return { requiresOtpVerification: true, pendingUserId: result.rows[0].id, deliveryChannel: 'email', target: email.replace(/^(.{2}).*(@.*)$/, '$1***$2'), flow: flow.toLowerCase() };
+  };
+  const consumeAuthChallenge = async (challengeId, otp, flow) => {
+    if (!/^[0-9]{6}$/.test(String(otp || ''))) throw Object.assign(new Error('Code OTP invalide'), { status: 400 });
+    const result = await db.query(
+      'SELECT * FROM auth_challenges WHERE id = $1 AND flow = $2 AND expires_at > NOW() FOR UPDATE',
+      [challengeId, flow],
+    );
+    const challenge = result.rows[0];
+    const submittedHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
+    if (!challenge || challenge.attempts >= 5 || challenge.code_hash.length !== submittedHash.length ||
+        !crypto.timingSafeEqual(Buffer.from(challenge.code_hash), Buffer.from(submittedHash))) {
+      if (challenge) await db.query('UPDATE auth_challenges SET attempts = attempts + 1 WHERE id = $1', [challenge.id]);
+      throw Object.assign(new Error('Code OTP expiré ou invalide'), { status: 400 });
+    }
+    return challenge;
+  };
+
   app.disable('x-powered-by');
   app.use(cors({ origin(origin, callback) { return !origin || origins.includes(origin) ? callback(null, true) : callback(new Error('Origine CORS non autorisée')); } }));
   app.use(express.json({ limit: '1mb' }));
@@ -51,19 +93,38 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   app.get(['/health', '/v1/health'], route(async (_req, res) => { await db.query('SELECT 1'); success(res, { status: 'online', version: API_VERSION, timestamp: new Date().toISOString() }); }));
 
   app.post('/v1/auth/register', route(async (req, res) => {
-    const fullName = text(req.body.fullName, 'Nom complet', 255);
+    const fullName = text(req.body.name || req.body.fullName, 'Nom complet', 255);
     const email = text(req.body.email, 'Email', 255).toLowerCase();
     const password = text(req.body.password, 'Mot de passe', 256);
     if (!/^\S+@\S+\.\S+$/.test(email)) return failure(res, 400, 'Email invalide');
     if (password.length < 12) return failure(res, 400, 'Le mot de passe doit contenir au moins 12 caractères');
+    const exists = await db.query('SELECT 1 FROM users WHERE email = $1 OR username = $2', [email, req.body.username?.trim() || null]);
+    if (exists.rowCount) return failure(res, 409, 'Un compte existe déjà avec cet email ou ce nom utilisateur');
+    const payload = {
+      email, passwordHash: await bcrypt.hash(password, 12), fullName,
+      username: req.body.username?.trim() || null, phone: req.body.phoneNumber?.trim() || req.body.phone?.trim() || null,
+      country: req.body.country?.trim() || 'Congo', city: req.body.city?.trim() || '',
+      bio: req.body.bio?.trim() || '', accountType: req.body.accountType || 'personal',
+      accountVisibility: req.body.accountVisibility || 'public',
+    };
+    success(res, await createAuthChallenge({ flow: 'REGISTER', email, payload }), 201);
+  }));
+
+  app.post('/v1/auth/verify-registration-otp', route(async (req, res) => {
+    await db.query('BEGIN');
     try {
+      const challenge = await consumeAuthChallenge(req.body.pendingUserId, req.body.otp, 'REGISTER');
+      const p = challenge.payload;
       const result = await db.query(
-        'INSERT INTO users (email, password_hash, full_name, phone, country, city) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-        [email, await bcrypt.hash(password, 12), fullName, req.body.phone?.trim() || null, req.body.country?.trim() || 'Congo', req.body.city?.trim() || 'Brazzaville'],
+        `INSERT INTO users (email, password_hash, full_name, username, phone, country, city, bio, is_verified)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true) RETURNING *`,
+        [p.email, p.passwordHash, p.fullName, p.username || null, p.phone || null, p.country || 'Congo', p.city || null, p.bio || null],
       );
+      await db.query('DELETE FROM auth_challenges WHERE id = $1', [challenge.id]);
+      await db.query('COMMIT');
       const user = result.rows[0];
-      return success(res, { token: tokenFor(user), refreshToken: null, userId: user.id, ...publicUser(user) }, 201);
-    } catch (error) { if (error.code === '23505') return failure(res, 409, 'Un compte existe déjà pour cet email'); throw error; }
+      return success(res, { token: tokenFor(user), user: { ...publicUser(user), username: user.username || '', phone_number: user.phone || '', country: user.country || '', city: user.city || '', account_type: p.accountType, account_visibility: p.accountVisibility } }, 201);
+    } catch (error) { await db.query('ROLLBACK'); throw error; }
   }));
 
   app.post('/v1/auth/login', route(async (req, res) => {
@@ -72,8 +133,22 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
     const user = result.rows[0];
     if (!user || !user.password_hash || !(await bcrypt.compare(password, user.password_hash))) return failure(res, 401, 'Identifiants invalides');
-    return success(res, { token: tokenFor(user), refreshToken: null, userId: user.id, ...publicUser(user) });
+    success(res, await createAuthChallenge({ flow: 'LOGIN', email, userId: user.id }));
   }));
+
+  app.post('/v1/auth/verify-login-otp', route(async (req, res) => {
+    await db.query('BEGIN');
+    try {
+      const challenge = await consumeAuthChallenge(req.body.pendingUserId, req.body.otp, 'LOGIN');
+      const result = await db.query('SELECT * FROM users WHERE id = $1', [challenge.user_id]);
+      if (!result.rowCount) throw Object.assign(new Error('Compte introuvable'), { status: 404 });
+      await db.query('DELETE FROM auth_challenges WHERE id = $1', [challenge.id]);
+      await db.query('COMMIT');
+      const user = result.rows[0];
+      return success(res, { token: tokenFor(user), user: { ...publicUser(user), username: user.username || '', phone_number: user.phone || '', country: user.country || '', city: user.city || '' } });
+    } catch (error) { await db.query('ROLLBACK'); throw error; }
+  }));
+
   app.get('/v1/auth/me', auth, route(async (req, res) => {
     const result = await db.query('SELECT * FROM users WHERE id = $1', [req.user.userId]);
     return result.rowCount ? success(res, publicUser(result.rows[0])) : failure(res, 401, 'Compte introuvable');
