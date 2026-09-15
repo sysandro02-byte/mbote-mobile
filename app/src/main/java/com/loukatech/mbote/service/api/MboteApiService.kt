@@ -278,7 +278,7 @@ data class ChatDto(
 private data class CreateChatRequest(
     val isGroup: Boolean,
     val name: String,
-    val participantIds: List<Int>
+    val participantIds: List<String>
 )
 
 @Serializable
@@ -1034,6 +1034,29 @@ class MboteApiService {
         }
     }
 
+    suspend fun fetchDiscoverProfiles(): Result<List<DiscoverProfile>> =
+        executeHttpRequest<Unit, List<DiscoverProfile>>(
+            endpoint = "/users/public?limit=100",
+            method = "GET"
+        ) { json ->
+            responseArray(json).map { element ->
+                val user = MboteBackendConfig.jsonParser.decodeFromJsonElement<PublicMastaUserDto>(element)
+                DiscoverProfile(
+                    id = user.id.toString().trim('"'),
+                    name = user.name.ifBlank { user.username },
+                    age = 0,
+                    city = user.city.orEmpty(),
+                    country = user.country.orEmpty(),
+                    avatar = user.avatar.orEmpty(),
+                    bio = user.bio.orEmpty(),
+                    matchAffinity = 0,
+                    interests = emptyList(),
+                    languages = emptyList(),
+                    favoriteAronQuestion = ""
+                )
+            }
+        }
+
     /**
      * Fetch all Short videos from backend REST API
      */
@@ -1105,7 +1128,7 @@ class MboteApiService {
             requestBody = ConfirmQrLoginRequest(pairingToken)
         ) { Unit }
 
-    suspend fun createGroupApi(name: String, participantIds: List<Int>): Result<String> =
+    suspend fun createGroupApi(name: String, participantIds: List<String>): Result<String> =
         executeHttpRequest(
             endpoint = "/chats",
             method = "POST",
@@ -1114,7 +1137,7 @@ class MboteApiService {
             MboteBackendConfig.jsonParser.decodeFromString<CreatedEntityResponse>(json).id.toString().trim('"')
         }
 
-    suspend fun createDirectChatApi(participantId: Int): Result<ChatDto> =
+    suspend fun createDirectChatApi(participantId: String): Result<ChatDto> =
         executeHttpRequest(
             endpoint = "/chats",
             method = "POST",
