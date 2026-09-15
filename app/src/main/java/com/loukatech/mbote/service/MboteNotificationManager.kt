@@ -189,7 +189,5 @@ object MboteNotificationManager {
         fcmToken = token
     }
 
-    fun getFcmToken(): String {
-        return fcmToken ?: "fcm_token_mbote_demo_device_${System.currentTimeMillis().toString().takeLast(6)}"
-    }
+    fun getFcmToken(): String? = fcmToken
 }
