@@ -47,12 +47,10 @@ fun MeetingRoomScreen(
     val seconds = meetingSeconds % 60
     val durationText = String.format("%02d:%02d", minutes, seconds)
 
-    val participants = listOf(
-        "Moi (Marc Loutala)" to "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-        "Grace Makiese" to "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-        "Yannick Nguesso" to "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-        "Sarah Mabiala" to "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80"
-    )
+    // The API currently exposes the meeting membership count but not remote
+    // media tracks. Never invent identities: render only the authenticated
+    // device preview until signaling supplies actual remote participants.
+    val participantName = meeting.hostName.ifBlank { "Participant" }
 
     Box(
         modifier = modifier
@@ -113,56 +111,24 @@ fun MeetingRoomScreen(
                 }
             }
 
-            // Participant 2x2 Video Grid
-            Column(
+            // Authenticated participant preview. Remote tiles are added only
+            // from real signaling participants, never from a local sample list.
+            Box(
                 modifier = Modifier
                     .weight(1f)
+                    .fillMaxWidth()
                     .padding(vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                contentAlignment = Alignment.Center
             ) {
-                Row(
+                MeetingVideoTile(
+                    name = participantName,
+                    avatar = "",
+                    isVideoOff = isVideoOff,
+                    isMuted = isMuted,
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    MeetingVideoTile(
-                        name = participants[0].first,
-                        avatar = participants[0].second,
-                        isVideoOff = isVideoOff,
-                        isMuted = isMuted,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MeetingVideoTile(
-                        name = participants[1].first,
-                        avatar = participants[1].second,
-                        isVideoOff = false,
-                        isMuted = false,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    MeetingVideoTile(
-                        name = participants[2].first,
-                        avatar = participants[2].second,
-                        isVideoOff = false,
-                        isMuted = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    MeetingVideoTile(
-                        name = participants[3].first,
-                        avatar = participants[3].second,
-                        isVideoOff = true,
-                        isMuted = false,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                        .fillMaxWidth()
+                        .fillMaxHeight()
+                )
             }
 
             // Bottom In-Meeting Controls
@@ -246,8 +212,6 @@ fun MeetingVideoTile(
     isMuted: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val isSelf = name.contains("Moi", ignoreCase = true)
-
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = DarkSurface,
@@ -258,40 +222,26 @@ fun MeetingVideoTile(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            if (isSelf) {
-                // Real CameraX Stream for User
+            if (!isVideoOff) {
+                // Real CameraX stream for the authenticated participant
                 com.loukatech.mbote.ui.components.CameraVideoPreview(
                     isVideoOff = isVideoOff,
                     avatarUrl = avatar,
                     userName = name,
                     modifier = Modifier.fillMaxSize()
                 )
-            } else if (isVideoOff) {
+            } else {
                 Box(
                     modifier = Modifier
                         .size(60.dp)
                         .clip(CircleShape)
-                        .background(PurplePrimary)
-                ) {
-                    AsyncImage(
-                        model = avatar,
-                        contentDescription = name,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color(0xFF1E1838)),
+                        .background(PurplePrimary),
                     contentAlignment = Alignment.Center
                 ) {
-                    AsyncImage(
-                        model = avatar,
-                        contentDescription = name,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
+                    Text(
+                        text = name.take(1).uppercase(),
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
