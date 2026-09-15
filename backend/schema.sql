@@ -457,3 +457,34 @@ CREATE INDEX IF NOT EXISTS idx_channel_subscriptions_user ON channel_subscriptio
 CREATE INDEX IF NOT EXISTS idx_status_comments_status ON status_comments(status_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_job_applications_user ON job_applications(applicant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_group_calls_status ON group_call_sessions(status, created_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS parental_link_tokens (
+    token UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    child_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT (NOW() + INTERVAL '10 minutes'),
+    consumed_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE TABLE IF NOT EXISTS parental_links (
+    parent_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    child_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    linked_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (parent_id, child_id),
+    CHECK (parent_id <> child_id)
+);
+
+CREATE TABLE IF NOT EXISTS panic_alerts (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    child_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    parent_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    address TEXT,
+    battery_level INT,
+    resolved_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_parental_links_child ON parental_links(child_id);
+CREATE INDEX IF NOT EXISTS idx_panic_alerts_parent ON panic_alerts(parent_id, created_at DESC);
