@@ -636,6 +636,274 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res, true);
   }));
 
+
+  // Session, profile and public configuration contracts consumed by Android.
+  app.post('/v1/auth/logout', auth, route(async (_req, res) => success(res, true)));
+  app.get('/v1/public-settings', route(async (_req, res) => {
+    const result = await db.query("SELECT value FROM app_content WHERE content_key = 'registration_config'");
+    success(res, result.rows[0]?.value || { termsOfService: '', privacyPolicy: '', businessCategories: [] });
+  }));
+  app.put('/v1/users/me/profile', auth, route(async (req, res) => {
+    const fields = [
+      req.body.name?.trim() || null, req.body.email?.trim()?.toLowerCase() || null,
+      req.body.bio?.trim() || null, req.body.avatar?.trim() || null, req.body.coverUrl?.trim() || null,
+      req.user.userId,
+    ];
+    const result = await db.query(
+      `UPDATE users SET full_name = COALESCE($1, full_name), email = COALESCE($2, email),
+       bio = COALESCE($3, bio), avatar_url = COALESCE($4, avatar_url),
+       cover_url = COALESCE($5, cover_url), updated_at = NOW() WHERE id = $6 RETURNING *`, fields,
+    );
+    if (!result.rowCount) return failure(res, 404, 'Compte introuvable');
+    const user = result.rows[0];
+    success(res, { ...publicUser(user), username: user.username || '', phone_number: user.phone || '', country: user.country || '', city: user.city || '' });
+  }));
+  app.delete('/v1/users/me', auth, route(async (req, res) => {
+    const result = await db.query('DELETE FROM users WHERE id = $1 RETURNING id', [req.user.userId]);
+    return result.rowCount ? success(res, { ok: true }) : failure(res, 404, 'Compte introuvable');
+  }));
+
+  // Creation, read receipts and reactions for real conversations.
+  app.post('/v1/chats', auth, route(async (req, res) => {
+    const participantIds = Array.isArray(req.body.participantIds) ? [...new Set(req.body.participantIds.map(String))] : [];
+    if (!participantIds.length) return failure(res, 400, 'Au moins un participant est requis');
+    const users = await db.query('SELECT id FROM users WHERE id = ANY($1::uuid[])', [participantIds]);
+    if (users.rowCount !== participantIds.length) return failure(res, 400, 'Un ou plusieurs participants sont invalides');
+    const isGroup = Boolean(req.body.isGroup);
+    const created = await db.query(
+      'INSERT INTO chats (name, is_group, created_by) VALUES ($1, $2, $3) RETURNING *',
+      [isGroup ? text(req.body.name, 'Nom du groupe', 255) : null, isGroup, req.user.userId],
+    );
+    const chat = created.rows[0];
+    const members = [...new Set([req.user.userId, ...participantIds])];
+    await db.query('INSERT INTO chat_participants (chat_id, user_id, role) SELECT $1, unnest($2::uuid[]), CASE WHEN unnest($2::uuid[]) = $3 THEN \'ADMIN\' ELSE \'MEMBER\' END ON CONFLICT DO NOTHING', [chat.id, members, req.user.userId]);
+    success(res, { id: chat.id, name: chat.name || 'Discussion', avatar: '', isGroup, isChannel: false, participants: [] }, 201);
+  }));
+  app.post('/v1/chats/:chatId/read', auth, route(async (req, res) => {
+    if (!(await member(req.params.chatId, req.user.userId))) return failure(res, 403, 'Accès refusé');
+    await db.query(
+      'INSERT INTO chat_reads (chat_id, user_id) VALUES ($1, $2) ON CONFLICT (chat_id, user_id) DO UPDATE SET last_read_at = NOW()',
+      [req.params.chatId, req.user.userId],
+    );
+    await db.query("UPDATE messages SET status = 'READ' WHERE chat_id = $1 AND sender_id <> $2", [req.params.chatId, req.user.userId]);
+    success(res, true);
+  }));
+  app.post('/v1/messages/:messageId/reactions', auth, route(async (req, res) => {
+    const emoji = text(req.body.emoji, 'Réaction', 16);
+    const allowed = await db.query(
+      'SELECT 1 FROM messages m JOIN chat_participants cp ON cp.chat_id = m.chat_id WHERE m.id = $1 AND cp.user_id = $2',
+      [req.params.messageId, req.user.userId],
+    );
+    if (!allowed.rowCount) return failure(res, 404, 'Message introuvable');
+    const inserted = await db.query(
+      'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING emoji',
+      [req.params.messageId, req.user.userId, emoji],
+    );
+    if (!inserted.rowCount) await db.query('DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3', [req.params.messageId, req.user.userId, emoji]);
+    const counts = await db.query('SELECT emoji, COUNT(*)::int AS count FROM message_reactions WHERE message_id = $1 GROUP BY emoji', [req.params.messageId]);
+    success(res, Object.fromEntries(counts.rows.map((row) => [row.emoji, row.count])));
+  }));
+
+  // Channels are conversations with a persisted public profile and subscriptions.
+  app.get('/v1/channels', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT c.id, c.name, cp.description, cp.category, c.avatar_url AS "avatarUrl",
+       cp.banner_url AS "bannerUrl", (SELECT COUNT(*)::int FROM channel_subscriptions cs WHERE cs.channel_id = c.id) AS "subscriberCount",
+       EXISTS(SELECT 1 FROM channel_subscriptions cs WHERE cs.channel_id = c.id AND cs.user_id = $1) AS "subscribedByMe",
+       (c.created_by = $1) AS "canPublish" FROM chats c JOIN channel_profiles cp ON cp.chat_id = c.id
+       WHERE cp.privacy = 'public' OR c.created_by = $1 OR EXISTS(SELECT 1 FROM channel_subscriptions cs WHERE cs.channel_id = c.id AND cs.user_id = $1)
+       ORDER BY c.created_at DESC`, [req.user.userId],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/channels', auth, route(async (req, res) => {
+    const name = text(req.body.name, 'Nom de la chaîne', 255);
+    const slug = text(req.body.slug, 'Identifiant de chaîne', 120).toLowerCase();
+    await db.query('BEGIN');
+    try {
+      const created = await db.query('INSERT INTO chats (name, is_group, is_channel, created_by) VALUES ($1, true, true, $2) RETURNING *', [name, req.user.userId]);
+      await db.query('INSERT INTO channel_profiles (chat_id, description, slug, privacy, category) VALUES ($1, $2, $3, $4, $5)', [created.rows[0].id, req.body.description?.trim() || '', slug, req.body.privacy === 'private' ? 'private' : 'public', req.body.category?.trim() || null]);
+      await db.query("INSERT INTO chat_participants (chat_id, user_id, role) VALUES ($1, $2, 'OWNER')", [created.rows[0].id, req.user.userId]);
+      await db.query('INSERT INTO channel_subscriptions (channel_id, user_id) VALUES ($1, $2)', [created.rows[0].id, req.user.userId]);
+      await db.query('COMMIT');
+      success(res, { id: created.rows[0].id }, 201);
+    } catch (error) { await db.query('ROLLBACK'); throw error; }
+  }));
+  app.post('/v1/channels/:channelId/posts', auth, route(async (req, res) => {
+    const owner = await db.query('SELECT 1 FROM chats WHERE id = $1 AND created_by = $2 AND is_channel = true', [req.params.channelId, req.user.userId]);
+    if (!owner.rowCount) return failure(res, 403, 'Publication réservée au propriétaire');
+    return sendMessage({ ...req, body: { chatId: req.params.channelId, text: req.body.content } }, res);
+  }));
+  const setChannelSubscription = async (req, res, subscribe) => {
+    if (subscribe) await db.query('INSERT INTO channel_subscriptions (channel_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.params.channelId, req.user.userId]);
+    else await db.query('DELETE FROM channel_subscriptions WHERE channel_id = $1 AND user_id = $2', [req.params.channelId, req.user.userId]);
+    success(res, true);
+  };
+  app.post('/v1/channels/:channelId/subscribe', auth, route((req, res) => setChannelSubscription(req, res, true)));
+  app.delete('/v1/channels/:channelId/subscribe', auth, route((req, res) => setChannelSubscription(req, res, false)));
+
+  // Actus API aliases with fully persisted reactions, comments and shares.
+  app.get('/v1/actus/posts', auth, route(async (req, res) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const result = await db.query(
+      `SELECT n.id, n.author_id, u.full_name AS author_name, COALESCE(u.avatar_url, '') AS author_avatar,
+       lower(COALESCE(n.media_type, 'text')) AS type, n.content, n.image_url AS thumbnail, n.category AS visibility,
+       (SELECT COUNT(*)::int FROM news_post_comments nc WHERE nc.news_post_id=n.id) AS comment_count,
+       (SELECT COUNT(*)::int FROM news_post_shares ns WHERE ns.news_post_id=n.id) AS share_count,
+       (SELECT COUNT(*)::int FROM news_post_likes nl WHERE nl.news_post_id=n.id) AS reaction_count,
+       CASE WHEN EXISTS(SELECT 1 FROM news_post_likes nl WHERE nl.news_post_id=n.id AND nl.user_id=$1) THEN '❤️' END AS my_reaction,
+       n.created_at FROM news_posts n JOIN users u ON u.id=n.author_id ORDER BY n.created_at DESC LIMIT $2`,
+      [req.user.userId, limit],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/actus/posts', auth, route(async (req, res) => {
+    const content = text(req.body.content, 'Publication');
+    const created = await db.query(
+      'INSERT INTO news_posts (author_id, category, title, content, image_url, media_type) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [req.user.userId, req.body.visibility || 'public', content.slice(0,255), content, req.body.type === 'text' ? null : req.body.content, String(req.body.type || 'text').toUpperCase()],
+    );
+    const user = await db.query('SELECT full_name, avatar_url FROM users WHERE id=$1', [req.user.userId]);
+    success(res, { id: created.rows[0].id, author_id: req.user.userId, author_name: user.rows[0].full_name, author_avatar: user.rows[0].avatar_url || '', type: req.body.type || 'text', content, thumbnail: req.body.thumbnail || null, visibility: req.body.visibility || 'public', comment_count: 0, share_count: 0, reaction_count: 0, my_reaction: null, created_at: created.rows[0].created_at }, 201);
+  }));
+  app.post('/v1/actus/posts/:postId/reactions', auth, route(async (req, res) => {
+    const existing = await db.query('SELECT 1 FROM news_post_likes WHERE news_post_id=$1 AND user_id=$2', [req.params.postId, req.user.userId]);
+    if (existing.rowCount) await db.query('DELETE FROM news_post_likes WHERE news_post_id=$1 AND user_id=$2', [req.params.postId, req.user.userId]);
+    else await db.query('INSERT INTO news_post_likes (news_post_id,user_id) VALUES ($1,$2)', [req.params.postId, req.user.userId]);
+    success(res, true);
+  }));
+  app.get('/v1/actus/posts/:postId/comments', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT c.id, u.full_name AS user_name, COALESCE(u.avatar_url,'') AS user_avatar, c.text AS content, c.created_at
+       FROM news_post_comments c JOIN users u ON u.id=c.author_id WHERE c.news_post_id=$1 ORDER BY c.created_at ASC LIMIT 100`,
+      [req.params.postId],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/actus/posts/:postId/comments', auth, route(async (req, res) => {
+    await db.query('INSERT INTO news_post_comments (news_post_id,author_id,text) VALUES ($1,$2,$3)', [req.params.postId, req.user.userId, text(req.body.content || req.body.text, 'Commentaire', 2000)]);
+    success(res, true, 201);
+  }));
+  app.post('/v1/actus/posts/:postId/shares', auth, route(async (req, res) => {
+    await db.query('INSERT INTO news_post_shares (news_post_id,user_id) VALUES ($1,$2)', [req.params.postId, req.user.userId]);
+    const count = await db.query('SELECT COUNT(*)::int AS count FROM news_post_shares WHERE news_post_id=$1', [req.params.postId]);
+    await db.query('UPDATE news_posts SET shares_count=$2 WHERE id=$1', [req.params.postId, count.rows[0].count]);
+    success(res, { shareCount: count.rows[0].count });
+  }));
+
+  // Jobs and applications are sourced exclusively from PostgreSQL.
+  app.get('/v1/jobs', auth, route(async (_req, res) => {
+    const result = await db.query(
+      `SELECT id,title,company,location,contract_type AS type,description,domain AS "activityDomain",
+       contract_type AS duration,COALESCE(salary,'') AS salary,created_at AS "publishedAt",
+       '' AS "expiresAt",'' AS url,company_logo AS "imageUrl" FROM job_offers ORDER BY created_at DESC`,
+    );
+    success(res, { jobs: result.rows });
+  }));
+  app.post('/v1/jobs', auth, route(async (req, res) => {
+    const created = await db.query(
+      `INSERT INTO job_offers (title,company,company_logo,location,domain,contract_type,work_mode,salary,description)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,title,company,location,contract_type AS type,
+       description,domain AS "activityDomain",contract_type AS duration,COALESCE(salary,'') AS salary,
+       created_at AS "publishedAt",'' AS "expiresAt",'' AS url,company_logo AS "imageUrl"`,
+      [text(req.body.title,'Titre',255),text(req.body.company,'Entreprise',255),req.body.imageUrl||null,text(req.body.location,'Lieu',255),req.body.activityDomain||req.body.domain||'Autre',req.body.duration||req.body.type||'CDI',req.body.workMode||'Sur site',req.body.salary||null,text(req.body.description,'Description')],
+    );
+    success(res, { job: created.rows[0] }, 201);
+  }));
+  app.post('/v1/jobs/:jobId/apply', auth, route(async (req, res) => {
+    await db.query('INSERT INTO job_applications (job_id,applicant_id,cv_url) VALUES ($1,$2,$3) ON CONFLICT (job_id,applicant_id) DO UPDATE SET cv_url=EXCLUDED.cv_url, created_at=NOW()', [req.params.jobId, req.user.userId, req.body.cvUrl || null]);
+    success(res, true, 201);
+  }));
+
+  // Status interactions and lifecycle.
+  app.get('/v1/status', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT s.id,s.author_id AS user_id,u.full_name AS user_name,COALESCE(u.avatar_url,'') AS user_avatar,
+       lower(s.media_type) AS type,COALESCE(s.text,s.media_url,'') AS content,s.background_color AS background,
+       s.text AS caption,s.created_at,(SELECT COUNT(*)::int FROM status_reactions r WHERE r.status_id=s.id) AS reaction_count,
+       (SELECT emoji FROM status_reactions r WHERE r.status_id=s.id AND r.user_id=$1) AS my_reaction,
+       (SELECT COUNT(*)::int FROM status_comments c WHERE c.status_id=s.id) AS comment_count,
+       (SELECT COUNT(*)::int FROM status_shares sh WHERE sh.status_id=s.id) AS share_count,
+       (SELECT COUNT(*)::int FROM status_views v WHERE v.status_id=s.id) AS view_count
+       FROM statuses s JOIN users u ON u.id=s.author_id WHERE s.expires_at>NOW() ORDER BY s.created_at DESC`,
+      [req.user.userId],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/status/publications', auth, route(async (req, res) => {
+    const type = String(req.body.type||'text').toUpperCase();
+    const content = text(req.body.content,'Statut',5000);
+    const created = await db.query(
+      `INSERT INTO statuses (author_id,media_type,media_url,text,background_color,expires_at)
+       VALUES ($1,$2,$3,$4,$5,NOW()+($6::int * INTERVAL '1 hour')) RETURNING *`,
+      [req.user.userId,type,type==='TEXT'?null:content,type==='TEXT'?content:(req.body.caption||null),req.body.background||null,Math.min(Math.max(Number(req.body.durationHours)||24,1),168)],
+    );
+    const user=await db.query('SELECT full_name,avatar_url FROM users WHERE id=$1',[req.user.userId]);
+    success(res,{id:created.rows[0].id,user_id:req.user.userId,user_name:user.rows[0].full_name,user_avatar:user.rows[0].avatar_url||'',type:type.toLowerCase(),content,background:req.body.background||null,caption:req.body.caption||null,created_at:created.rows[0].created_at,reaction_count:0,my_reaction:null,comment_count:0,share_count:0,view_count:0},201);
+  }));
+  app.post('/v1/status/:statusId/views', auth, route(async (req,res)=>{await db.query('INSERT INTO status_views(status_id,viewer_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[req.params.statusId,req.user.userId]);success(res,true);}));
+  app.post('/v1/status/:statusId/reactions', auth, route(async (req,res)=>{
+    const emoji=text(req.body.reaction,'Réaction',16);
+    await db.query('INSERT INTO status_reactions(status_id,user_id,emoji) VALUES($1,$2,$3) ON CONFLICT(status_id,user_id) DO UPDATE SET emoji=EXCLUDED.emoji',[req.params.statusId,req.user.userId,emoji]);
+    success(res,true);
+  }));
+  app.post('/v1/status/:statusId/comments', auth, route(async (req,res)=>{await db.query('INSERT INTO status_comments(status_id,author_id,text) VALUES($1,$2,$3)',[req.params.statusId,req.user.userId,text(req.body.content,'Commentaire',2000)]);success(res,true,201);}));
+  app.post('/v1/status/:statusId/shares', auth, route(async (req,res)=>{await db.query('INSERT INTO status_shares(status_id,user_id) VALUES($1,$2)',[req.params.statusId,req.user.userId]);success(res,true,201);}));
+  app.delete('/v1/status/:statusId', auth, route(async (req,res)=>{const result=await db.query('DELETE FROM statuses WHERE id=$1 AND author_id=$2 RETURNING id',[req.params.statusId,req.user.userId]);return result.rowCount?success(res,true):failure(res,404,'Statut introuvable');}));
+
+  // Group call sessions never fall back to fabricated local participants.
+  const groupCallDto = async (roomCode, viewerId) => {
+    const sessionResult = await db.query('SELECT * FROM group_call_sessions WHERE room_code=$1',[roomCode.toUpperCase()]);
+    if(!sessionResult.rowCount) return null;
+    const session=sessionResult.rows[0];
+    const participants=await db.query(
+      `SELECT u.id,u.full_name AS name,COALESCE(u.avatar_url,'') AS avatar,
+       NOT p.audio_enabled AS "isMuted",NOT p.video_enabled AS "isVideoOff",
+       (u.id=$2) AS "isHost",p.screen_sharing AS "isScreenSharing",0::float AS "audioVolumeLevel"
+       FROM group_call_participants p JOIN users u ON u.id=p.user_id
+       WHERE p.session_id=$1 AND p.left_at IS NULL ORDER BY p.joined_at`,[session.id,session.host_id],
+    );
+    return {roomCode:session.room_code,roomTitle:session.title,isVideoCall:session.is_video,hostUserId:String(session.host_id),participants:participants.rows,connectionQuality:'SERVER_CONNECTED',encryptionStandard:'WebRTC E2EE',createdAtTimestamp:new Date(session.created_at).getTime()};
+  };
+  app.post('/v1/calls/group/create',auth,route(async(req,res)=>{
+    const code=crypto.randomBytes(4).toString('hex').toUpperCase();
+    const created=await db.query('INSERT INTO group_call_sessions(room_code,host_id,title,is_video) VALUES($1,$2,$3,$4) RETURNING id',[code,req.user.userId,text(req.body.roomTitle,'Titre',255),req.body.isVideoCall!==false]);
+    await db.query('INSERT INTO group_call_participants(session_id,user_id,video_enabled) VALUES($1,$2,$3)',[created.rows[0].id,req.user.userId,req.body.isVideoCall!==false]);
+    const invitees=Array.isArray(req.body.participantIds)?req.body.participantIds.map(String):[];
+    if(invitees.length) await db.query('INSERT INTO group_call_participants(session_id,user_id,video_enabled) SELECT $1,unnest($2::uuid[]),$3 ON CONFLICT DO NOTHING',[created.rows[0].id,invitees,req.body.isVideoCall!==false]);
+    success(res,await groupCallDto(code,req.user.userId),201);
+  }));
+  app.post('/v1/calls/group/join/:roomCode',auth,route(async(req,res)=>{
+    const session=await db.query("SELECT id,is_video FROM group_call_sessions WHERE room_code=$1 AND status='ACTIVE'",[req.params.roomCode.toUpperCase()]);
+    if(!session.rowCount)return failure(res,404,'Appel de groupe introuvable');
+    await db.query('INSERT INTO group_call_participants(session_id,user_id,video_enabled,left_at) VALUES($1,$2,$3,NULL) ON CONFLICT(session_id,user_id) DO UPDATE SET left_at=NULL',[session.rows[0].id,req.user.userId,session.rows[0].is_video]);
+    success(res,await groupCallDto(req.params.roomCode,req.user.userId));
+  }));
+  app.put('/v1/calls/group/update-state',auth,route(async(req,res)=>{
+    const session=await db.query('SELECT id FROM group_call_sessions WHERE room_code=$1',[text(req.body.roomCode,'Code',32).toUpperCase()]);
+    if(!session.rowCount)return failure(res,404,'Appel introuvable');
+    await db.query('UPDATE group_call_participants SET audio_enabled=$3,video_enabled=$4,screen_sharing=$5 WHERE session_id=$1 AND user_id=$2',[session.rows[0].id,req.user.userId,!req.body.isMuted,!req.body.isVideoOff,Boolean(req.body.isScreenSharing)]);
+    success(res,true);
+  }));
+  app.post('/v1/calls/group/leave/:roomCode',auth,route(async(req,res)=>{
+    const session=await db.query('SELECT id,host_id FROM group_call_sessions WHERE room_code=$1',[req.params.roomCode.toUpperCase()]);
+    if(!session.rowCount)return failure(res,404,'Appel introuvable');
+    await db.query('UPDATE group_call_participants SET left_at=NOW() WHERE session_id=$1 AND user_id=$2',[session.rows[0].id,req.user.userId]);
+    if(String(session.rows[0].host_id)===String(req.user.userId))await db.query("UPDATE group_call_sessions SET status='ENDED',ended_at=NOW() WHERE id=$1",[session.rows[0].id]);
+    success(res,true);
+  }));
+
+  // Dynamic application content and push-token registration.
+  app.get('/v1/content/aron-questions',auth,route(async(_req,res)=>{
+    const result=await db.query("SELECT value FROM app_content WHERE content_key='aron_questions'");
+    success(res,result.rows[0]?.value||[]);
+  }));
+  app.put('/v1/devices/push-token',auth,route(async(req,res)=>{
+    const token=text(req.body.token,'Jeton FCM',4096);
+    await db.query('INSERT INTO device_push_tokens(user_id,token) VALUES($1,$2) ON CONFLICT(user_id,token) DO UPDATE SET updated_at=NOW()',[req.user.userId,token]);
+    success(res,true);
+  }));
+
   app.post('/v1/ai/smart-replies', auth, route(async (req, res) => {
     if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_MODEL) {
       return failure(res, 503, 'L’assistant IA est temporairement indisponible');
