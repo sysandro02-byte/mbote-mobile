@@ -637,6 +637,60 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   }));
 
 
+  // Server-side media search and payment connectors keep provider secrets out of the APK.
+  app.get('/v1/media/search', auth, route(async (req, res) => {
+    if (!process.env.GIPHY_API_KEY) return failure(res, 503, 'La recherche GIF n’est pas configurée');
+    const query = text(req.query.q, 'Recherche', 100);
+    const type = req.query.type === 'sticker' ? 'stickers' : 'gifs';
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
+    const upstream = await fetch(`https://api.giphy.com/v1/${type}/search?api_key=${encodeURIComponent(process.env.GIPHY_API_KEY)}&q=${encodeURIComponent(query)}&limit=${limit}&rating=pg-13`);
+    if (!upstream.ok) throw Object.assign(new Error('Le fournisseur GIF est indisponible'), { status: 502 });
+    const payload = await upstream.json();
+    const items = (payload.data || []).map((item) => ({
+      id: item.id,
+      title: item.title || '',
+      previewUrl: item.images?.fixed_width_small?.url || item.images?.preview_gif?.url || '',
+      originalUrl: item.images?.original?.url || '',
+      width: Number(item.images?.original?.width) || 0,
+      height: Number(item.images?.original?.height) || 0,
+    })).filter((item) => item.originalUrl);
+    success(res, { items });
+  }));
+
+  app.post('/v1/payments/intents', auth, route(async (req, res) => {
+    if (!process.env.PAYMENTS_API_URL || !process.env.PAYMENTS_API_KEY) {
+      return failure(res, 503, 'Le connecteur de paiement n’est pas configuré');
+    }
+    const provider = text(req.body.provider, 'Opérateur', 50);
+    const amount = Number(req.body.amountFcfa);
+    const phone = text(req.body.phone, 'Téléphone', 50);
+    if (!Number.isSafeInteger(amount) || amount <= 0) return failure(res, 400, 'Montant invalide');
+    const local = await db.query(
+      'INSERT INTO payment_intents(user_id,provider,amount_fcfa,phone) VALUES($1,$2,$3,$4) RETURNING id',
+      [req.user.userId, provider, amount, phone],
+    );
+    const upstream = await fetch(process.env.PAYMENTS_API_URL, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${process.env.PAYMENTS_API_KEY}`, 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ intentId: local.rows[0].id, provider, amount, currency: 'XAF', phone, callbackUrl: process.env.PAYMENTS_CALLBACK_URL }),
+    });
+    if (!upstream.ok) {
+      await db.query("UPDATE payment_intents SET status='FAILED',updated_at=NOW() WHERE id=$1", [local.rows[0].id]);
+      throw Object.assign(new Error('L’opérateur de paiement a refusé la demande'), { status: 502 });
+    }
+    const payload = await upstream.json();
+    await db.query('UPDATE payment_intents SET provider_reference=$2,status=$3,updated_at=NOW() WHERE id=$1', [local.rows[0].id, payload.reference || null, String(payload.status || 'PENDING').toUpperCase()]);
+    success(res, {
+      intentId: local.rows[0].id,
+      status: String(payload.status || 'PENDING').toUpperCase(),
+      amount,
+      currency: 'XAF',
+      merchantCode: payload.merchantCode || null,
+      ussdCode: payload.ussdCode || null,
+      instructions: payload.instructions || null,
+    }, 201);
+  }));
+
   // Session, profile and public configuration contracts consumed by Android.
   app.post('/v1/auth/logout', auth, route(async (_req, res) => success(res, true)));
   app.get('/v1/public-settings', route(async (_req, res) => {
