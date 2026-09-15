@@ -111,9 +111,11 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   }));
 
   app.post('/v1/auth/verify-registration-otp', route(async (req, res) => {
+    // Validate before opening the account-creation transaction so a failed OTP
+    // attempt is persisted instead of being undone by the rollback below.
+    const challenge = await consumeAuthChallenge(req.body.pendingUserId, req.body.otp, 'REGISTER');
     await db.query('BEGIN');
     try {
-      const challenge = await consumeAuthChallenge(req.body.pendingUserId, req.body.otp, 'REGISTER');
       const p = challenge.payload;
       const result = await db.query(
         `INSERT INTO users (email, password_hash, full_name, username, phone, country, city, bio, is_verified)
@@ -137,9 +139,10 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   }));
 
   app.post('/v1/auth/verify-login-otp', route(async (req, res) => {
+    // Keep invalid-attempt accounting outside the transaction rolled back below.
+    const challenge = await consumeAuthChallenge(req.body.pendingUserId, req.body.otp, 'LOGIN');
     await db.query('BEGIN');
     try {
-      const challenge = await consumeAuthChallenge(req.body.pendingUserId, req.body.otp, 'LOGIN');
       const result = await db.query('SELECT * FROM users WHERE id = $1', [challenge.user_id]);
       if (!result.rowCount) throw Object.assign(new Error('Compte introuvable'), { status: 404 });
       await db.query('DELETE FROM auth_challenges WHERE id = $1', [challenge.id]);
