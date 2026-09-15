@@ -495,7 +495,7 @@ fun QrCodeScannerDialog(
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Entrez un nom d'utilisateur (ex: @aron_ngala) ou un numéro de téléphone pour simuler le scan QR.", fontSize = 12.5.sp)
+                    Text("Entrez l’identifiant exact d’un compte déjà chargé depuis le serveur.", fontSize = 12.5.sp)
                     OutlinedTextField(
                         value = manualInput,
                         onValueChange = { manualInput = it },
@@ -511,17 +511,21 @@ fun QrCodeScannerDialog(
                     onClick = {
                         val query = manualInput.trim()
                         if (query.isNotBlank()) {
-                            val matched = sampleScanCandidates.find {
-                                it.username.contains(query, ignoreCase = true) || it.name.contains(query, ignoreCase = true) || it.phone.contains(query)
-                            } ?: ScannedContactResult(
-                                id = "user_manual_${query.hashCode()}",
-                                name = query.removePrefix("@").replaceFirstChar { it.uppercase() },
-                                username = if (query.startsWith("@")) query else "@$query",
-                                avatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150",
-                                phone = "+242 06 000 0000",
-                                bio = "Nouveau contact découvert via scanner QR MBoté"
+                            val matchedUser = allMastaUsers.find {
+                                it.id.equals(query, ignoreCase = true) || it.name.equals(query.removePrefix("@"), ignoreCase = true)
+                            }
+                            if (matchedUser == null) {
+                                Toast.makeText(context, "Compte serveur introuvable.", Toast.LENGTH_LONG).show()
+                                return@Button
+                            }
+                            scannedResult = ScannedContactResult(
+                                id = matchedUser.id,
+                                name = matchedUser.name,
+                                username = "",
+                                avatar = matchedUser.avatar,
+                                phone = "",
+                                bio = matchedUser.infoSubtitle
                             )
-                            scannedResult = matched
                             showManualInputDialog = false
                             manualInput = ""
                         }
