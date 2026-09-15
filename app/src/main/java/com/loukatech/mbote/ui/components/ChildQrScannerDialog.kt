@@ -2,6 +2,8 @@ package com.loukatech.mbote.ui.components
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.widget.Toast
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
@@ -288,21 +290,27 @@ fun ChildQrScannerDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Fast test scan triggers linking immediately for smooth testing
                 Button(
                     onClick = {
-                        onQrScanned("mbote://child-link?id=MB-CHILD-88392&name=Junior+Loutala&auth=RSA2048-PAIRING-TOKEN")
+                        GmsBarcodeScanning.getClient(context).startScan()
+                            .addOnSuccessListener { barcode ->
+                                val payload = barcode.rawValue
+                                if (!payload.isNullOrBlank()) onQrScanned(payload)
+                            }
+                            .addOnFailureListener { error ->
+                                Toast.makeText(context, error.message ?: "QR code illisible.", Toast.LENGTH_LONG).show()
+                            }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
-                        .testTag("simulate_child_qr_scan_button"),
+                        .testTag("scan_child_qr_button"),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary)
                 ) {
                     Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Valider le Scan du QR Code Enfant", fontWeight = FontWeight.Bold)
+                    Text("Scanner le QR Code Enfant", fontWeight = FontWeight.Bold)
                 }
             }
         }
