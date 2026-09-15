@@ -717,7 +717,7 @@ class MboteApiService {
         val type = if (stickers) "sticker" else "gif"
         return executeHttpRequest<Unit, List<MediaSearchItem>>(
             endpoint = "/media/search?type=$type&q=$safeQuery&limit=20"
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<MediaSearchResponse>(json).items }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<MediaSearchResponse>(responseObject(json)).items }
     }
 
     suspend fun createPaymentIntent(provider: String, amountFcfa: Long, phone: String): Result<PaymentIntentResponse> =
@@ -725,11 +725,11 @@ class MboteApiService {
             endpoint = "/payments/intents",
             method = "POST",
             requestBody = PaymentIntentRequest(provider, amountFcfa, "XAF", phone)
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<PaymentIntentResponse>(json) }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<PaymentIntentResponse>(responseObject(json)) }
 
     suspend fun getRegistrationPublicConfig(): Result<RegistrationPublicConfig> =
         executeHttpRequest<Unit, RegistrationPublicConfig>(endpoint = "/public-settings") { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<RegistrationPublicConfig>(json)
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<RegistrationPublicConfig>(responseObject(json))
         }
 
     suspend fun verifyLoginOtp(pendingUserId: String, otp: String): Result<VerifiedAuthResponse> {
