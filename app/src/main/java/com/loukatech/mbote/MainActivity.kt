@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
             val meetings by viewModel.meetings.collectAsStateWithLifecycle()
             val jobs by viewModel.jobs.collectAsStateWithLifecycle()
             val discoverProfiles by viewModel.discoverProfiles.collectAsStateWithLifecycle()
+            val aronQuestions by viewModel.aronQuestions.collectAsStateWithLifecycle()
 
             val unreadCount by viewModel.totalUnreadMessages.collectAsStateWithLifecycle()
             val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -955,14 +956,11 @@ class MainActivity : ComponentActivity() {
 
                     if (showAronQuestionsSheet) {
                         AronQuestionsSheet(
+                            questions = aronQuestions,
                             onDismiss = { viewModel.setShowAronQuestionsSheet(false) },
                             onSelectQuestion = { question ->
                                 if (activeChat != null) {
                                     viewModel.sendAronQuestion(activeChat!!.id, question)
-                                } else {
-                                    // Start a chat with AI Luna to explore question
-                                    viewModel.openChat("chat_luna")
-                                    viewModel.sendAronQuestion("chat_luna", question)
                                 }
                             },
                             onStartEyeContactExercise = {
