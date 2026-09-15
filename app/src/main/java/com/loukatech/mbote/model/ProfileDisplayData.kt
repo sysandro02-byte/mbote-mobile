@@ -12,5 +12,13 @@ data class ProfileDisplayData(
     val city: String = "Brazzaville",
     val isCelebrity: Boolean = false,
     val isCompany: Boolean = false,
-    val mutualFriends: Int = 4
+    val mutualFriends: Int = 0,
+    val username: String = "",
+    val coverUrl: String = "",
+    val category: String = "",
+    val followersCount: Int = 0,
+    val videosCount: Int = 0,
+    val viewsCount: Int = 0,
+    val likesCount: Int = 0,
+    val isFollowing: Boolean = false
 )
