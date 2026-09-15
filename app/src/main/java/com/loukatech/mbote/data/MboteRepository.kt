@@ -1825,26 +1825,16 @@ class MboteRepository(
         return newMeeting
     }
 
-    fun toggleJobLike(jobId: String) {
-        _jobs.update { jobList ->
-            jobList.map { job ->
-                if (job.id == jobId) {
-                    val newLiked = !job.isLiked
-                    val newCount = if (newLiked) job.likesCount + 1 else job.likesCount - 1
-                    job.copy(isLiked = newLiked, likesCount = newCount)
-                } else job
-            }
-        }
+    suspend fun toggleJobLike(jobId: String): Result<Unit> {
+        val result = publicationApiService.toggleJobLike(jobId)
+        if (result.isSuccess) refreshJobs()
+        return result
     }
 
-    fun toggleJobBookmark(jobId: String) {
-        _jobs.update { jobList ->
-            jobList.map { job ->
-                if (job.id == jobId) {
-                    job.copy(isSaved = !job.isSaved)
-                } else job
-            }
-        }
+    suspend fun toggleJobBookmark(jobId: String): Result<Unit> {
+        val result = publicationApiService.toggleJobBookmark(jobId)
+        if (result.isSuccess) refreshJobs()
+        return result
     }
 
     suspend fun refreshJobs(): Result<Unit> = publicationApiService.fetchJobs()
