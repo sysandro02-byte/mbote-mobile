@@ -708,7 +708,7 @@ class MboteApiService {
             method = "POST",
             requestBody = request
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<PendingOtpChallenge>(json)
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<PendingOtpChallenge>(responseObject(json))
         }
     }
 
@@ -779,13 +779,13 @@ class MboteApiService {
             endpoint = "/users/me/profile",
             method = "PUT",
             requestBody = request
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<AuthUserData>(json) }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<AuthUserData>(responseObject(json)) }
 
     suspend fun fetchMySettings(): Result<JsonObject> =
         executeHttpRequest<Unit, JsonObject>(
             endpoint = "/users/me/settings",
             method = "GET"
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<UserSettingsResponse>(json).value }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<UserSettingsResponse>(responseObject(json)).value }
 
     suspend fun updateMySettings(settings: JsonObject): Result<JsonObject> =
         executeHttpRequest(
@@ -832,8 +832,7 @@ class MboteApiService {
                 method = "POST",
                 requestBody = request
             ) { json ->
-                MboteBackendConfig.jsonParser.decodeFromString<ForgotPasswordResponse>(json).message
-                    ?: "Si ce compte existe, un lien de réinitialisation a été envoyé."
+                responseObject(json).string("message", default = "Si ce compte existe, un code de réinitialisation a été envoyé.")
             }
     }
 
