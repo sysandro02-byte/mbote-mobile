@@ -412,10 +412,6 @@ class MboteRepository(
                 .onFailure { rejectOptimisticMessage(chatId, localId, it) }
         }
 
-        // If chatting with AI, generate an instant response
-        if (chat?.isAI == true) {
-            triggerAiResponse(chatId, text)
-        }
     }
 
     fun sendVoiceMessage(
@@ -478,9 +474,6 @@ class MboteRepository(
                 .onFailure { rejectOptimisticMessage(chatId, localId, it) }
         }
 
-        if (chat?.isAI == true) {
-            triggerAiResponse(chatId, "Message vocal reçu")
-        }
     }
 
     private fun sendStructuredChatMessage(
@@ -1321,160 +1314,6 @@ class MboteRepository(
     fun getScrollingMinutes(): Int = _scrollingMinutes
     fun addScrollingMinutes(min: Int) {
         _scrollingMinutes += min
-    }
-
-    data class ScheduledMessage(
-        val text: String,
-        val destChatId: String,
-        val destName: String,
-        val delaySeconds: Long,
-        val timestampScheduled: String
-    )
-
-    private val _scheduledMessages = MutableStateFlow<List<ScheduledMessage>>(emptyList())
-    val scheduledMessages: StateFlow<List<ScheduledMessage>> = _scheduledMessages.asStateFlow()
-
-    private fun triggerAiResponse(chatId: String, userPrompt: String) {
-        val currentTime = timeFormat.format(Date())
-        val isScheduling = userPrompt.contains("programme", ignoreCase = true) || 
-                            userPrompt.contains("planifie", ignoreCase = true) || 
-                            userPrompt.contains("différé", ignoreCase = true) || 
-                            userPrompt.contains("envoyer après", ignoreCase = true)
-        
-        val isGiftsQuery = userPrompt.contains("cadeau", ignoreCase = true) || 
-                            userPrompt.contains("reçu", ignoreCase = true) || 
-                            userPrompt.contains("gain", ignoreCase = true)
-        
-        val isScreenTimeQuery = userPrompt.contains("scroll", ignoreCase = true) || 
-                                 userPrompt.contains("temps", ignoreCase = true) || 
-                                 userPrompt.contains("écran", ignoreCase = true) || 
-                                 userPrompt.contains("minute", ignoreCase = true)
-
-        val aiReplyText = when {
-            isScheduling -> {
-                // Parse message inside quotes or after "le message"
-                val textMatch = Regex("['\"«]([^'\"»]+)['\"»]").find(userPrompt)
-                val msgText = textMatch?.groupValues?.get(1) ?: run {
-                    val index = userPrompt.lowercase().indexOf("message")
-                    if (index != -1 && index + 8 < userPrompt.length) {
-                        userPrompt.substring(index + 8).trim()
-                    } else {
-                        "Mboté ! Comment tu vas ?"
-                    }
-                }
-
-                // Parse delay
-                val secondsMatch = Regex("(\\d+)\\s*(seconde|secondes|sec)").find(userPrompt)
-                val minutesMatch = Regex("(\\d+)\\s*(minute|minutes|min)").find(userPrompt)
-                val delaySeconds = when {
-                    secondsMatch != null -> secondsMatch.groupValues[1].toLong()
-                    minutesMatch != null -> minutesMatch.groupValues[1].toLong() * 60L
-                    else -> 10L // Default to 10 seconds for fun demoing
-                }
-
-                // Find recipient chat
-                val chatsVal = _chats.value
-                var targetChat = chatsVal.find { chat ->
-                    chat.id != "chat_luna_ai" && (
-                        userPrompt.contains(chat.name, ignoreCase = true) || 
-                        chat.name.split(" ").any { part -> part.length > 2 && userPrompt.contains(part, ignoreCase = true) }
-                    )
-                }
-                if (targetChat == null) {
-                    targetChat = chatsVal.find { it.id != "chat_luna_ai" && it.id != chatId } ?: chatsVal.firstOrNull()
-                }
-
-                val targetChatId = targetChat?.id ?: chatId
-                val targetChatName = targetChat?.name ?: "Mon masta"
-
-                val schedMsg = ScheduledMessage(
-                    text = msgText,
-                    destChatId = targetChatId,
-                    destName = targetChatName,
-                    delaySeconds = delaySeconds,
-                    timestampScheduled = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                )
-                _scheduledMessages.update { it + schedMsg }
-
-                // Launch delayed sending mechanism
-                CoroutineScope(Dispatchers.Default).launch {
-                    kotlinx.coroutines.delay(delaySeconds * 1000L)
-                    sendMessage(targetChatId, msgText)
-                    _scheduledMessages.update { list -> list.filter { it != schedMsg } }
-                }
-
-                val targetTimeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(System.currentTimeMillis() + delaySeconds * 1000L))
-                "D'accord ! J'ai programmé votre message : **« $msgText »** pour **$targetChatName**.\nIl sera envoyé automatiquement dans **$delaySeconds secondes** (à $targetTimeStr). 🕒"
-            }
-            isGiftsQuery -> {
-                val receivedTransactions = _userGiftState.value.transactions.filter { it.isReceived }
-                val totalGains = _userGiftState.value.totalVirtualEarnedFcfa
-                val giftsStr = if (receivedTransactions.isEmpty()) {
-                    "Vous n'avez pas encore reçu de cadeaux sur vos directs ou vidéos."
-                } else {
-                    receivedTransactions.joinToString("\n") { tx ->
-                        "• ${tx.emoji} **${tx.giftName}** reçu de *${tx.counterpartName}* (${tx.amountFcfa} FCFA) - ${tx.timestamp}"
-                    }
-                }
-                "Voici un récapitulatif de vos cadeaux reçus 🎁 :\n\n$giftsStr\n\n💰 **Total de vos gains accumulés : $totalGains FCFA**\nVous pouvez transférer ce solde vers MTN MoMo, Airtel Money ou votre portefeuille MBoté à tout moment depuis les Paramètres !"
-            }
-            isScreenTimeQuery -> {
-                val isLimitConfig = userPrompt.contains("limite", ignoreCase = true) && Regex("\\d+").containsMatchIn(userPrompt)
-                if (isLimitConfig) {
-                    val newLimit = Regex("\\d+").find(userPrompt)?.value?.toIntOrNull() ?: 45
-                    _screenLimitMinutes = newLimit
-                    "Parfait ! J'ai configuré votre limite de temps d'écran à **$newLimit minutes** pour aujourd'hui. Je vous alerterai dès que vous la dépasserez ! ⏳😊"
-                } else {
-                    "Vous avez passé **$_scrollingMinutes minutes** à scroller et naviguer sur MBoté aujourd'hui. 📱\n" +
-                    "Votre limite d'utilisation recommandée est de **$_screenLimitMinutes minutes**.\n\n" +
-                    "💡 *Conseil de Luna :* Faire des pauses de 5 minutes toutes les 30 minutes aide à garder l'esprit frais et reposé !"
-                }
-            }
-            userPrompt.contains("aide", ignoreCase = true) || userPrompt.contains("faire", ignoreCase = true) || userPrompt.contains("fonction", ignoreCase = true) || (userPrompt.contains("luna", ignoreCase = true) && userPrompt.contains("quoi", ignoreCase = true)) ->
-                "Je suis Luna, votre assistante IA MBoté ! Voici ce que je peux faire pour vous :\n\n" +
-                "1️⃣ **Planifier des messages** 🕒 : Dites-moi par exemple *\"programme le message 'Salut mon masta' dans 10 secondes\"*.\n" +
-                "2️⃣ **Rappeler vos cadeaux reçus** 🎁 : Demandez-moi *\"quels cadeaux j'ai reçus ?\"* ou *\"mes gains de cadeaux\"*.\n" +
-                "3️⃣ **Suivre votre temps d'écran** ⏳ : Demandez-moi *\"combien de temps j'ai passé à scroller ?\"* ou *\"définis ma limite d'écran à 60 minutes\"*.\n" +
-                "4️⃣ **Aide générale** 💡 : Je réponds à vos questions sur la sécurité, les transferts d'argent, les appels et plus encore !"
-            userPrompt.contains("rappelle", ignoreCase = true) || userPrompt.contains("remind", ignoreCase = true) || userPrompt.contains("portefeuille", ignoreCase = true) || userPrompt.contains("wallet", ignoreCase = true) ->
-                "⏰ **Rappel activé par Luna AI !**\n" +
-                "J'ai bien enregistré votre rappel : *\"Vérifier mon portefeuille\"*.\n" +
-                "Je vous enverrai une notification de rappel très bientôt pour ne pas oublier ! 💼💰"
-            userPrompt.contains("aron", ignoreCase = true) || userPrompt.contains("question", ignoreCase = true) ->
-                "Les 36 Questions d'Arthur Aron sont une méthode formidable pour créer des liens authentiques ! Ma réponse à cette question : ce que j'apprécie le plus, c'est d'aider chacun à communiquer librement et en toute sécurité."
-            userPrompt.contains("bonjour", ignoreCase = true) || userPrompt.contains("mbote", ignoreCase = true) ->
-                "Mbote ! Comment puis-je vous aider aujourd'hui sur MBoté ? Je peux vous renseigner sur les messages chiffrés, les questions d'Aron, les transferts d'argent ou les réunions."
-            userPrompt.contains("sécurité", ignoreCase = true) || userPrompt.contains("chiffr", ignoreCase = true) ->
-                "Sur MBoté, tous vos messages, appels, vocaux et positions sont sécurisés de bout en bout avec un chiffrement AES-256 / Signal protocol."
-            userPrompt.contains("argent", ignoreCase = true) || userPrompt.contains("paiement", ignoreCase = true) ->
-                "Vous pouvez envoyer des fonds via MTN MoMo, Airtel Money ou Orange Money directement dans vos discussions sans quitter MBoté !"
-            userPrompt.contains("réunion", ignoreCase = true) ->
-                "Vous pouvez démarrer une visioconférence instantanée ou planifier une réunion d'équipe dans l'onglet Réunions !"
-            else ->
-                "Merci pour votre message ! Je suis Luna, l'intelligence artificielle intégrée à MBoté. Je peux planifier des messages, résumer des discussions, rappeler vos cadeaux reçus, suivre votre temps d'utilisation ou vous guider sur l'application. Écrivez \"aide\" pour voir toutes mes capacités ! 🌟"
-        }
-
-        val aiMessage = Message(
-            text = aiReplyText,
-            senderId = "luna_ai",
-            senderName = "Luna AI",
-            senderAvatar = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80",
-            timestamp = currentTime,
-            status = MessageStatus.READ,
-            isMine = false
-        )
-
-        _chats.update { chatList ->
-            chatList.map { chat ->
-                if (chat.id == chatId) {
-                    chat.copy(
-                        lastMessage = aiReplyText,
-                        lastMessageTime = currentTime,
-                        messages = chat.messages + aiMessage
-                    )
-                } else chat
-            }
-        }
     }
 
     fun addReaction(chatId: String, messageId: String, emoji: String) {
