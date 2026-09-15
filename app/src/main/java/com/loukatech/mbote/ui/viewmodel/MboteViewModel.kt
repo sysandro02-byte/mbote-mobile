@@ -807,11 +807,11 @@ class MboteViewModel(
     }
 
     fun toggleJobLike(jobId: String) {
-        repository.toggleJobLike(jobId)
+        viewModelScope.launch { repository.toggleJobLike(jobId).onFailure { _publicationError.value = it.message } }
     }
 
     fun toggleJobBookmark(jobId: String) {
-        repository.toggleJobBookmark(jobId)
+        viewModelScope.launch { repository.toggleJobBookmark(jobId).onFailure { _publicationError.value = it.message } }
     }
 
     fun applyToJob(jobId: String, onComplete: (Boolean) -> Unit = {}, cvUrl: String = "") {
