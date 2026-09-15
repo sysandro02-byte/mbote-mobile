@@ -12,12 +12,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.loukatech.mbote.model.MeetingItem
 import com.loukatech.mbote.ui.theme.DarkBackground
 import com.loukatech.mbote.ui.theme.DarkSurface
@@ -169,19 +167,6 @@ fun MeetingRoomScreen(
                     )
                 }
 
-                IconButton(
-                    onClick = { /* Screen share toggle */ },
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.2f))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ScreenShare,
-                        contentDescription = "Partager écran",
-                        tint = Color.White
-                    )
-                }
 
                 // Leave Meeting Button
                 IconButton(
