@@ -1091,6 +1091,13 @@ class MboteApiService {
         ) { json -> mapShortComment(MboteBackendConfig.jsonParser.decodeFromJsonElement(responseObject(json))) }
     }
 
+    suspend fun registerPushToken(token: String): Result<Unit> =
+        executeHttpRequest(
+            endpoint = "/devices/push-token",
+            method = "PUT",
+            requestBody = mapOf("token" to token)
+        ) { Unit }
+
     suspend fun confirmDesktopQrLogin(pairingToken: String): Result<Unit> =
         executeHttpRequest(
             endpoint = "/auth/qr/confirm",
