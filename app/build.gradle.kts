@@ -35,6 +35,18 @@ val googleClientId = envProps.getProperty("GOOGLE_CLIENT_ID")
 val githubClientId = envProps.getProperty("GITHUB_CLIENT_ID")
     ?: System.getenv("GITHUB_CLIENT_ID")
     ?: ""
+
+val qaKeystorePath = System.getenv("MBOTE_QA_KEYSTORE_PATH")
+val qaKeystorePassword = System.getenv("MBOTE_QA_KEYSTORE_PASSWORD")
+val qaKeyAlias = System.getenv("MBOTE_QA_KEY_ALIAS")
+val qaKeyPassword = System.getenv("MBOTE_QA_KEY_PASSWORD")
+val qaSigningConfigured = listOf(
+    qaKeystorePath,
+    qaKeystorePassword,
+    qaKeyAlias,
+    qaKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.loukatech.mbote"
     compileSdk = 36
@@ -55,6 +67,17 @@ android {
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"$githubClientId\"")
     }
 
+    signingConfigs {
+        if (qaSigningConfigured) {
+            create("qa") {
+                storeFile = file(qaKeystorePath!!)
+                storePassword = qaKeystorePassword
+                keyAlias = qaKeyAlias
+                keyPassword = qaKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -66,6 +89,17 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+        }
+        create("qa") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".qa"
+            versionNameSuffix = "-qa"
+            matchingFallbacks += listOf("debug")
+            signingConfig = if (qaSigningConfigured) {
+                signingConfigs.getByName("qa")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
     compileOptions {
