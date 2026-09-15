@@ -752,7 +752,7 @@ class MboteApiService {
             method = "POST",
             requestBody = request
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<PendingOtpChallenge>(json)
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<PendingOtpChallenge>(responseObject(json))
         }
     }
 
@@ -792,7 +792,7 @@ class MboteApiService {
             endpoint = "/users/me/settings",
             method = "PUT",
             requestBody = UserSettingsRequest(settings)
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<UserSettingsResponse>(json).value }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<UserSettingsResponse>(responseObject(json)).value }
 
     suspend fun deleteMyAccount(): Result<Boolean> =
         executeHttpRequest<Unit, Boolean>(
