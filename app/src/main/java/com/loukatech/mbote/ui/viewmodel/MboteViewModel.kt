@@ -777,8 +777,7 @@ class MboteViewModel(
                 if (result.isSuccess) {
                     _activeMeetingRoom.value = result.getOrNull()
                 } else {
-                    val fallback = repository.createMeeting(title.trim(), durationMin)
-                    _activeMeetingRoom.value = fallback
+                    _publicationError.value = result.exceptionOrNull()?.message ?: "Création de la réunion impossible."
                 }
             }
         }
