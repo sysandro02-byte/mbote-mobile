@@ -283,13 +283,13 @@ fun LiveBroadcastDialog(
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            // Background Live Video placeholder / simulated feed
-            AsyncImage(
-                model = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800",
-                contentDescription = "Live Video",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
+            // A real signaling media track is required; no local sample is rendered.
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Connexion au flux Live…", color = Color.White.copy(alpha = 0.8f))
+            }
 
             // Dark gradient overlay
             Box(
