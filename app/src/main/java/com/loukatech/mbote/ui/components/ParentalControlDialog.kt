@@ -103,15 +103,14 @@ fun ParentalControlDialog(
                     Spacer(modifier = Modifier.height(24.dp))
                     Button(
                         onClick = {
-                            onUnlockPremium()
-                            Toast.makeText(context, "👑 Abonnement Premium débloqué pour le Contrôle Parental !", Toast.LENGTH_LONG).show()
                             onDismiss()
+                            onOpenPremiumScreen()
                         },
                         modifier = Modifier.fillMaxWidth().height(50.dp),
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB8860B))
                     ) {
-                        Text("Débloquer MBoté Premium 👑", fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("Choisir un abonnement Premium", fontWeight = FontWeight.Bold, color = Color.White)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedButton(
@@ -158,9 +157,6 @@ fun ParentalControlDialog(
 
     val scrollState = rememberScrollState()
 
-    // Mock weekly 7-day usage data in minutes for the bar chart
-    val weeklyUsageMinutes = listOf(95, 110, 135, 105, 125, 140, 85) // Mon-Sun
-    val daysOfWeek = listOf("Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim")
 
     if (showSosDialog) {
         AlertDialog(
@@ -168,7 +164,7 @@ fun ParentalControlDialog(
             title = { Text("🚨 SOS Alerte Enfant", fontWeight = FontWeight.Bold, color = Color(0xFFEF4444)) },
             text = {
                 Column {
-                    Text("Envoyer immédiatement une alerte de détresse (Push + Email Brevo) au parent associé (${if (parentEmail.isBlank()) "parent@exemple.com" else parentEmail}).")
+                    Text("Envoyer immédiatement une alerte de détresse (Push + Email Brevo) au parent associé (${parentEmail.ifBlank { "aucun parent lié" }}).")
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
                         value = sosReasonInput,
@@ -182,10 +178,12 @@ fun ParentalControlDialog(
             confirmButton = {
                 Button(
                     onClick = {
-                        val emailToUse = if (parentEmail.isBlank()) "parent@exemple.com" else parentEmail
-                        onSendSosAlert(emailToUse, if (sosReasonInput.isBlank()) "Situation de détresse signalée par l'enfant" else sosReasonInput)
-                        Toast.makeText(context, "🚨 Alerte SOS envoyée aux parents via Brevo & Push avec succès !", Toast.LENGTH_LONG).show()
-                        showSosDialog = false
+                        if (parentEmail.isNotBlank()) {
+                            onSendSosAlert(parentEmail, if (sosReasonInput.isBlank()) "Situation de détresse signalée par l'enfant" else sosReasonInput)
+                            showSosDialog = false
+                        } else {
+                            Toast.makeText(context, "Aucun parent lié : envoi impossible", Toast.LENGTH_LONG).show()
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
                 ) {
@@ -828,15 +826,15 @@ fun ParentalControlDialog(
                                             ) {
                                                 Column {
                                                     Text("Temps total (7j)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                    Text("11h 45m", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+                                                    Text("—", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
                                                 }
                                                 Column {
                                                     Text("Moyenne / jour", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                    Text("1h 41m", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MbotePurplePrimary)
+                                                    Text("—", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MbotePurplePrimary)
                                                 }
                                                 Column {
                                                     Text("Statut Limite 2h", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                    Text("Respecté ✓", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF10B981))
+                                                    Text("Non calculé", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                                 }
                                             }
                                         }
@@ -862,53 +860,11 @@ fun ParentalControlDialog(
                                             )
                                             Spacer(modifier = Modifier.height(16.dp))
 
-                                            // Custom Canvas Bar Chart representing Recharts
-                                            val primaryColor = MbotePurplePrimary
-                                            val warningColor = Color(0xFFEF4444)
-
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(140.dp)
-                                                    .padding(horizontal = 8.dp)
-                                            ) {
-                                                Canvas(modifier = Modifier.fillMaxSize()) {
-                                                    val maxVal = 180f // 3 hours max scale
-                                                    val chartHeight = size.height - 30f
-                                                    val barWidth = size.width / (weeklyUsageMinutes.size * 2.2f)
-
-                                                    // Draw limit line at 120 mins (2h)
-                                                    val limitY = chartHeight * (1f - (120f / maxVal))
-                                                    drawLine(
-                                                        color = warningColor.copy(alpha = 0.8f),
-                                                        start = Offset(0f, limitY),
-                                                        end = Offset(size.width, limitY),
-                                                        strokeWidth = 3f
-                                                    )
-
-                                                    weeklyUsageMinutes.forEachIndexed { index, mins ->
-                                                        val barHeight = chartHeight * (mins / maxVal)
-                                                        val left = index * (size.width / weeklyUsageMinutes.size) + barWidth / 2f
-                                                        val top = chartHeight - barHeight
-
-                                                        drawRect(
-                                                            color = if (mins > 120) warningColor else primaryColor,
-                                                            topLeft = Offset(left, top),
-                                                            size = Size(barWidth, barHeight)
-                                                        )
-                                                    }
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.height(8.dp))
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceAround
-                                            ) {
-                                                daysOfWeek.forEach { day ->
-                                                    Text(day, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                            }
+                                            Text(
+                                                text = "Les statistiques apparaîtront après synchronisation des données d'usage du serveur.",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
                                         }
                                     }
 
