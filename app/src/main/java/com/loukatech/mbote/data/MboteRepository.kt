@@ -1771,8 +1771,7 @@ class MboteRepository(
             _meetings.update { listOf(meeting) + it }
             Result.success(meeting)
         } else {
-            val fallback = createMeeting(roomTitle)
-            Result.success(fallback)
+            Result.failure(res.exceptionOrNull() ?: IllegalStateException("Création de la réunion impossible."))
         }
     }
 
@@ -1792,17 +1791,7 @@ class MboteRepository(
             _meetings.update { listOf(meeting) + it }
             Result.success(meeting)
         } else {
-            val meeting = MeetingItem(
-                title = "Réunion Visioconférence #$roomCode",
-                hostName = "MBoté Host",
-                code = roomCode,
-                scheduledTime = "En cours",
-                durationMinutes = 45,
-                isLive = true,
-                participantsCount = 2
-            )
-            _meetings.update { listOf(meeting) + it }
-            Result.success(meeting)
+            Result.failure(res.exceptionOrNull() ?: IllegalStateException("Réunion introuvable ou serveur indisponible."))
         }
     }
 
