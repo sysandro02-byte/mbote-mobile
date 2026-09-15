@@ -849,10 +849,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             onMarkAllRead = { viewModel.markAllNotificationsAsRead() },
-                            onClearAll = { viewModel.clearAllNotifications() },
-                            onSimulateFcmPush = { type ->
-                                viewModel.sendFcmTestNotification(type, context)
-                            }
+                            onClearAll = { viewModel.clearAllNotifications() }
                         )
                     }
 
