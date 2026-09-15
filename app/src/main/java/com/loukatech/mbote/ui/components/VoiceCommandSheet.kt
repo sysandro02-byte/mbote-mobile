@@ -140,19 +140,8 @@ fun VoiceCommandSheet(
                 speechRecognizer?.startListening(intent)
                 isListening = true
             } catch (e: Exception) {
-                statusText = "Erreur de lancement: ${e.message}"
-                // Simulate fallback for emulator / sandbox environment
-                statusText = "Simulation de commande vocale sur émulateur..."
-                val simulatedCommands = listOf(
-                    "programme le message 'Salut Jean, je t'envoie ça' dans 15 secondes à Jean",
-                    "rappelle-moi de vérifier mon portefeuille",
-                    "combien de temps j'ai passé à scroller ?",
-                    "quels cadeaux j'ai reçus ?",
-                    "définis ma limite d'écran à 30 minutes"
-                )
-                val randomCommand = simulatedCommands.random()
-                recognizedText = randomCommand
-                onCommandRecognized(randomCommand)
+                isListening = false
+                statusText = "La reconnaissance vocale n’a pas pu démarrer : ${e.message ?: "service indisponible"}"
             }
         }
     }
