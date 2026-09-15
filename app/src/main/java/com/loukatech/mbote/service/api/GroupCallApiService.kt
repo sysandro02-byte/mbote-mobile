@@ -80,8 +80,7 @@ class GroupCallApiService {
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val responseText = stream?.let { BufferedReader(InputStreamReader(it, Charsets.UTF_8)).use(BufferedReader::readText) }.orEmpty()
             if (code !in 200..299) {
-                val error = runCatching { MboteBackendConfig.jsonParser.decodeFromString<ApiErrorResponse>(responseText).error }.getOrNull()
-                return@withContext Result.failure(IllegalStateException(error ?: "Erreur serveur ($code)"))
+                return@withContext Result.failure(IllegalStateException("Erreur serveur ($code)"))
             }
             val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<Response>>(responseText)
             response.data?.let(Result.Companion::success)
