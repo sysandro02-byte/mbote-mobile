@@ -380,6 +380,20 @@ CREATE TABLE IF NOT EXISTS news_post_shares (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS job_likes (
+    job_id UUID REFERENCES job_offers(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (job_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS job_bookmarks (
+    job_id UUID REFERENCES job_offers(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (job_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS job_applications (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     job_id UUID REFERENCES job_offers(id) ON DELETE CASCADE,
