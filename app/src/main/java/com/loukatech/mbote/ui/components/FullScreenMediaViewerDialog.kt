@@ -11,13 +11,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,7 +36,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.loukatech.mbote.ui.theme.PurplePrimary
-import kotlinx.coroutines.launch
 
 @Composable
 fun FullScreenMediaViewerDialog(
@@ -51,43 +48,30 @@ fun FullScreenMediaViewerDialog(
     onReaction: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var rotation by remember { mutableFloatStateOf(0f) }
-
     var showControls by remember { mutableStateOf(true) }
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black)
-                .testTag("fullscreen_media_viewer")
+            modifier = Modifier.fillMaxSize().background(Color.Black).testTag("fullscreen_media_viewer")
         ) {
-            // Main Interactive Media Canvas with Pinch-to-Zoom, Pan, and Double-tap
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
                         detectTapGestures(
-                            onTap = {
-                                showControls = !showControls
-                            },
+                            onTap = { showControls = !showControls },
                             onDoubleTap = { tapOffset ->
                                 if (scale > 1.2f) {
                                     scale = 1f
                                     offset = Offset.Zero
                                 } else {
                                     scale = 2.5f
-                                    // Pan slightly towards tap location
                                     val centerX = size.width / 2f
                                     val centerY = size.height / 2f
                                     offset = Offset((centerX - tapOffset.x) * 1.2f, (centerY - tapOffset.y) * 1.2f)
@@ -96,18 +80,16 @@ fun FullScreenMediaViewerDialog(
                         )
                     }
                     .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, rot ->
+                        detectTransformGestures { _, pan, zoom, _ ->
                             scale = (scale * zoom).coerceIn(0.7f, 5f)
                             if (scale > 1f) {
                                 val maxOffsetX = (size.width * (scale - 1f)) / 2f
                                 val maxOffsetY = (size.height * (scale - 1f)) / 2f
                                 offset = Offset(
-                                    x = (offset.x + pan.x * scale).coerceIn(-maxOffsetX, maxOffsetX),
-                                    y = (offset.y + pan.y * scale).coerceIn(-maxOffsetY, maxOffsetY)
+                                    (offset.x + pan.x * scale).coerceIn(-maxOffsetX, maxOffsetX),
+                                    (offset.y + pan.y * scale).coerceIn(-maxOffsetY, maxOffsetY)
                                 )
-                            } else {
-                                offset = Offset.Zero
-                            }
+                            } else offset = Offset.Zero
                         }
                     },
                 contentAlignment = Alignment.Center
@@ -130,305 +112,113 @@ fun FullScreenMediaViewerDialog(
                 }
             }
 
-            // Top Header Bar Overlay
             AnimatedVisibility(
                 visible = showControls,
                 enter = fadeIn() + slideInVertically { -it },
                 exit = fadeOut() + slideOutVertically { -it },
                 modifier = Modifier.align(Alignment.TopCenter)
             ) {
-                Box(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Black.copy(alpha = 0.85f),
-                                    Color.Black.copy(alpha = 0.4f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
+                        .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .85f), Color.Transparent)))
                         .statusBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            IconButton(
-                                onClick = onDismiss,
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.2f))
-                                    .testTag("media_viewer_close_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Fermer la vue plein écran",
-                                    tint = Color.White
-                                )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.clip(CircleShape).background(Color.White.copy(alpha = .2f)).testTag("media_viewer_close_button")
+                        ) { Icon(Icons.Default.Close, "Fermer la vue plein écran", tint = Color.White) }
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(senderName.ifBlank { if (isVideo) "Vidéo MBoté" else "Photo MBoté" }, color = Color.White, fontWeight = FontWeight.Bold)
+                            if (timestamp.isNotBlank()) Text(timestamp, color = Color.White.copy(alpha = .75f), fontSize = 12.sp)
+                        }
+                    }
+                    Row {
+                        IconButton(onClick = {
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, mediaUrl)
                             }
-
-                            Column {
-                                Text(
-                                    text = senderName.ifBlank { if (isVideo) "Vidéo MBoté" else "Photo MBoté" },
-                                    color = Color.White,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                if (timestamp.isNotBlank()) {
-                                    Text(
-                                        text = timestamp,
-                                        color = Color.White.copy(alpha = 0.75f),
-                                        fontSize = 12.sp
-                                    )
+                            context.startActivity(Intent.createChooser(intent, "Partager le média"))
+                        }) { Icon(Icons.Default.Share, "Partager le média", tint = Color.White) }
+                        IconButton(
+                            onClick = {
+                                runCatching {
+                                    val request = DownloadManager.Request(Uri.parse(mediaUrl))
+                                        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                        .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "mbote-${System.currentTimeMillis()}")
+                                    (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+                                }.onSuccess {
+                                    Toast.makeText(context, "Téléchargement démarré", Toast.LENGTH_SHORT).show()
+                                }.onFailure {
+                                    Toast.makeText(context, "Téléchargement impossible", Toast.LENGTH_SHORT).show()
                                 }
-                            }
-                        }
-
-                        // Action Buttons: Share, Download
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            IconButton(
-                                onClick = {
-                                    val intent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_TEXT, mediaUrl)
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, "Partager le média"))
-                                },
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.15f))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Share,
-                                    contentDescription = "Partager le média",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    runCatching {
-                                        val request = DownloadManager.Request(Uri.parse(mediaUrl))
-                                            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                                            .setDestinationInExternalPublicDir(
-                                                Environment.DIRECTORY_DOWNLOADS,
-                                                "mbote-" + java.lang.System.currentTimeMillis()
-                                            )
-                                        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                                        manager.enqueue(request)
-                                    }.onSuccess {
-                                        Toast.makeText(context, "Téléchargement démarré", Toast.LENGTH_SHORT).show()
-                                    }.onFailure {
-                                        Toast.makeText(context, "Téléchargement impossible", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.15f))
-                                    .testTag("media_viewer_download_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Download,
-                                    contentDescription = "Télécharger le média",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
+                            },
+                            modifier = Modifier.testTag("media_viewer_download_button")
+                        ) { Icon(Icons.Default.Download, "Télécharger le média", tint = Color.White) }
                     }
                 }
             }
 
-            // Floating Interactive Zoom Controls Toolpad (for quick precision zooming)
             AnimatedVisibility(
-                visible = showControls,
+                visible = showControls && !isVideo,
                 enter = fadeIn() + slideInHorizontally { it },
                 exit = fadeOut() + slideOutHorizontally { it },
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 16.dp)
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 16.dp)
             ) {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color.Black.copy(alpha = 0.7f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
-                    shadowElevation = 8.dp
-                ) {
-                    Column(
-                        modifier = Modifier.padding(6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        // Zoom In (+)
-                        IconButton(
-                            onClick = {
-                                scale = (scale + 0.5f).coerceAtMost(5f)
-                            },
-                            modifier = Modifier.size(36.dp).testTag("zoom_in_button")
-                        ) {
-                            Icon(Icons.Default.ZoomIn, contentDescription = "Zoom avant", tint = Color.White)
+                Surface(shape = RoundedCornerShape(20.dp), color = Color.Black.copy(alpha = .7f)) {
+                    Column(Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        IconButton(onClick = { scale = (scale + .5f).coerceAtMost(5f) }, modifier = Modifier.testTag("zoom_in_button")) {
+                            Icon(Icons.Default.ZoomIn, "Zoom avant", tint = Color.White)
                         }
-
-                        // Reset Zoom (1x)
                         Surface(
                             shape = CircleShape,
-                            color = if (scale == 1f) PurplePrimary else Color.White.copy(alpha = 0.2f),
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clickable {
-                                    scale = 1f
-                                    offset = Offset.Zero
-                                    rotation = 0f
-                                }
-                                .testTag("zoom_reset_button")
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "${(scale * 100).toInt()}%",
-                                    color = Color.White,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                            color = if (scale == 1f) PurplePrimary else Color.White.copy(alpha = .2f),
+                            modifier = Modifier.size(36.dp).clickable {
+                                scale = 1f; offset = Offset.Zero; rotation = 0f
+                            }.testTag("zoom_reset_button")
+                        ) { Box(contentAlignment = Alignment.Center) { Text("${(scale * 100).toInt()}%", color = Color.White, fontSize = 9.sp) } }
+                        IconButton(onClick = { scale = (scale - .5f).coerceAtLeast(1f); if (scale == 1f) offset = Offset.Zero }, modifier = Modifier.testTag("zoom_out_button")) {
+                            Icon(Icons.Default.ZoomOut, "Zoom arrière", tint = Color.White)
                         }
-
-                        // Zoom Out (-)
-                        IconButton(
-                            onClick = {
-                                scale = (scale - 0.5f).coerceAtLeast(1f)
-                                if (scale == 1f) offset = Offset.Zero
-                            },
-                            modifier = Modifier.size(36.dp).testTag("zoom_out_button")
-                        ) {
-                            Icon(Icons.Default.ZoomOut, contentDescription = "Zoom arrière", tint = Color.White)
-                        }
-
-                        // Rotate (90°)
-                        IconButton(
-                            onClick = {
-                                rotation = (rotation + 90f) % 360f
-                            },
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(Icons.Default.RotateRight, contentDescription = "Pivoter de 90°", tint = Color.White)
+                        IconButton(onClick = { rotation = (rotation + 90f) % 360f }) {
+                            Icon(Icons.Default.RotateRight, "Pivoter de 90°", tint = Color.White)
                         }
                     }
                 }
             }
 
-            // Bottom Overlay: Video progress bar (if video) + Caption & Quick Reactions
             AnimatedVisibility(
                 visible = showControls,
                 enter = fadeIn() + slideInVertically { it },
                 exit = fadeOut() + slideOutVertically { it },
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = 0.5f),
-                                    Color.Black.copy(alpha = 0.9f)
-                                )
-                            )
-                        )
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .9f))))
                         .navigationBarsPadding()
-                        .padding(horizontal = 18.dp, vertical = 14.dp)
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        // Video Progress Bar & Times
-                        if (isVideo) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = String.format("%02d:%02d", ((videoProgress * 45).toInt() / 60), ((videoProgress * 45).toInt() % 60)),
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Slider(
-                                    value = videoProgress,
-                                    onValueChange = { videoProgress = it },
-                                    modifier = Modifier.weight(1f),
-                                    colors = SliderDefaults.colors(
-                                        thumbColor = PurplePrimary,
-                                        activeTrackColor = PurplePrimary,
-                                        inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                                    )
-                                )
-                                Text(
-                                    text = "00:45",
-                                    color = Color.White.copy(alpha = 0.7f),
-                                    fontSize = 11.sp
-                                )
+                    if (caption.isNotBlank()) Text(caption, color = Color.White, fontSize = 14.sp)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            listOf("❤️", "🔥", "👍", "😂", "😮").forEach { emoji ->
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.White.copy(alpha = .2f),
+                                    modifier = Modifier.size(38.dp).clickable { onReaction(emoji) }
+                                ) { Box(contentAlignment = Alignment.Center) { Text(emoji, fontSize = 18.sp) } }
                             }
                         }
-
-                        // Caption if present
-                        if (caption.isNotBlank()) {
-                            Text(
-                                text = caption,
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                lineHeight = 19.sp,
-                                modifier = Modifier.padding(horizontal = 4.dp)
-                            )
-                        }
-
-                        // Quick Reaction Emoji Row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                listOf("❤️", "🔥", "👍", "😂", "😮").forEach { emoji ->
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = Color.White.copy(alpha = 0.2f),
-                                        modifier = Modifier
-                                            .size(38.dp)
-                                            .clickable {
-                                                onReaction(emoji)
-                                                Toast.makeText(context, "Réaction $emoji envoyée !", Toast.LENGTH_SHORT).show()
-                                            }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Text(text = emoji, fontSize = 18.sp)
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Hint / Double-tap indicator
-                            Text(
-                                text = "Double-tap pour zoomer",
-                                color = Color.White.copy(alpha = 0.6f),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Normal
-                            )
-                        }
+                        if (!isVideo) Text("Double-tap pour zoomer", color = Color.White.copy(alpha = .6f), fontSize = 11.sp)
                     }
                 }
             }
