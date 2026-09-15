@@ -1,6 +1,7 @@
 package com.loukatech.mbote.ui.components
 
 import android.widget.Toast
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -81,27 +82,34 @@ fun QrCodeScannerDialog(
         label = "scan_beam_offset"
     )
 
-    // Demo contact candidates for instant scan simulation
-    val sampleScanCandidates = remember(allChats, allMastaUsers) {
-        val list = mutableListOf<ScannedContactResult>()
-        allMastaUsers.take(4).forEach { u ->
-            list.add(ScannedContactResult(id = u.id, name = u.name, username = "@${u.name.lowercase().replace(" ", "")}", avatar = u.avatar, phone = "+242 06 888 1234", bio = u.infoSubtitle))
+    fun handleScannedValue(rawValue: String) {
+        val key = rawValue.substringAfterLast('/').substringAfterLast(':').trim().removePrefix("@")
+        val user = allMastaUsers.firstOrNull {
+            it.id == key || it.name.replace(" ", "", ignoreCase = true).equals(key.replace("_", ""), ignoreCase = true)
         }
-        allChats.take(3).forEach { c ->
-            if (list.none { it.id == c.id }) {
-                list.add(ScannedContactResult(id = c.id, name = c.name, username = "@${c.name.lowercase().replace(" ", "")}", avatar = c.avatar, phone = "+242 05 555 9999", bio = "Contact MBoté certifié"))
-            }
+        val chat = allChats.firstOrNull { it.id == key }
+        scannedResult = when {
+            user != null -> ScannedContactResult(
+                id = user.id,
+                name = user.name,
+                username = "",
+                avatar = user.avatar,
+                phone = "",
+                bio = user.infoSubtitle
+            )
+            chat != null -> ScannedContactResult(
+                id = chat.id,
+                name = chat.name,
+                username = "",
+                avatar = chat.avatar,
+                phone = "",
+                bio = if (chat.isGroup) "Groupe MBoté" else "Discussion MBoté"
+            )
+            else -> null
         }
-        if (list.isEmpty()) {
-            list.add(ScannedContactResult(id = "user_aron", name = "Aron Ngala", username = "@aron_ngala", avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", phone = "+242 06 999 0000", bio = "Ambassadeur LoukaTech & Passionné de Tech"))
-            list.add(ScannedContactResult(id = "user_linda", name = "Linda Bongo Ondimba", username = "@linda_bongo", avatar = "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=150", phone = "+241 07 111 2222", bio = "Créatrice MBoté & Musique"))
+        if (scannedResult == null) {
+            Toast.makeText(context, "Ce QR code ne correspond à aucun compte chargé depuis le serveur.", Toast.LENGTH_LONG).show()
         }
-        list
-    }
-
-    fun handleSimulateScan(contact: ScannedContactResult) {
-        scannedResult = contact
-        Toast.makeText(context, "📷 Code QR Détecté avec succès !", Toast.LENGTH_SHORT).show()
     }
 
     Dialog(
@@ -345,75 +353,35 @@ fun QrCodeScannerDialog(
                             )
                         }
 
-                        // Simulation / Quick action buttons
                         Column(
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = "Simuler la détection d'un contact :",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                items(sampleScanCandidates) { cand ->
-                                    Surface(
-                                        onClick = { handleSimulateScan(cand) },
-                                        shape = RoundedCornerShape(12.dp),
-                                        color = MbotePurpleSoft,
-                                        border = BorderStroke(1.dp, MbotePurplePrimary.copy(alpha = 0.3f)),
-                                        modifier = Modifier.testTag("simulate_scan_contact_${cand.id}")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            AsyncImage(
-                                                model = cand.avatar,
-                                                contentDescription = cand.name,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier.size(24.dp).clip(CircleShape)
-                                            )
-                                            Text(cand.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Button(
+                                onClick = {
+                                    GmsBarcodeScanning.getClient(context).startScan()
+                                        .addOnSuccessListener { barcode ->
+                                            barcode.rawValue?.let(::handleScannedValue)
                                         }
-                                    }
-                                }
-                            }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        .addOnFailureListener { error ->
+                                            Toast.makeText(context, error.message ?: "Lecture du QR code impossible.", Toast.LENGTH_LONG).show()
+                                        }
+                                },
+                                modifier = Modifier.fillMaxWidth().testTag("scan_real_qr_button"),
+                                colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary)
                             ) {
-                                OutlinedButton(
-                                    onClick = { showManualInputDialog = true },
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.weight(1f).testTag("manual_qr_entry_button")
-                                ) {
-                                    Icon(Icons.Default.Keyboard, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Entrer ID manuellement", fontSize = 12.sp)
-                                }
-
-                                OutlinedButton(
-                                    onClick = {
-                                        // Pick from gallery simulation
-                                        val randomContact = sampleScanCandidates.random()
-                                        handleSimulateScan(randomContact)
-                                        Toast.makeText(context, "Image de QR code importée de la galerie !", Toast.LENGTH_SHORT).show()
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.testTag("gallery_qr_picker_button")
-                                ) {
-                                    Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Galerie", fontSize = 12.sp)
-                                }
+                                Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Scanner un QR code")
+                            }
+                            OutlinedButton(
+                                onClick = { showManualInputDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().testTag("manual_qr_entry_button")
+                            ) {
+                                Icon(Icons.Default.Keyboard, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Entrer un identifiant")
                             }
                         }
                     }
