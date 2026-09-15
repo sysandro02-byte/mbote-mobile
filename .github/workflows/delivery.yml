@@ -41,7 +41,7 @@ jobs:
         run: npm test
 
   android:
-    name: Android lint, tests and verified production-connected APK
+    name: Android lint, tests and stable signed QA APK
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env: &android-test-env
@@ -51,6 +51,9 @@ jobs:
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+      MBOTE_QA_KEYSTORE_PASSWORD: mbote-qa-test-only
+      MBOTE_QA_KEY_ALIAS: mboteqa
+      MBOTE_QA_KEY_PASSWORD: mbote-qa-test-only
       GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx2g
     steps:
       - name: Checkout
@@ -64,6 +67,14 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
+      - name: Prepare stable QA signing keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mbote-qa-signing"
+          base64 --decode ci/mbote-qa-keystore.b64 > "$RUNNER_TEMP/mbote-qa-signing/mbote-qa.keystore"
+          test -s "$RUNNER_TEMP/mbote-qa-signing/mbote-qa.keystore"
+          echo "MBOTE_QA_KEYSTORE_PATH=$RUNNER_TEMP/mbote-qa-signing/mbote-qa.keystore" >> "$GITHUB_ENV"
       - name: Reject invalid production endpoints
         shell: bash
         run: |
@@ -71,12 +82,12 @@ jobs:
           test "$MBOTE_API_BASE_URL" = "https://mbote-backend.onrender.com/v1"
           test "$VITE_SOCKET_URL" = "https://mbote-backend.onrender.com"
           ! printf '%s\n%s\n' "$MBOTE_API_BASE_URL" "$VITE_SOCKET_URL" | grep -q 'example.invalid'
-      - name: Build installable debug APK
-        run: gradle --no-daemon --max-workers=2 --stacktrace clean assembleDebug
+      - name: Build installable QA APK
+        run: gradle --no-daemon --max-workers=2 --stacktrace clean assembleQa
       - name: Run Android unit tests
-        run: gradle --no-daemon --max-workers=2 --stacktrace testDebugUnitTest
+        run: gradle --no-daemon --max-workers=2 --stacktrace testQaUnitTest
       - name: Run Android lint
-        run: gradle --no-daemon --max-workers=2 --stacktrace lintDebug
+        run: gradle --no-daemon --max-workers=2 --stacktrace lintQa
       - name: Locate Android SDK build tools
         id: android-tools
         shell: bash
@@ -86,29 +97,33 @@ jobs:
           test -x "$BUILD_TOOLS/apksigner"
           test -x "$BUILD_TOOLS/aapt"
           echo "build_tools=$BUILD_TOOLS" >> "$GITHUB_OUTPUT"
-      - name: Verify APK signature and package
+      - name: Verify stable APK signature and package
         shell: bash
         run: |
           set -euo pipefail
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK="app/build/outputs/apk/qa/app-qa.apk"
           TOOLS="${{ steps.android-tools.outputs.build_tools }}"
           test -s "$APK"
-          "$TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          SIGNATURE_INFO="$($TOOLS/apksigner verify --verbose --print-certs "$APK")"
+          echo "$SIGNATURE_INFO"
+          echo "$SIGNATURE_INFO" | tr '[:upper:]' '[:lower:]' | grep -q 'a1ec5aac2b61ef68640eea7095997a0c6cafbb75366f85e15ec05d9f6158cb69'
           BADGING="$($TOOLS/aapt dump badging "$APK")"
           echo "$BADGING"
-          echo "$BADGING" | grep -q "package: name='com.aistudio.mbote.krtwvx.debug'"
+          echo "$BADGING" | grep -q "package: name='com.aistudio.mbote.krtwvx.qa'"
           echo "$BADGING" | grep -q "sdkVersion:'26'"
-          echo "$BADGING" > app/build/outputs/apk/debug/mbote-apk-info.txt
-          sha256sum "$APK" > app/build/outputs/apk/debug/mbote-apk-sha256.txt
-      - name: Prepare test APK artifact
+          echo "$BADGING" > app/build/outputs/apk/qa/mbote-apk-info.txt
+          printf '%s\n' "$SIGNATURE_INFO" > app/build/outputs/apk/qa/mbote-apk-signature.txt
+          sha256sum "$APK" > app/build/outputs/apk/qa/mbote-apk-sha256.txt
+      - name: Prepare QA APK artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p app/build/test-apk
-          cp app/build/outputs/apk/debug/app-debug.apk app/build/test-apk/MBote-test.apk
-          cp app/build/outputs/apk/debug/mbote-apk-info.txt app/build/test-apk/
-          cp app/build/outputs/apk/debug/mbote-apk-sha256.txt app/build/test-apk/
+          cp app/build/outputs/apk/qa/app-qa.apk app/build/test-apk/MBote-QA.apk
+          cp app/build/outputs/apk/qa/mbote-apk-info.txt app/build/test-apk/
+          cp app/build/outputs/apk/qa/mbote-apk-signature.txt app/build/test-apk/
+          cp app/build/outputs/apk/qa/mbote-apk-sha256.txt app/build/test-apk/
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -118,22 +133,23 @@ jobs:
             app/build/reports/
             app/build/test-results/
           if-no-files-found: ignore
-      - name: Upload branch APK
+      - name: Upload branch QA APK
         if: github.ref != 'refs/heads/main' && success()
         uses: actions/upload-artifact@v4
         with:
-          name: mbote-production-test-apk
+          name: mbote-stable-qa-apk
           path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/debug/mbote-apk-info.txt
-            app/build/outputs/apk/debug/mbote-apk-sha256.txt
+            app/build/outputs/apk/qa/app-qa.apk
+            app/build/outputs/apk/qa/mbote-apk-info.txt
+            app/build/outputs/apk/qa/mbote-apk-signature.txt
+            app/build/outputs/apk/qa/mbote-apk-sha256.txt
           if-no-files-found: error
           retention-days: 30
-      - name: Publish verified installable test APK
+      - name: Publish stable installable QA APK
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && success()
         uses: actions/upload-artifact@v4
         with:
-          name: mbote-installable-test-apk
+          name: mbote-installable-qa-apk
           path: app/build/test-apk/
           if-no-files-found: error
           retention-days: 30
