@@ -44,95 +44,16 @@ fun UserProfileDialog(
 ) {
     val isCelebrity = profile.isCelebrity
     val isCompany = profile.isCompany
-
-    // Derived username
-    val username = remember(profile.name) {
-        "@" + profile.name.lowercase()
-            .replace(" ", "")
-            .replace("é", "e")
-            .replace("è", "e")
-            .replace("à", "a")
-            .replace("ô", "o")
-            .replace("û", "u")
-    }
-
-    // Category label (Culture, Humour, Tech, etc.)
-    val category = remember(profile.name, isCelebrity, isCompany) {
-        when {
-            isCelebrity -> "Culture"
-            isCompany -> "Entreprise"
-            profile.name.contains("Aron") || profile.name.contains("Intelligence") -> "Tech"
-            profile.name.contains("Journaliste") -> "Médias"
-            else -> "Premium"
-        }
-    }
-
-    // Unique Premium Cover banner representing African sunsets, landscapes, and modern abstracts
-    val coverImage = remember(profile.name) {
-        val hash = kotlin.math.abs(profile.name.hashCode())
-        when (hash % 5) {
-            0 -> "https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=800&auto=format&fit=crop&q=80" // Savanna sunset (exactly like the image!)
-            1 -> "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&auto=format&fit=crop&q=80" // Music concert
-            2 -> "https://images.unsplash.com/photo-1519741497674-611481863552?w=800&auto=format&fit=crop&q=80" // River sunset
-            3 -> "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800&auto=format&fit=crop&q=80" // Light show
-            else -> "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800&auto=format&fit=crop&q=80" // Modern tech network
-        }
-    }
-
-    // Unique statistics to make every profile realistic, active, and unique!
-    val abonneesCount = remember(profile.name) {
-        val hash = kotlin.math.abs(profile.name.hashCode())
-        val base = if (isCelebrity) 12000 else if (isCompany) 42000 else 850
-        val offset = hash % 2000
-        val total = base + offset
-        if (total >= 1000) {
-            String.format(java.util.Locale.US, "%.1fk", total / 1000.0)
-        } else {
-            "$total"
-        }
-    }
-
-    val videosCount = remember(profile.name) {
-        val hash = kotlin.math.abs(profile.name.hashCode())
-        val base = if (isCelebrity) 8 else if (isCompany) 24 else 2
-        (base + (hash % 6)).coerceAtLeast(1)
-    }
-
-    val viewsCount = remember(profile.name) {
-        val hash = kotlin.math.abs(profile.name.hashCode())
-        val base = if (isCelebrity) 180 else if (isCompany) 420 else 10
-        val offset = hash % 50
-        "${base + offset}k"
-    }
-
-    val likesCount = remember(profile.name) {
-        val hash = kotlin.math.abs(profile.name.hashCode())
-        val base = if (isCelebrity) 5 else if (isCompany) 15 else 1
-        val offset = (hash % 10) / 2.0
-        String.format(java.util.Locale.US, "%.1fk", base + offset)
-    }
-
-    // Interactive States inside the dialog
-    var isFollowing by remember { mutableStateOf(false) }
-    var greetingSent by remember { mutableStateOf(false) }
-
-    // Mock thumbnails for publications (matching the exact layout)
-    val mockThumbnails = remember(profile.name, videosCount) {
-        val hash = kotlin.math.abs(profile.name.hashCode())
-        val count = videosCount.coerceAtMost(3)
-        List(count) { i ->
-            val imgIndex = (hash + i) % 5
-            val imgUrl = when (imgIndex) {
-                0 -> "https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=400&auto=format&fit=crop&q=80"
-                1 -> "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=400&auto=format&fit=crop&q=80"
-                2 -> "https://images.unsplash.com/photo-1519741497674-611481863552?w=400&auto=format&fit=crop&q=80"
-                3 -> "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400&auto=format&fit=crop&q=80"
-                else -> "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=400&auto=format&fit=crop&q=80"
-            }
-            val views = ((hash * (i + 1)) % 45 + 1).coerceAtLeast(1)
-            Pair(imgUrl, views)
-        }
-    }
+    val username = profile.username
+    val category = profile.category
+    val coverImage = profile.coverUrl
+    val abonneesCount = profile.followersCount.toString()
+    val videosCount = profile.videosCount
+    val viewsCount = profile.viewsCount.toString()
+    val likesCount = profile.likesCount.toString()
+    var isFollowing by remember(profile.id, profile.isFollowing) { mutableStateOf(profile.isFollowing) }
+    var greetingSent by remember(profile.id) { mutableStateOf(false) }
+    val profileThumbnails = remember(profile.id) { emptyList<Pair<String, Int>>() }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -553,7 +474,7 @@ fun UserProfileDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Vidéos du créateur (${mockThumbnails.size})",
+                            text = "Vidéos du créateur (${profileThumbnails.size})",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -574,7 +495,7 @@ fun UserProfileDialog(
                             .padding(bottom = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        mockThumbnails.forEach { item ->
+                        profileThumbnails.forEach { item ->
                             Card(
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
