@@ -205,6 +205,9 @@ class MboteRepository(
     private val _jobs = MutableStateFlow<List<JobOffer>>(emptyList())
     val jobs: StateFlow<List<JobOffer>> = _jobs.asStateFlow()
 
+    private val _aronQuestions = MutableStateFlow<List<AronQuestion>>(emptyList())
+    val aronQuestions: StateFlow<List<AronQuestion>> = _aronQuestions.asStateFlow()
+
     private val _discoverProfiles = MutableStateFlow<List<DiscoverProfile>>(emptyList())
     val discoverProfiles: StateFlow<List<DiscoverProfile>> = _discoverProfiles.asStateFlow()
 
@@ -663,6 +666,7 @@ class MboteRepository(
     }
 
     suspend fun refreshMastaFromBackend() {
+        apiService.fetchAronQuestions().onSuccess { _aronQuestions.value = it }
         apiService.fetchDiscoverProfiles().onSuccess { _discoverProfiles.value = it }
         val result = apiService.fetchMastaUsers()
         if (result.isSuccess) {
