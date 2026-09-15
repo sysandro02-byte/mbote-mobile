@@ -94,7 +94,7 @@ fun SettingsScreen(
     onLanguageChange: (AppLanguage) -> Unit = {},
     onCurrencyChange: (AppCurrency) -> Unit = {},
     onSaveParentalControl: (Boolean, String, Boolean, Int, Int, Boolean, Boolean) -> Unit = { _, _, _, _, _, _, _ -> },
-    onSendSosAlert: (String, String) -> Boolean = { _, _ -> true },
+    onSendSosAlert: (String, String) -> Unit = { _, _ -> },
     onTogglePremium: (Boolean) -> Unit = {},
     linkedChild: LinkedChildInfo = LinkedChildInfo(),
     onUpgradeParentalPlan: (String, Long) -> Unit = { _, _ -> },

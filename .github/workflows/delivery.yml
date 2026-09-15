@@ -41,16 +41,16 @@ jobs:
         run: npm test
 
   android:
-    name: Android lint, tests and verified APK
+    name: Android lint, tests and verified production-connected APK
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env: &android-test-env
-      MBOTE_API_BASE_URL: https://example.invalid/v1
-      VITE_SOCKET_URL: https://example.invalid
-      VITE_SUPABASE_URL: https://example.invalid
-      VITE_SUPABASE_ANON_KEY: test-anon-key
-      GOOGLE_CLIENT_ID: test-google-client-id
-      GITHUB_CLIENT_ID: test-github-client-id
+      MBOTE_API_BASE_URL: https://mbote-backend.onrender.com/v1
+      VITE_SOCKET_URL: https://mbote-backend.onrender.com
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
       GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx3g -Dkotlin.daemon.jvm.options=-Xmx2g
     steps:
       - name: Checkout
@@ -64,6 +64,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.10.2
+      - name: Reject invalid production endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$MBOTE_API_BASE_URL" = "https://mbote-backend.onrender.com/v1"
+          test "$VITE_SOCKET_URL" = "https://mbote-backend.onrender.com"
+          ! printf '%s\n%s\n' "$MBOTE_API_BASE_URL" "$VITE_SOCKET_URL" | grep -q 'example.invalid'
       - name: Build installable debug APK
         run: gradle --no-daemon --max-workers=2 --stacktrace clean assembleDebug
       - name: Run Android unit tests
@@ -111,6 +118,17 @@ jobs:
             app/build/reports/
             app/build/test-results/
           if-no-files-found: ignore
+      - name: Upload branch APK
+        if: github.ref != 'refs/heads/main' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mbote-production-test-apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/mbote-apk-info.txt
+            app/build/outputs/apk/debug/mbote-apk-sha256.txt
+          if-no-files-found: error
+          retention-days: 30
       - name: Publish verified installable test APK
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && success()
         uses: actions/upload-artifact@v4

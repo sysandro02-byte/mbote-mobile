@@ -227,10 +227,10 @@ data class DiscoverProfile(
     val country: String = "Congo",
     val avatar: String,
     val bio: String,
-    val matchAffinity: Int = 85, // percentage
+    val matchAffinity: Int = 0, // percentage
     val interests: List<String> = emptyList(),
-    val languages: List<String> = listOf("Français", "Lingala"),
-    val favoriteAronQuestion: String = "Si vous pouviez inviter n'importe qui dans le monde à dîner, qui choisiriez-vous ?"
+    val languages: List<String> = emptyList(),
+    val favoriteAronQuestion: String = ""
 )
 
 enum class AppThemeMode(val label: String, val description: String) {

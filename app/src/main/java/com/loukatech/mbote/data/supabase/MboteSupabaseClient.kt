@@ -1,6 +1,7 @@
 package com.loukatech.mbote.data.supabase
 
 import android.util.Log
+import com.loukatech.mbote.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -17,8 +18,8 @@ import java.net.URL
  * Ready for direct integration with Supabase PostgreSQL, Storage Buckets, and Realtime WebSocket subscriptions.
  */
 object MboteSupabaseConfig {
-    var supabaseUrl: String = "https://mbote-app.supabase.co"
-    var supabaseAnonKey: String = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ib3RlLWFwcCIsInJvbGUiOiJhbW9uIiwiaWF0IjoxNzE2MDAwMDAwLCJleHAiOjIwMzE1NzYwMDB9.MboteSupabaseSecretKeyPlaceholder"
+    var supabaseUrl: String = BuildConfig.VITE_SUPABASE_URL.trimEnd('/')
+    var supabaseAnonKey: String = BuildConfig.VITE_SUPABASE_ANON_KEY
     var userAccessToken: String? = null
 
     // Storage Buckets

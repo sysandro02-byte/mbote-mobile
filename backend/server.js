@@ -44,6 +44,48 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   const member = async (chatId, userId) => (await db.query('SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2', [chatId, userId])).rowCount > 0;
   const messageDto = (row, userId) => ({ id: row.id, chatId: row.chat_id, senderId: row.sender_id, senderName: row.sender_name, senderAvatar: row.sender_avatar || '', text: row.text || '', timestamp: row.created_at, mediaType: row.media_type || 'NONE', mediaUrl: row.media_url, isStarred: Boolean(row.is_starred), isMine: row.sender_id === userId });
 
+  const sendOtpEmail = async (email, code, flow) => {
+    if (!process.env.BREVO_API_KEY) throw Object.assign(new Error('Le service e-mail est temporairement indisponible'), { status: 503 });
+    const response = await fetch(process.env.BREVO_API_URL || 'https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'api-key': process.env.BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({
+        sender: { name: process.env.BREVO_SENDER_NAME || 'MBoté Sécurité', email: process.env.BREVO_SENDER_EMAIL || 'noreply@loukatech.com' },
+        to: [{ email }],
+        subject: flow === 'REGISTER' ? 'Confirmez votre compte MBoté' : 'Confirmez votre connexion MBoté',
+        htmlContent: `<p>Votre code de sécurité MBoté est <strong>${code}</strong>.</p><p>Il expire dans 10 minutes. Ne le communiquez à personne.</p>`,
+      }),
+    });
+    if (!response.ok) throw Object.assign(new Error('Le code de sécurité n’a pas pu être envoyé'), { status: 502 });
+  };
+  const createAuthChallenge = async ({ flow, email, userId = null, payload = {} }) => {
+    const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+    const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+    const result = await db.query(
+      `INSERT INTO auth_challenges (flow, user_id, email, code_hash, payload, expires_at)
+       VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '10 minutes') RETURNING id`,
+      [flow, userId, email, codeHash, payload],
+    );
+    try { await sendOtpEmail(email, code, flow); }
+    catch (error) { await db.query('DELETE FROM auth_challenges WHERE id = $1', [result.rows[0].id]); throw error; }
+    return { requiresOtpVerification: true, pendingUserId: result.rows[0].id, deliveryChannel: 'email', target: email.replace(/^(.{2}).*(@.*)$/, '$1***$2'), flow: flow.toLowerCase() };
+  };
+  const consumeAuthChallenge = async (challengeId, otp, flow) => {
+    if (!/^[0-9]{6}$/.test(String(otp || ''))) throw Object.assign(new Error('Code OTP invalide'), { status: 400 });
+    const result = await db.query(
+      'SELECT * FROM auth_challenges WHERE id = $1 AND flow = $2 AND expires_at > NOW() FOR UPDATE',
+      [challengeId, flow],
+    );
+    const challenge = result.rows[0];
+    const submittedHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
+    if (!challenge || challenge.attempts >= 5 || challenge.code_hash.length !== submittedHash.length ||
+        !crypto.timingSafeEqual(Buffer.from(challenge.code_hash), Buffer.from(submittedHash))) {
+      if (challenge) await db.query('UPDATE auth_challenges SET attempts = attempts + 1 WHERE id = $1', [challenge.id]);
+      throw Object.assign(new Error('Code OTP expiré ou invalide'), { status: 400 });
+    }
+    return challenge;
+  };
+
   app.disable('x-powered-by');
   app.use(cors({ origin(origin, callback) { return !origin || origins.includes(origin) ? callback(null, true) : callback(new Error('Origine CORS non autorisée')); } }));
   app.use(express.json({ limit: '1mb' }));
@@ -51,19 +93,40 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   app.get(['/health', '/v1/health'], route(async (_req, res) => { await db.query('SELECT 1'); success(res, { status: 'online', version: API_VERSION, timestamp: new Date().toISOString() }); }));
 
   app.post('/v1/auth/register', route(async (req, res) => {
-    const fullName = text(req.body.fullName, 'Nom complet', 255);
+    const fullName = text(req.body.name || req.body.fullName, 'Nom complet', 255);
     const email = text(req.body.email, 'Email', 255).toLowerCase();
     const password = text(req.body.password, 'Mot de passe', 256);
     if (!/^\S+@\S+\.\S+$/.test(email)) return failure(res, 400, 'Email invalide');
     if (password.length < 12) return failure(res, 400, 'Le mot de passe doit contenir au moins 12 caractères');
+    const exists = await db.query('SELECT 1 FROM users WHERE email = $1 OR username = $2', [email, req.body.username?.trim() || null]);
+    if (exists.rowCount) return failure(res, 409, 'Un compte existe déjà avec cet email ou ce nom utilisateur');
+    const payload = {
+      email, passwordHash: await bcrypt.hash(password, 12), fullName,
+      username: req.body.username?.trim() || null, phone: req.body.phoneNumber?.trim() || req.body.phone?.trim() || null,
+      country: req.body.country?.trim() || 'Congo', city: req.body.city?.trim() || '',
+      bio: req.body.bio?.trim() || '', accountType: req.body.accountType || 'personal',
+      accountVisibility: req.body.accountVisibility || 'public',
+    };
+    success(res, await createAuthChallenge({ flow: 'REGISTER', email, payload }), 201);
+  }));
+
+  app.post('/v1/auth/verify-registration-otp', route(async (req, res) => {
+    // Validate before opening the account-creation transaction so a failed OTP
+    // attempt is persisted instead of being undone by the rollback below.
+    const challenge = await consumeAuthChallenge(req.body.pendingUserId, req.body.otp, 'REGISTER');
+    await db.query('BEGIN');
     try {
+      const p = challenge.payload;
       const result = await db.query(
-        'INSERT INTO users (email, password_hash, full_name, phone, country, city) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-        [email, await bcrypt.hash(password, 12), fullName, req.body.phone?.trim() || null, req.body.country?.trim() || 'Congo', req.body.city?.trim() || 'Brazzaville'],
+        `INSERT INTO users (email, password_hash, full_name, username, phone, country, city, bio, is_verified)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true) RETURNING *`,
+        [p.email, p.passwordHash, p.fullName, p.username || null, p.phone || null, p.country || 'Congo', p.city || null, p.bio || null],
       );
+      await db.query('DELETE FROM auth_challenges WHERE id = $1', [challenge.id]);
+      await db.query('COMMIT');
       const user = result.rows[0];
-      return success(res, { token: tokenFor(user), refreshToken: null, userId: user.id, ...publicUser(user) }, 201);
-    } catch (error) { if (error.code === '23505') return failure(res, 409, 'Un compte existe déjà pour cet email'); throw error; }
+      return success(res, { token: tokenFor(user), user: { ...publicUser(user), username: user.username || '', phone_number: user.phone || '', country: user.country || '', city: user.city || '', account_type: p.accountType, account_visibility: p.accountVisibility } }, 201);
+    } catch (error) { await db.query('ROLLBACK'); throw error; }
   }));
 
   app.post('/v1/auth/login', route(async (req, res) => {
@@ -72,8 +135,23 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
     const user = result.rows[0];
     if (!user || !user.password_hash || !(await bcrypt.compare(password, user.password_hash))) return failure(res, 401, 'Identifiants invalides');
-    return success(res, { token: tokenFor(user), refreshToken: null, userId: user.id, ...publicUser(user) });
+    success(res, await createAuthChallenge({ flow: 'LOGIN', email, userId: user.id }));
   }));
+
+  app.post('/v1/auth/verify-login-otp', route(async (req, res) => {
+    // Keep invalid-attempt accounting outside the transaction rolled back below.
+    const challenge = await consumeAuthChallenge(req.body.pendingUserId, req.body.otp, 'LOGIN');
+    await db.query('BEGIN');
+    try {
+      const result = await db.query('SELECT * FROM users WHERE id = $1', [challenge.user_id]);
+      if (!result.rowCount) throw Object.assign(new Error('Compte introuvable'), { status: 404 });
+      await db.query('DELETE FROM auth_challenges WHERE id = $1', [challenge.id]);
+      await db.query('COMMIT');
+      const user = result.rows[0];
+      return success(res, { token: tokenFor(user), user: { ...publicUser(user), username: user.username || '', phone_number: user.phone || '', country: user.country || '', city: user.city || '' } });
+    } catch (error) { await db.query('ROLLBACK'); throw error; }
+  }));
+
   app.get('/v1/auth/me', auth, route(async (req, res) => {
     const result = await db.query('SELECT * FROM users WHERE id = $1', [req.user.userId]);
     return result.rowCount ? success(res, publicUser(result.rows[0])) : failure(res, 401, 'Compte introuvable');
@@ -559,6 +637,389 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   app.post('/v1/statuses/:statusId/view', auth, route(async (req, res) => {
     await db.query('INSERT INTO status_views (status_id, viewer_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.params.statusId, req.user.userId]);
     success(res, true);
+  }));
+
+
+  // Server-side media search and payment connectors keep provider secrets out of the APK.
+  app.get('/v1/media/search', auth, route(async (req, res) => {
+    if (!process.env.GIPHY_API_KEY) return failure(res, 503, 'La recherche GIF n’est pas configurée');
+    const query = text(req.query.q, 'Recherche', 100);
+    const type = req.query.type === 'sticker' ? 'stickers' : 'gifs';
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
+    const upstream = await fetch(`https://api.giphy.com/v1/${type}/search?api_key=${encodeURIComponent(process.env.GIPHY_API_KEY)}&q=${encodeURIComponent(query)}&limit=${limit}&rating=pg-13`);
+    if (!upstream.ok) throw Object.assign(new Error('Le fournisseur GIF est indisponible'), { status: 502 });
+    const payload = await upstream.json();
+    const items = (payload.data || []).map((item) => ({
+      id: item.id,
+      title: item.title || '',
+      previewUrl: item.images?.fixed_width_small?.url || item.images?.preview_gif?.url || '',
+      originalUrl: item.images?.original?.url || '',
+      width: Number(item.images?.original?.width) || 0,
+      height: Number(item.images?.original?.height) || 0,
+    })).filter((item) => item.originalUrl);
+    success(res, { items });
+  }));
+
+  app.post('/v1/payments/intents', auth, route(async (req, res) => {
+    if (!process.env.PAYMENTS_API_URL || !process.env.PAYMENTS_API_KEY) {
+      return failure(res, 503, 'Le connecteur de paiement n’est pas configuré');
+    }
+    const provider = text(req.body.provider, 'Opérateur', 50);
+    const amount = Number(req.body.amountFcfa);
+    const phone = text(req.body.phone, 'Téléphone', 50);
+    if (!Number.isSafeInteger(amount) || amount <= 0) return failure(res, 400, 'Montant invalide');
+    const local = await db.query(
+      'INSERT INTO payment_intents(user_id,provider,amount_fcfa,phone) VALUES($1,$2,$3,$4) RETURNING id',
+      [req.user.userId, provider, amount, phone],
+    );
+    const upstream = await fetch(process.env.PAYMENTS_API_URL, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${process.env.PAYMENTS_API_KEY}`, 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ intentId: local.rows[0].id, provider, amount, currency: 'XAF', phone, callbackUrl: process.env.PAYMENTS_CALLBACK_URL }),
+    });
+    if (!upstream.ok) {
+      await db.query("UPDATE payment_intents SET status='FAILED',updated_at=NOW() WHERE id=$1", [local.rows[0].id]);
+      throw Object.assign(new Error('L’opérateur de paiement a refusé la demande'), { status: 502 });
+    }
+    const payload = await upstream.json();
+    await db.query('UPDATE payment_intents SET provider_reference=$2,status=$3,updated_at=NOW() WHERE id=$1', [local.rows[0].id, payload.reference || null, String(payload.status || 'PENDING').toUpperCase()]);
+    success(res, {
+      intentId: local.rows[0].id,
+      status: String(payload.status || 'PENDING').toUpperCase(),
+      amount,
+      currency: 'XAF',
+      merchantCode: payload.merchantCode || null,
+      ussdCode: payload.ussdCode || null,
+      instructions: payload.instructions || null,
+    }, 201);
+  }));
+
+  // Session, profile and public configuration contracts consumed by Android.
+  app.post('/v1/auth/logout', auth, route(async (_req, res) => success(res, true)));
+  app.get('/v1/public-settings', route(async (_req, res) => {
+    const result = await db.query("SELECT value FROM app_content WHERE content_key = 'registration_config'");
+    success(res, result.rows[0]?.value || { termsOfService: '', privacyPolicy: '', businessCategories: [] });
+  }));
+  app.put('/v1/users/me/profile', auth, route(async (req, res) => {
+    const fields = [
+      req.body.name?.trim() || null, req.body.email?.trim()?.toLowerCase() || null,
+      req.body.bio?.trim() || null, req.body.avatar?.trim() || null, req.body.coverUrl?.trim() || null,
+      req.user.userId,
+    ];
+    const result = await db.query(
+      `UPDATE users SET full_name = COALESCE($1, full_name), email = COALESCE($2, email),
+       bio = COALESCE($3, bio), avatar_url = COALESCE($4, avatar_url),
+       cover_url = COALESCE($5, cover_url), updated_at = NOW() WHERE id = $6 RETURNING *`, fields,
+    );
+    if (!result.rowCount) return failure(res, 404, 'Compte introuvable');
+    const user = result.rows[0];
+    success(res, { ...publicUser(user), username: user.username || '', phone_number: user.phone || '', country: user.country || '', city: user.city || '' });
+  }));
+  app.delete('/v1/users/me', auth, route(async (req, res) => {
+    const result = await db.query('DELETE FROM users WHERE id = $1 RETURNING id', [req.user.userId]);
+    return result.rowCount ? success(res, { ok: true }) : failure(res, 404, 'Compte introuvable');
+  }));
+
+  // Creation, read receipts and reactions for real conversations.
+  app.post('/v1/chats', auth, route(async (req, res) => {
+    const participantIds = Array.isArray(req.body.participantIds) ? [...new Set(req.body.participantIds.map(String))] : [];
+    if (!participantIds.length) return failure(res, 400, 'Au moins un participant est requis');
+    const users = await db.query('SELECT id FROM users WHERE id = ANY($1::uuid[])', [participantIds]);
+    if (users.rowCount !== participantIds.length) return failure(res, 400, 'Un ou plusieurs participants sont invalides');
+    const isGroup = Boolean(req.body.isGroup);
+    const created = await db.query(
+      'INSERT INTO chats (name, is_group, created_by) VALUES ($1, $2, $3) RETURNING *',
+      [isGroup ? text(req.body.name, 'Nom du groupe', 255) : null, isGroup, req.user.userId],
+    );
+    const chat = created.rows[0];
+    const members = [...new Set([req.user.userId, ...participantIds])];
+    await db.query('INSERT INTO chat_participants (chat_id, user_id, role) SELECT $1, unnest($2::uuid[]), CASE WHEN unnest($2::uuid[]) = $3 THEN \'ADMIN\' ELSE \'MEMBER\' END ON CONFLICT DO NOTHING', [chat.id, members, req.user.userId]);
+    success(res, { id: chat.id, name: chat.name || 'Discussion', avatar: '', isGroup, isChannel: false, participants: [] }, 201);
+  }));
+  app.post('/v1/chats/:chatId/read', auth, route(async (req, res) => {
+    if (!(await member(req.params.chatId, req.user.userId))) return failure(res, 403, 'Accès refusé');
+    await db.query(
+      'INSERT INTO chat_reads (chat_id, user_id) VALUES ($1, $2) ON CONFLICT (chat_id, user_id) DO UPDATE SET last_read_at = NOW()',
+      [req.params.chatId, req.user.userId],
+    );
+    await db.query("UPDATE messages SET status = 'READ' WHERE chat_id = $1 AND sender_id <> $2", [req.params.chatId, req.user.userId]);
+    success(res, true);
+  }));
+  app.post('/v1/messages/:messageId/reactions', auth, route(async (req, res) => {
+    const emoji = text(req.body.emoji, 'Réaction', 16);
+    const allowed = await db.query(
+      'SELECT 1 FROM messages m JOIN chat_participants cp ON cp.chat_id = m.chat_id WHERE m.id = $1 AND cp.user_id = $2',
+      [req.params.messageId, req.user.userId],
+    );
+    if (!allowed.rowCount) return failure(res, 404, 'Message introuvable');
+    const inserted = await db.query(
+      'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING RETURNING emoji',
+      [req.params.messageId, req.user.userId, emoji],
+    );
+    if (!inserted.rowCount) await db.query('DELETE FROM message_reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3', [req.params.messageId, req.user.userId, emoji]);
+    const counts = await db.query('SELECT emoji, COUNT(*)::int AS count FROM message_reactions WHERE message_id = $1 GROUP BY emoji', [req.params.messageId]);
+    success(res, Object.fromEntries(counts.rows.map((row) => [row.emoji, row.count])));
+  }));
+
+  // Channels are conversations with a persisted public profile and subscriptions.
+  app.get('/v1/channels', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT c.id, c.name, cp.description, cp.category, c.avatar_url AS "avatarUrl",
+       cp.banner_url AS "bannerUrl", (SELECT COUNT(*)::int FROM channel_subscriptions cs WHERE cs.channel_id = c.id) AS "subscriberCount",
+       EXISTS(SELECT 1 FROM channel_subscriptions cs WHERE cs.channel_id = c.id AND cs.user_id = $1) AS "subscribedByMe",
+       (c.created_by = $1) AS "canPublish" FROM chats c JOIN channel_profiles cp ON cp.chat_id = c.id
+       WHERE cp.privacy = 'public' OR c.created_by = $1 OR EXISTS(SELECT 1 FROM channel_subscriptions cs WHERE cs.channel_id = c.id AND cs.user_id = $1)
+       ORDER BY c.created_at DESC`, [req.user.userId],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/channels', auth, route(async (req, res) => {
+    const name = text(req.body.name, 'Nom de la chaîne', 255);
+    const slug = text(req.body.slug, 'Identifiant de chaîne', 120).toLowerCase();
+    await db.query('BEGIN');
+    try {
+      const created = await db.query('INSERT INTO chats (name, is_group, is_channel, created_by) VALUES ($1, true, true, $2) RETURNING *', [name, req.user.userId]);
+      await db.query('INSERT INTO channel_profiles (chat_id, description, slug, privacy, category) VALUES ($1, $2, $3, $4, $5)', [created.rows[0].id, req.body.description?.trim() || '', slug, req.body.privacy === 'private' ? 'private' : 'public', req.body.category?.trim() || null]);
+      await db.query("INSERT INTO chat_participants (chat_id, user_id, role) VALUES ($1, $2, 'OWNER')", [created.rows[0].id, req.user.userId]);
+      await db.query('INSERT INTO channel_subscriptions (channel_id, user_id) VALUES ($1, $2)', [created.rows[0].id, req.user.userId]);
+      await db.query('COMMIT');
+      success(res, { id: created.rows[0].id }, 201);
+    } catch (error) { await db.query('ROLLBACK'); throw error; }
+  }));
+  app.post('/v1/channels/:channelId/posts', auth, route(async (req, res) => {
+    const owner = await db.query('SELECT 1 FROM chats WHERE id = $1 AND created_by = $2 AND is_channel = true', [req.params.channelId, req.user.userId]);
+    if (!owner.rowCount) return failure(res, 403, 'Publication réservée au propriétaire');
+    return sendMessage({ ...req, body: { chatId: req.params.channelId, text: req.body.content } }, res);
+  }));
+  const setChannelSubscription = async (req, res, subscribe) => {
+    if (subscribe) await db.query('INSERT INTO channel_subscriptions (channel_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [req.params.channelId, req.user.userId]);
+    else await db.query('DELETE FROM channel_subscriptions WHERE channel_id = $1 AND user_id = $2', [req.params.channelId, req.user.userId]);
+    success(res, true);
+  };
+  app.post('/v1/channels/:channelId/subscribe', auth, route((req, res) => setChannelSubscription(req, res, true)));
+  app.delete('/v1/channels/:channelId/subscribe', auth, route((req, res) => setChannelSubscription(req, res, false)));
+
+  // Actus API aliases with fully persisted reactions, comments and shares.
+  app.get('/v1/actus/posts', auth, route(async (req, res) => {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const result = await db.query(
+      `SELECT n.id, n.author_id, u.full_name AS author_name, COALESCE(u.avatar_url, '') AS author_avatar,
+       lower(COALESCE(n.media_type, 'text')) AS type, n.content, n.image_url AS thumbnail, n.category AS visibility,
+       (SELECT COUNT(*)::int FROM news_post_comments nc WHERE nc.news_post_id=n.id) AS comment_count,
+       (SELECT COUNT(*)::int FROM news_post_shares ns WHERE ns.news_post_id=n.id) AS share_count,
+       (SELECT COUNT(*)::int FROM news_post_likes nl WHERE nl.news_post_id=n.id) AS reaction_count,
+       CASE WHEN EXISTS(SELECT 1 FROM news_post_likes nl WHERE nl.news_post_id=n.id AND nl.user_id=$1) THEN '❤️' END AS my_reaction,
+       n.created_at FROM news_posts n JOIN users u ON u.id=n.author_id ORDER BY n.created_at DESC LIMIT $2`,
+      [req.user.userId, limit],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/actus/posts', auth, route(async (req, res) => {
+    const content = text(req.body.content, 'Publication');
+    const created = await db.query(
+      'INSERT INTO news_posts (author_id, category, title, content, image_url, media_type) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [req.user.userId, req.body.visibility || 'public', content.slice(0,255), content, req.body.type === 'text' ? null : req.body.content, String(req.body.type || 'text').toUpperCase()],
+    );
+    const user = await db.query('SELECT full_name, avatar_url FROM users WHERE id=$1', [req.user.userId]);
+    success(res, { id: created.rows[0].id, author_id: req.user.userId, author_name: user.rows[0].full_name, author_avatar: user.rows[0].avatar_url || '', type: req.body.type || 'text', content, thumbnail: req.body.thumbnail || null, visibility: req.body.visibility || 'public', comment_count: 0, share_count: 0, reaction_count: 0, my_reaction: null, created_at: created.rows[0].created_at }, 201);
+  }));
+  app.post('/v1/actus/posts/:postId/reactions', auth, route(async (req, res) => {
+    const existing = await db.query('SELECT 1 FROM news_post_likes WHERE news_post_id=$1 AND user_id=$2', [req.params.postId, req.user.userId]);
+    if (existing.rowCount) await db.query('DELETE FROM news_post_likes WHERE news_post_id=$1 AND user_id=$2', [req.params.postId, req.user.userId]);
+    else await db.query('INSERT INTO news_post_likes (news_post_id,user_id) VALUES ($1,$2)', [req.params.postId, req.user.userId]);
+    success(res, true);
+  }));
+  app.get('/v1/actus/posts/:postId/comments', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT c.id, u.full_name AS user_name, COALESCE(u.avatar_url,'') AS user_avatar, c.text AS content, c.created_at
+       FROM news_post_comments c JOIN users u ON u.id=c.author_id WHERE c.news_post_id=$1 ORDER BY c.created_at ASC LIMIT 100`,
+      [req.params.postId],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/actus/posts/:postId/comments', auth, route(async (req, res) => {
+    await db.query('INSERT INTO news_post_comments (news_post_id,author_id,text) VALUES ($1,$2,$3)', [req.params.postId, req.user.userId, text(req.body.content || req.body.text, 'Commentaire', 2000)]);
+    success(res, true, 201);
+  }));
+  app.post('/v1/actus/posts/:postId/shares', auth, route(async (req, res) => {
+    await db.query('INSERT INTO news_post_shares (news_post_id,user_id) VALUES ($1,$2)', [req.params.postId, req.user.userId]);
+    const count = await db.query('SELECT COUNT(*)::int AS count FROM news_post_shares WHERE news_post_id=$1', [req.params.postId]);
+    await db.query('UPDATE news_posts SET shares_count=$2 WHERE id=$1', [req.params.postId, count.rows[0].count]);
+    success(res, { shareCount: count.rows[0].count });
+  }));
+
+  // Jobs and applications are sourced exclusively from PostgreSQL.
+  app.get('/v1/jobs', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT id,title,company,location,contract_type AS type,description,domain AS "activityDomain",
+       contract_type AS duration,COALESCE(salary,'') AS salary,j.created_at AS "publishedAt",
+       '' AS "expiresAt",'' AS url,company_logo AS "imageUrl",
+       (SELECT COUNT(*)::int FROM job_applications a WHERE a.job_id=j.id) AS "applicantsCount",
+       (SELECT COUNT(*)::int FROM job_likes l WHERE l.job_id=j.id) AS "likesCount",
+       EXISTS(SELECT 1 FROM job_likes l WHERE l.job_id=j.id AND l.user_id=$1) AS "isLiked",
+       EXISTS(SELECT 1 FROM job_bookmarks b WHERE b.job_id=j.id AND b.user_id=$1) AS "isSaved"
+       FROM job_offers j ORDER BY j.created_at DESC`,
+      [req.user.userId],
+    );
+    success(res, { jobs: result.rows });
+  }));
+  app.post('/v1/jobs', auth, route(async (req, res) => {
+    const created = await db.query(
+      `INSERT INTO job_offers (title,company,company_logo,location,domain,contract_type,work_mode,salary,description)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,title,company,location,contract_type AS type,
+       description,domain AS "activityDomain",contract_type AS duration,COALESCE(salary,'') AS salary,
+       created_at AS "publishedAt",'' AS "expiresAt",'' AS url,company_logo AS "imageUrl"`,
+      [text(req.body.title,'Titre',255),text(req.body.company,'Entreprise',255),req.body.imageUrl||null,text(req.body.location,'Lieu',255),req.body.activityDomain||req.body.domain||'Autre',req.body.duration||req.body.type||'CDI',req.body.workMode||'Sur site',req.body.salary||null,text(req.body.description,'Description')],
+    );
+    success(res, { job: created.rows[0] }, 201);
+  }));
+  app.post('/v1/jobs/:jobId/apply', auth, route(async (req, res) => {
+    await db.query('INSERT INTO job_applications (job_id,applicant_id,cv_url) VALUES ($1,$2,$3) ON CONFLICT (job_id,applicant_id) DO UPDATE SET cv_url=EXCLUDED.cv_url, created_at=NOW()', [req.params.jobId, req.user.userId, req.body.cvUrl || null]);
+    success(res, true, 201);
+  }));
+
+  app.post('/v1/jobs/:jobId/like', auth, route(async (req,res)=>{
+    const inserted=await db.query('INSERT INTO job_likes(job_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING job_id',[req.params.jobId,req.user.userId]);
+    if(!inserted.rowCount)await db.query('DELETE FROM job_likes WHERE job_id=$1 AND user_id=$2',[req.params.jobId,req.user.userId]);
+    const count=await db.query('SELECT COUNT(*)::int AS count FROM job_likes WHERE job_id=$1',[req.params.jobId]);
+    success(res,{liked:inserted.rowCount>0,count:count.rows[0].count});
+  }));
+  app.post('/v1/jobs/:jobId/bookmark', auth, route(async (req,res)=>{
+    const inserted=await db.query('INSERT INTO job_bookmarks(job_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING job_id',[req.params.jobId,req.user.userId]);
+    if(!inserted.rowCount)await db.query('DELETE FROM job_bookmarks WHERE job_id=$1 AND user_id=$2',[req.params.jobId,req.user.userId]);
+    success(res,{saved:inserted.rowCount>0});
+  }));
+
+  // Status interactions and lifecycle.
+  app.get('/v1/status', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT s.id,s.author_id AS user_id,u.full_name AS user_name,COALESCE(u.avatar_url,'') AS user_avatar,
+       lower(s.media_type) AS type,COALESCE(s.text,s.media_url,'') AS content,s.background_color AS background,
+       s.text AS caption,s.created_at,(SELECT COUNT(*)::int FROM status_reactions r WHERE r.status_id=s.id) AS reaction_count,
+       (SELECT emoji FROM status_reactions r WHERE r.status_id=s.id AND r.user_id=$1) AS my_reaction,
+       (SELECT COUNT(*)::int FROM status_comments c WHERE c.status_id=s.id) AS comment_count,
+       (SELECT COUNT(*)::int FROM status_shares sh WHERE sh.status_id=s.id) AS share_count,
+       (SELECT COUNT(*)::int FROM status_views v WHERE v.status_id=s.id) AS view_count
+       FROM statuses s JOIN users u ON u.id=s.author_id WHERE s.expires_at>NOW() ORDER BY s.created_at DESC`,
+      [req.user.userId],
+    );
+    success(res, result.rows);
+  }));
+  app.post('/v1/status/publications', auth, route(async (req, res) => {
+    const type = String(req.body.type||'text').toUpperCase();
+    const content = text(req.body.content,'Statut',5000);
+    const created = await db.query(
+      `INSERT INTO statuses (author_id,media_type,media_url,text,background_color,expires_at)
+       VALUES ($1,$2,$3,$4,$5,NOW()+($6::int * INTERVAL '1 hour')) RETURNING *`,
+      [req.user.userId,type,type==='TEXT'?null:content,type==='TEXT'?content:(req.body.caption||null),req.body.background||null,Math.min(Math.max(Number(req.body.durationHours)||24,1),168)],
+    );
+    const user=await db.query('SELECT full_name,avatar_url FROM users WHERE id=$1',[req.user.userId]);
+    success(res,{id:created.rows[0].id,user_id:req.user.userId,user_name:user.rows[0].full_name,user_avatar:user.rows[0].avatar_url||'',type:type.toLowerCase(),content,background:req.body.background||null,caption:req.body.caption||null,created_at:created.rows[0].created_at,reaction_count:0,my_reaction:null,comment_count:0,share_count:0,view_count:0},201);
+  }));
+  app.post('/v1/status/:statusId/views', auth, route(async (req,res)=>{await db.query('INSERT INTO status_views(status_id,viewer_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[req.params.statusId,req.user.userId]);success(res,true);}));
+  app.post('/v1/status/:statusId/reactions', auth, route(async (req,res)=>{
+    const emoji=text(req.body.reaction,'Réaction',16);
+    await db.query('INSERT INTO status_reactions(status_id,user_id,emoji) VALUES($1,$2,$3) ON CONFLICT(status_id,user_id) DO UPDATE SET emoji=EXCLUDED.emoji',[req.params.statusId,req.user.userId,emoji]);
+    success(res,true);
+  }));
+  app.post('/v1/status/:statusId/comments', auth, route(async (req,res)=>{await db.query('INSERT INTO status_comments(status_id,author_id,text) VALUES($1,$2,$3)',[req.params.statusId,req.user.userId,text(req.body.content,'Commentaire',2000)]);success(res,true,201);}));
+  app.post('/v1/status/:statusId/shares', auth, route(async (req,res)=>{await db.query('INSERT INTO status_shares(status_id,user_id) VALUES($1,$2)',[req.params.statusId,req.user.userId]);success(res,true,201);}));
+  app.delete('/v1/status/:statusId', auth, route(async (req,res)=>{const result=await db.query('DELETE FROM statuses WHERE id=$1 AND author_id=$2 RETURNING id',[req.params.statusId,req.user.userId]);return result.rowCount?success(res,true):failure(res,404,'Statut introuvable');}));
+
+  // Group call sessions never fall back to fabricated local participants.
+  const groupCallDto = async (roomCode, viewerId) => {
+    const sessionResult = await db.query('SELECT * FROM group_call_sessions WHERE room_code=$1',[roomCode.toUpperCase()]);
+    if(!sessionResult.rowCount) return null;
+    const session=sessionResult.rows[0];
+    const participants=await db.query(
+      `SELECT u.id,u.full_name AS name,COALESCE(u.avatar_url,'') AS avatar,
+       NOT p.audio_enabled AS "isMuted",NOT p.video_enabled AS "isVideoOff",
+       (u.id=$2) AS "isHost",p.screen_sharing AS "isScreenSharing",0::float AS "audioVolumeLevel"
+       FROM group_call_participants p JOIN users u ON u.id=p.user_id
+       WHERE p.session_id=$1 AND p.left_at IS NULL ORDER BY p.joined_at`,[session.id,session.host_id],
+    );
+    return {roomCode:session.room_code,roomTitle:session.title,isVideoCall:session.is_video,hostUserId:String(session.host_id),participants:participants.rows,connectionQuality:'SERVER_CONNECTED',encryptionStandard:'WebRTC E2EE',createdAtTimestamp:new Date(session.created_at).getTime()};
+  };
+  app.post('/v1/calls/group/create',auth,route(async(req,res)=>{
+    const code=crypto.randomBytes(4).toString('hex').toUpperCase();
+    const created=await db.query('INSERT INTO group_call_sessions(room_code,host_id,title,is_video) VALUES($1,$2,$3,$4) RETURNING id',[code,req.user.userId,text(req.body.roomTitle,'Titre',255),req.body.isVideoCall!==false]);
+    await db.query('INSERT INTO group_call_participants(session_id,user_id,video_enabled) VALUES($1,$2,$3)',[created.rows[0].id,req.user.userId,req.body.isVideoCall!==false]);
+    const invitees=Array.isArray(req.body.participantIds)?req.body.participantIds.map(String):[];
+    if(invitees.length) await db.query('INSERT INTO group_call_participants(session_id,user_id,video_enabled) SELECT $1,unnest($2::uuid[]),$3 ON CONFLICT DO NOTHING',[created.rows[0].id,invitees,req.body.isVideoCall!==false]);
+    success(res,await groupCallDto(code,req.user.userId),201);
+  }));
+  app.post('/v1/calls/group/join/:roomCode',auth,route(async(req,res)=>{
+    const session=await db.query("SELECT id,is_video FROM group_call_sessions WHERE room_code=$1 AND status='ACTIVE'",[req.params.roomCode.toUpperCase()]);
+    if(!session.rowCount)return failure(res,404,'Appel de groupe introuvable');
+    await db.query('INSERT INTO group_call_participants(session_id,user_id,video_enabled,left_at) VALUES($1,$2,$3,NULL) ON CONFLICT(session_id,user_id) DO UPDATE SET left_at=NULL',[session.rows[0].id,req.user.userId,session.rows[0].is_video]);
+    success(res,await groupCallDto(req.params.roomCode,req.user.userId));
+  }));
+  app.put('/v1/calls/group/update-state',auth,route(async(req,res)=>{
+    const session=await db.query('SELECT id FROM group_call_sessions WHERE room_code=$1',[text(req.body.roomCode,'Code',32).toUpperCase()]);
+    if(!session.rowCount)return failure(res,404,'Appel introuvable');
+    await db.query('UPDATE group_call_participants SET audio_enabled=$3,video_enabled=$4,screen_sharing=$5 WHERE session_id=$1 AND user_id=$2',[session.rows[0].id,req.user.userId,!req.body.isMuted,!req.body.isVideoOff,Boolean(req.body.isScreenSharing)]);
+    success(res,true);
+  }));
+  app.post('/v1/calls/group/leave/:roomCode',auth,route(async(req,res)=>{
+    const session=await db.query('SELECT id,host_id FROM group_call_sessions WHERE room_code=$1',[req.params.roomCode.toUpperCase()]);
+    if(!session.rowCount)return failure(res,404,'Appel introuvable');
+    await db.query('UPDATE group_call_participants SET left_at=NOW() WHERE session_id=$1 AND user_id=$2',[session.rows[0].id,req.user.userId]);
+    if(String(session.rows[0].host_id)===String(req.user.userId))await db.query("UPDATE group_call_sessions SET status='ENDED',ended_at=NOW() WHERE id=$1",[session.rows[0].id]);
+    success(res,true);
+  }));
+
+  // Parent/child links accept only short-lived tokens generated by the child account.
+  app.post('/v1/parental/link-token',auth,route(async(req,res)=>{
+    const result=await db.query("INSERT INTO parental_link_tokens(child_id) VALUES($1) RETURNING token,expires_at",[req.user.userId]);
+    success(res,{qrPayload:`mbote://child-link?token=${result.rows[0].token}`,expiresAt:result.rows[0].expires_at},201);
+  }));
+  app.post('/v1/parental/links/consume',auth,route(async(req,res)=>{
+    const payload=text(req.body.qrPayload,'QR code',2000);
+    let token;
+    try { token=new URL(payload).searchParams.get('token'); } catch { token=null; }
+    if(!token)return failure(res,400,'QR code enfant invalide');
+    const found=await db.query(
+      `UPDATE parental_link_tokens SET consumed_at=NOW() WHERE token=$1 AND expires_at>NOW() AND consumed_at IS NULL
+       RETURNING child_id`,[token],
+    );
+    if(!found.rowCount)return failure(res,400,'QR code expiré ou déjà utilisé');
+    await db.query('INSERT INTO parental_links(parent_id,child_id) VALUES($1,$2) ON CONFLICT DO NOTHING',[req.user.userId,found.rows[0].child_id]);
+    const child=await db.query('SELECT id,full_name,username,avatar_url,created_at FROM users WHERE id=$1',[found.rows[0].child_id]);
+    const u=child.rows[0];
+    success(res,{id:u.id,name:u.full_name,username:u.username||'',avatar:u.avatar_url||'',age:0,schoolName:'',deviceModel:'',batteryLevel:0,isOnline:false,lastActive:'',linkToken:'',installedApps:[],lastPanicAlert:null});
+  }));
+  app.get('/v1/parental/children',auth,route(async(req,res)=>{
+    const result=await db.query(
+      `SELECT u.id,u.full_name AS name,COALESCE(u.username,'') AS username,COALESCE(u.avatar_url,'') AS avatar,
+       0 AS age,'' AS "schoolName",'' AS "deviceModel",0 AS "batteryLevel",false AS "isOnline",'' AS "lastActive",
+       '' AS "linkToken",'[]'::json AS "installedApps",NULL::json AS "lastPanicAlert"
+       FROM parental_links p JOIN users u ON u.id=p.child_id WHERE p.parent_id=$1 ORDER BY p.linked_at DESC`,[req.user.userId],
+    );
+    success(res,result.rows);
+  }));
+  app.delete('/v1/parental/children/:childId',auth,route(async(req,res)=>{
+    await db.query('DELETE FROM parental_links WHERE parent_id=$1 AND child_id=$2',[req.user.userId,req.params.childId]);success(res,true);
+  }));
+  app.post('/v1/parental/sos',auth,route(async(req,res)=>{
+    const parent=await db.query('SELECT parent_id FROM parental_links WHERE child_id=$1 ORDER BY linked_at DESC LIMIT 1',[req.user.userId]);
+    if(!parent.rowCount)return failure(res,409,'Aucun compte parent lié');
+    const created=await db.query(
+      `INSERT INTO panic_alerts(child_id,parent_id,reason,latitude,longitude,address,battery_level)
+       VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [req.user.userId,parent.rows[0].parent_id,text(req.body.reason,'Motif',2000),req.body.latitude||null,req.body.longitude||null,req.body.address||null,req.body.batteryLevel||null],
+    );
+    success(res,created.rows[0],201);
+  }));
+
+  // Dynamic application content and push-token registration.
+  app.get('/v1/content/aron-questions',auth,route(async(_req,res)=>{
+    const result=await db.query("SELECT value FROM app_content WHERE content_key='aron_questions'");
+    success(res,result.rows[0]?.value||[]);
+  }));
+  app.put('/v1/devices/push-token',auth,route(async(req,res)=>{
+    const token=text(req.body.token,'Jeton FCM',4096);
+    await db.query('INSERT INTO device_push_tokens(user_id,token) VALUES($1,$2) ON CONFLICT(user_id,token) DO UPDATE SET updated_at=NOW()',[req.user.userId,token]);
+    success(res,true);
   }));
 
   app.post('/v1/ai/smart-replies', auth, route(async (req, res) => {

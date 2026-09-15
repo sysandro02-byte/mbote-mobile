@@ -24,17 +24,17 @@ val viteSocketUrl = envProps.getProperty("VITE_SOCKET_URL")
     ?: "https://mbote-backend.onrender.com"
 val viteSupabaseUrl = envProps.getProperty("VITE_SUPABASE_URL")
     ?: System.getenv("VITE_SUPABASE_URL")
-    ?: "https://mbote-app.supabase.co"
+    ?: ""
 val viteSupabaseAnonKey = envProps.getProperty("VITE_SUPABASE_ANON_KEY")
     ?: System.getenv("VITE_SUPABASE_ANON_KEY")
-    ?: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ib3RlLWFwcCIsInJvbGUiOiJhbW9uIiwiaWF0IjoxNzE2MDAwMDAwLCJleHAiOjIwMzE1NzYwMDB9.MboteSupabaseSecretKeyPlaceholder"
+    ?: ""
 
 val googleClientId = envProps.getProperty("GOOGLE_CLIENT_ID")
     ?: System.getenv("GOOGLE_CLIENT_ID")
-    ?: "108392019482-mbote-google-oauth.apps.googleusercontent.com"
+    ?: ""
 val githubClientId = envProps.getProperty("GITHUB_CLIENT_ID")
     ?: System.getenv("GITHUB_CLIENT_ID")
-    ?: "Iv1.mbote_github_oauth_client_id"
+    ?: ""
 android {
     namespace = "com.loukatech.mbote"
     compileSdk = 36

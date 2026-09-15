@@ -278,7 +278,7 @@ data class ChatDto(
 private data class CreateChatRequest(
     val isGroup: Boolean,
     val name: String,
-    val participantIds: List<Int>
+    val participantIds: List<String>
 )
 
 @Serializable
@@ -708,7 +708,7 @@ class MboteApiService {
             method = "POST",
             requestBody = request
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<PendingOtpChallenge>(json)
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<PendingOtpChallenge>(responseObject(json))
         }
     }
 
@@ -717,7 +717,7 @@ class MboteApiService {
         val type = if (stickers) "sticker" else "gif"
         return executeHttpRequest<Unit, List<MediaSearchItem>>(
             endpoint = "/media/search?type=$type&q=$safeQuery&limit=20"
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<MediaSearchResponse>(json).items }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<MediaSearchResponse>(responseObject(json)).items }
     }
 
     suspend fun createPaymentIntent(provider: String, amountFcfa: Long, phone: String): Result<PaymentIntentResponse> =
@@ -725,11 +725,11 @@ class MboteApiService {
             endpoint = "/payments/intents",
             method = "POST",
             requestBody = PaymentIntentRequest(provider, amountFcfa, "XAF", phone)
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<PaymentIntentResponse>(json) }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<PaymentIntentResponse>(responseObject(json)) }
 
     suspend fun getRegistrationPublicConfig(): Result<RegistrationPublicConfig> =
         executeHttpRequest<Unit, RegistrationPublicConfig>(endpoint = "/public-settings") { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<RegistrationPublicConfig>(json)
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<RegistrationPublicConfig>(responseObject(json))
         }
 
     suspend fun verifyLoginOtp(pendingUserId: String, otp: String): Result<VerifiedAuthResponse> {
@@ -752,7 +752,7 @@ class MboteApiService {
             method = "POST",
             requestBody = request
         ) { json ->
-            MboteBackendConfig.jsonParser.decodeFromString<PendingOtpChallenge>(json)
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<PendingOtpChallenge>(responseObject(json))
         }
     }
 
@@ -779,20 +779,20 @@ class MboteApiService {
             endpoint = "/users/me/profile",
             method = "PUT",
             requestBody = request
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<AuthUserData>(json) }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<AuthUserData>(responseObject(json)) }
 
     suspend fun fetchMySettings(): Result<JsonObject> =
         executeHttpRequest<Unit, JsonObject>(
             endpoint = "/users/me/settings",
             method = "GET"
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<UserSettingsResponse>(json).value }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<UserSettingsResponse>(responseObject(json)).value }
 
     suspend fun updateMySettings(settings: JsonObject): Result<JsonObject> =
         executeHttpRequest(
             endpoint = "/users/me/settings",
             method = "PUT",
             requestBody = UserSettingsRequest(settings)
-        ) { json -> MboteBackendConfig.jsonParser.decodeFromString<UserSettingsResponse>(json).value }
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<UserSettingsResponse>(responseObject(json)).value }
 
     suspend fun deleteMyAccount(): Result<Boolean> =
         executeHttpRequest<Unit, Boolean>(
@@ -832,8 +832,7 @@ class MboteApiService {
                 method = "POST",
                 requestBody = request
             ) { json ->
-                MboteBackendConfig.jsonParser.decodeFromString<ForgotPasswordResponse>(json).message
-                    ?: "Si ce compte existe, un lien de réinitialisation a été envoyé."
+                responseObject(json).string("message", default = "Si ce compte existe, un code de réinitialisation a été envoyé.")
             }
     }
 
@@ -1035,6 +1034,37 @@ class MboteApiService {
         }
     }
 
+    suspend fun fetchAronQuestions(): Result<List<AronQuestion>> =
+        executeHttpRequest<Unit, List<AronQuestion>>(
+            endpoint = "/content/aron-questions",
+            method = "GET"
+        ) { json ->
+            responseArray(json).map { MboteBackendConfig.jsonParser.decodeFromJsonElement<AronQuestion>(it) }
+        }
+
+    suspend fun fetchDiscoverProfiles(): Result<List<DiscoverProfile>> =
+        executeHttpRequest<Unit, List<DiscoverProfile>>(
+            endpoint = "/users/public?limit=100",
+            method = "GET"
+        ) { json ->
+            responseArray(json).map { element ->
+                val user = MboteBackendConfig.jsonParser.decodeFromJsonElement<PublicMastaUserDto>(element)
+                DiscoverProfile(
+                    id = user.id.toString().trim('"'),
+                    name = user.name.ifBlank { user.username },
+                    age = 0,
+                    city = user.city.orEmpty(),
+                    country = user.country.orEmpty(),
+                    avatar = user.avatar.orEmpty(),
+                    bio = user.bio.orEmpty(),
+                    matchAffinity = 0,
+                    interests = emptyList(),
+                    languages = emptyList(),
+                    favoriteAronQuestion = ""
+                )
+            }
+        }
+
     /**
      * Fetch all Short videos from backend REST API
      */
@@ -1092,6 +1122,27 @@ class MboteApiService {
         ) { json -> mapShortComment(MboteBackendConfig.jsonParser.decodeFromJsonElement(responseObject(json))) }
     }
 
+    suspend fun consumeParentChildQr(qrPayload: String): Result<LinkedChildInfo> =
+        executeHttpRequest(
+            endpoint = "/parental/links/consume",
+            method = "POST",
+            requestBody = mapOf("qrPayload" to qrPayload)
+        ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<LinkedChildInfo>(responseObject(json)) }
+
+    suspend fun sendParentalSos(reason: String): Result<Unit> =
+        executeHttpRequest(
+            endpoint = "/parental/sos",
+            method = "POST",
+            requestBody = mapOf("reason" to reason)
+        ) { Unit }
+
+    suspend fun registerPushToken(token: String): Result<Unit> =
+        executeHttpRequest(
+            endpoint = "/devices/push-token",
+            method = "PUT",
+            requestBody = mapOf("token" to token)
+        ) { Unit }
+
     suspend fun confirmDesktopQrLogin(pairingToken: String): Result<Unit> =
         executeHttpRequest(
             endpoint = "/auth/qr/confirm",
@@ -1099,7 +1150,7 @@ class MboteApiService {
             requestBody = ConfirmQrLoginRequest(pairingToken)
         ) { Unit }
 
-    suspend fun createGroupApi(name: String, participantIds: List<Int>): Result<String> =
+    suspend fun createGroupApi(name: String, participantIds: List<String>): Result<String> =
         executeHttpRequest(
             endpoint = "/chats",
             method = "POST",
@@ -1108,7 +1159,7 @@ class MboteApiService {
             MboteBackendConfig.jsonParser.decodeFromString<CreatedEntityResponse>(json).id.toString().trim('"')
         }
 
-    suspend fun createDirectChatApi(participantId: Int): Result<ChatDto> =
+    suspend fun createDirectChatApi(participantId: String): Result<ChatDto> =
         executeHttpRequest(
             endpoint = "/chats",
             method = "POST",

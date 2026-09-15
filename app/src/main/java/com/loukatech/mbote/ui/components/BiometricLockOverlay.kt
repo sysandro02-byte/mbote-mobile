@@ -46,9 +46,6 @@ fun BiometricLockOverlay(
     onDismiss: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    var showPinDialog by remember { mutableStateOf(false) }
-    var pinInput by remember { mutableStateOf("") }
-    var pinError by remember { mutableStateOf(false) }
     var isAuthenticating by remember { mutableStateOf(false) }
 
     // Pulsing animation for fingerprint graphic
@@ -100,7 +97,7 @@ fun BiometricLockOverlay(
                 val promptInfo = BiometricPrompt.PromptInfo.Builder()
                     .setTitle("MBoté - Authentification Biométrique")
                     .setSubtitle("Utilisez votre empreinte digitale ou la reconnaissance faciale")
-                    .setNegativeButtonText("Code PIN de secours")
+                    .setNegativeButtonText("Annuler")
                     .build()
 
                 try {
@@ -112,10 +109,8 @@ fun BiometricLockOverlay(
             }
         }
 
-        // Fallback simulated success for emulator / devices without hardware biometric enrollment
         isAuthenticating = false
-        Toast.makeText(context, "⚡ Biométrie validée (Empreinte / Face Unlock) !", Toast.LENGTH_SHORT).show()
-        onUnlockSuccess()
+        Toast.makeText(context, "Aucune biométrie sécurisée n’est disponible sur cet appareil.", Toast.LENGTH_LONG).show()
     }
 
     Dialog(
@@ -237,7 +232,7 @@ fun BiometricLockOverlay(
                     }
 
                     OutlinedButton(
-                        onClick = { showPinDialog = true },
+                        onClick = onDismiss,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
                         shape = RoundedCornerShape(16.dp),
@@ -249,7 +244,7 @@ fun BiometricLockOverlay(
                         Icon(Icons.Default.Password, contentDescription = null, tint = Color.White)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Saisir le Code PIN de secours",
+                            text = "Revenir à la connexion",
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 14.sp
                         )
@@ -265,68 +260,4 @@ fun BiometricLockOverlay(
         }
     }
 
-    // Backup PIN Dialog
-    if (showPinDialog) {
-        AlertDialog(
-            onDismissRequest = { showPinDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Lock, contentDescription = null, tint = MbotePurplePrimary)
-                    Text("Code PIN de Secours", fontWeight = FontWeight.Bold)
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        "Saisissez votre code PIN à 4 chiffres (Code par défaut : 1234).",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = pinInput,
-                        onValueChange = {
-                            if (it.length <= 4 && it.all { char -> char.isDigit() }) {
-                                pinInput = it
-                                pinError = false
-                            }
-                        },
-                        label = { Text("Code PIN (4 chiffres)") },
-                        singleLine = true,
-                        isError = pinError,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MbotePurplePrimary),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("pin_input_field")
-                    )
-                    if (pinError) {
-                        Text("Code PIN incorrect. Réessayez (ex: 1234).", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (pinInput == "1234" || pinInput.length == 4) {
-                            Toast.makeText(context, "✅ Code PIN accepté !", Toast.LENGTH_SHORT).show()
-                            showPinDialog = false
-                            onUnlockSuccess()
-                        } else {
-                            pinError = true
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary)
-                ) {
-                    Text("Valider")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPinDialog = false }) {
-                    Text("Annuler")
-                }
-            },
-            shape = RoundedCornerShape(20.dp)
-        )
-    }
 }

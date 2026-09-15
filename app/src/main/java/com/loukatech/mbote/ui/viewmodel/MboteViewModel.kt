@@ -34,6 +34,7 @@ class MboteViewModel(
     val meetings = repository.meetings
     val jobs = repository.jobs
     val discoverProfiles = repository.discoverProfiles
+    val aronQuestions = repository.aronQuestions
     val reports = repository.reports
 
     fun submitReport(type: String, targetName: String) {
@@ -70,22 +71,7 @@ class MboteViewModel(
     val childInstalledApps: StateFlow<List<ChildInstalledApp>> = _childInstalledApps.asStateFlow()
 
     // 2) Child Panic Button / Emergency GPS Location Alert State
-    private val _childPanicAlerts = MutableStateFlow<List<ChildPanicAlert>>(listOf(
-        ChildPanicAlert(
-            alertId = "PANIC-PREV-01",
-            childId = "MB-CHILD-88392",
-            childName = "Junior Loutala",
-            timestamp = "Hier à 18:42",
-            latitude = -4.2634,
-            longitude = 15.2429,
-            address = "Avenue de l'Indépendance, Poto-Poto, Brazzaville",
-            city = "Brazzaville, Congo",
-            batteryLevel = 92,
-            emergencyType = "Trajet École - Maison Sécurisé",
-            emergencyMessage = "Notification de position GPS transmise avec succès.",
-            isResolved = true
-        )
-    ))
+    private val _childPanicAlerts = MutableStateFlow<List<ChildPanicAlert>>(emptyList())
     val childPanicAlerts: StateFlow<List<ChildPanicAlert>> = _childPanicAlerts.asStateFlow()
 
     private val _activePanicAlert = MutableStateFlow<ChildPanicAlert?>(null)
@@ -777,8 +763,7 @@ class MboteViewModel(
                 if (result.isSuccess) {
                     _activeMeetingRoom.value = result.getOrNull()
                 } else {
-                    val fallback = repository.createMeeting(title.trim(), durationMin)
-                    _activeMeetingRoom.value = fallback
+                    _publicationError.value = result.exceptionOrNull()?.message ?: "Création de la réunion impossible."
                 }
             }
         }
@@ -822,11 +807,11 @@ class MboteViewModel(
     }
 
     fun toggleJobLike(jobId: String) {
-        repository.toggleJobLike(jobId)
+        viewModelScope.launch { repository.toggleJobLike(jobId).onFailure { _publicationError.value = it.message } }
     }
 
     fun toggleJobBookmark(jobId: String) {
-        repository.toggleJobBookmark(jobId)
+        viewModelScope.launch { repository.toggleJobBookmark(jobId).onFailure { _publicationError.value = it.message } }
     }
 
     fun applyToJob(jobId: String, onComplete: (Boolean) -> Unit = {}, cvUrl: String = "") {
@@ -1281,21 +1266,11 @@ class MboteViewModel(
         repository.updateUserProfile(updated)
     }
 
-    fun sendSosAlert(parentEmail: String, reason: String): Boolean {
-        // Simulates sending push notification and Brevo transactional email to parent
-        val current = repository.userProfile.value
-        val updatedActions = current.atRiskActions.toMutableList()
-        updatedActions.add(
-            0,
-            AtRiskAction(
-                timestamp = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date()),
-                title = "🚨 ALERTE SOS ENFANT",
-                description = "Signalement de détresse / contenu inapproprié envoyé à $parentEmail via Brevo & Push. Raison : $reason",
-                severity = RiskSeverity.HIGH
-            )
-        )
-        repository.updateUserProfile(current.copy(atRiskActions = updatedActions))
-        return true
+    fun sendSosAlert(parentEmail: String, reason: String) {
+        viewModelScope.launch {
+            repository.apiService.sendParentalSos(reason)
+                .onFailure { _publicationError.value = it.message ?: "Alerte SOS non transmise." }
+        }
     }
 
     fun checkAndEnforceQuota(): Boolean {
@@ -1340,58 +1315,26 @@ class MboteViewModel(
         viewModelScope.launch {
             _parentChildLinkState.value = ParentChildLinkState.Verifying(
                 qrPayload = qrPayload,
-                progress = 0.25f,
-                statusMessage = "Analyse du QR code et lecture du jeton de sécurité..."
+                progress = 0.5f,
+                statusMessage = "Vérification sécurisée du jeton par le serveur MBoté..."
             )
-            delay(500)
-
-            _parentChildLinkState.value = ParentChildLinkState.Verifying(
-                qrPayload = qrPayload,
-                progress = 0.65f,
-                statusMessage = "Échange de clés RSA-2048 & vérification du compte enfant..."
-            )
-            delay(600)
-
-            _parentChildLinkState.value = ParentChildLinkState.Verifying(
-                qrPayload = qrPayload,
-                progress = 0.90f,
-                statusMessage = "Association du canal d'urgence SOS Brevo & Quota 2h..."
-            )
-            delay(400)
-
-            // Extract child info if present or use default child account
-            val childInfo = LinkedChildInfo(
-                id = if (qrPayload.contains("id=")) qrPayload.substringAfter("id=").substringBefore("&") else "MB-CHILD-88392",
-                name = if (qrPayload.contains("name=")) qrPayload.substringAfter("name=").substringBefore("&") else "Junior Loutala",
-                username = "@junior_lt",
-                avatar = "https://images.unsplash.com/photo-1543610892-0b1f7e6d8ac1?w=150&auto=format&fit=crop&q=80",
-                age = 13,
-                schoolName = "Lycée d'Excellence de Brazzaville",
-                deviceModel = "Samsung Galaxy A15 (Android 14)",
-                batteryLevel = 88,
-                isOnline = true,
-                lastActive = "À l'instant",
-                linkToken = qrPayload.ifBlank { "MBOTE-LINK-QR-9941-XYZ" }
-            )
-
-            _linkedChildInfo.value = childInfo
-
-            val now = java.text.SimpleDateFormat("dd/MM/yyyy à HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
-            val successState = ParentChildLinkState.Success(
-                childProfile = childInfo,
-                linkedAt = now
-            )
-            _parentChildLinkState.value = successState
-
-            // Update user profile to mark child account linked
-            val current = repository.userProfile.value
-            val updated = current.copy(
-                isChildAccountLinkedByQrScan = true,
-                parentalControlActive = true
-            )
-            repository.updateUserProfile(updated)
-
-            onComplete?.invoke(true)
+            repository.apiService.consumeParentChildQr(qrPayload)
+                .onSuccess { childInfo ->
+                    _linkedChildInfo.value = childInfo
+                    _parentChildLinkState.value = ParentChildLinkState.Success(
+                        childProfile = childInfo,
+                        linkedAt = java.text.SimpleDateFormat("dd/MM/yyyy à HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+                    )
+                    repository.updateUserProfile(repository.userProfile.value.copy(
+                        isChildAccountLinkedByQrScan = true,
+                        parentalControlActive = true
+                    ))
+                    onComplete?.invoke(true)
+                }
+                .onFailure { error ->
+                    _parentChildLinkState.value = ParentChildLinkState.Error(error.message ?: "Liaison enfant impossible.")
+                    onComplete?.invoke(false)
+                }
         }
     }
 

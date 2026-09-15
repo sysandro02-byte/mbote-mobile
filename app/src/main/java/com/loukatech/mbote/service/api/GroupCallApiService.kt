@@ -1,6 +1,5 @@
 package com.loukatech.mbote.service.api
 
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -20,7 +19,7 @@ data class CallParticipantDto(
     val isVideoOff: Boolean = false,
     val isHost: Boolean = false,
     val isScreenSharing: Boolean = false,
-    val audioVolumeLevel: Float = 0.8f
+    val audioVolumeLevel: Float = 0f
 )
 
 @Serializable
@@ -30,9 +29,9 @@ data class GroupCallSessionDto(
     val isVideoCall: Boolean = true,
     val hostUserId: String,
     val participants: List<CallParticipantDto> = emptyList(),
-    val connectionQuality: String = "EXCELLENT_1080P",
-    val encryptionStandard: String = "AES-GCM-256 (WebRTC E2EE)",
-    val createdAtTimestamp: Long = System.currentTimeMillis()
+    val connectionQuality: String = "SERVER_CONNECTED",
+    val encryptionStandard: String = "WebRTC E2EE",
+    val createdAtTimestamp: Long = 0L
 )
 
 @Serializable
@@ -52,189 +51,56 @@ data class ParticipantStateUpdateRequest(
 )
 
 class GroupCallApiService {
-    private val tag = "GroupCallApiService"
-
-    /**
-     * Create New Group Call Room API
-     */
-    suspend fun createGroupCall(request: CreateGroupCallRequest): Result<GroupCallSessionDto> = withContext(Dispatchers.IO) {
+    private suspend inline fun <reified Request, reified Response> request(
+        endpoint: String,
+        method: String,
+        body: Request? = null
+    ): Result<Response> = withContext(Dispatchers.IO) {
+        val token = MboteBackendConfig.authToken?.takeIf(String::isNotBlank)
+            ?: return@withContext Result.failure(IllegalStateException("Session MBoté requise."))
+        var connection: HttpURLConnection? = null
         try {
-            val endpoint = "${MboteBackendConfig.baseUrl}/calls/group/create"
-            val url = URL(endpoint)
-            val connection = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 6000
-                readTimeout = 6000
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            connection = (URL("${MboteBackendConfig.baseUrl}$endpoint").openConnection() as HttpURLConnection).apply {
+                requestMethod = method
+                connectTimeout = 8_000
+                readTimeout = 12_000
                 setRequestProperty("Accept", "application/json")
-                MboteBackendConfig.authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
+                setRequestProperty("Authorization", "Bearer $token")
+                if (body != null) {
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+                }
             }
-
-            val jsonBody = MboteBackendConfig.jsonParser.encodeToString(request)
-            OutputStreamWriter(connection.outputStream, "UTF-8").use {
-                it.write(jsonBody)
-                it.flush()
+            if (body != null) {
+                OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use {
+                    it.write(MboteBackendConfig.jsonParser.encodeToString(body))
+                }
             }
-
-            val responseCode = connection.responseCode
-            if (responseCode in 200..299) {
-                val responseText = BufferedReader(InputStreamReader(connection.inputStream, "UTF-8")).use { it.readText() }
-                val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<GroupCallSessionDto>>(responseText)
-                Result.success(response.data!!)
-            } else {
-                Log.w(tag, "Group Call API HTTP $responseCode. Using active production room session.")
-                Result.success(createLocalGroupCallSession(request))
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val responseText = stream?.let { BufferedReader(InputStreamReader(it, Charsets.UTF_8)).use(BufferedReader::readText) }.orEmpty()
+            if (code !in 200..299) {
+                return@withContext Result.failure(IllegalStateException("Erreur serveur ($code)"))
             }
-        } catch (e: Exception) {
-            Log.d(tag, "Group Call API info: ${e.message}. Launching real local call mesh session.")
-            Result.success(createLocalGroupCallSession(request))
+            val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<Response>>(responseText)
+            response.data?.let(Result.Companion::success)
+                ?: Result.failure(IllegalStateException("Réponse serveur incomplète"))
+        } catch (error: Exception) {
+            Result.failure(error)
+        } finally {
+            connection?.disconnect()
         }
     }
 
-    /**
-     * Join Existing Group Call Room by Code API
-     */
-    suspend fun joinGroupCall(roomCode: String): Result<GroupCallSessionDto> = withContext(Dispatchers.IO) {
-        try {
-            val endpoint = "${MboteBackendConfig.baseUrl}/calls/group/join/$roomCode"
-            val url = URL(endpoint)
-            val connection = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 6000
-                readTimeout = 6000
-                MboteBackendConfig.authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
-            }
+    suspend fun createGroupCall(request: CreateGroupCallRequest): Result<GroupCallSessionDto> =
+        request("/calls/group/create", "POST", request)
 
-            val responseCode = connection.responseCode
-            if (responseCode in 200..299) {
-                val responseText = BufferedReader(InputStreamReader(connection.inputStream, "UTF-8")).use { it.readText() }
-                val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<GroupCallSessionDto>>(responseText)
-                Result.success(response.data!!)
-            } else {
-                Result.success(getJoinedGroupCallSession(roomCode))
-            }
-        } catch (e: Exception) {
-            Result.success(getJoinedGroupCallSession(roomCode))
-        }
-    }
+    suspend fun joinGroupCall(roomCode: String): Result<GroupCallSessionDto> =
+        request<Unit, GroupCallSessionDto>("/calls/group/join/${roomCode.trim()}", "POST")
 
-    /**
-     * Update Live Audio/Video Participant State API
-     */
-    suspend fun updateParticipantState(request: ParticipantStateUpdateRequest): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val endpoint = "${MboteBackendConfig.baseUrl}/calls/group/update-state"
-            val url = URL(endpoint)
-            val connection = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "PUT"
-                connectTimeout = 5000
-                readTimeout = 5000
-                doOutput = true
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                MboteBackendConfig.authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
-            }
+    suspend fun updateParticipantState(request: ParticipantStateUpdateRequest): Result<Boolean> =
+        request("/calls/group/update-state", "PUT", request)
 
-            val jsonBody = MboteBackendConfig.jsonParser.encodeToString(request)
-            OutputStreamWriter(connection.outputStream, "UTF-8").use {
-                it.write(jsonBody)
-                it.flush()
-            }
-            connection.responseCode
-            Result.success(true)
-        } catch (e: Exception) {
-            Result.success(true)
-        }
-    }
-
-    /**
-     * Leave or End Group Call Session API
-     */
-    suspend fun leaveGroupCall(roomCode: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val endpoint = "${MboteBackendConfig.baseUrl}/calls/group/leave/$roomCode"
-            val url = URL(endpoint)
-            val connection = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                connectTimeout = 5000
-                readTimeout = 5000
-                MboteBackendConfig.authToken?.let { setRequestProperty("Authorization", "Bearer $it") }
-            }
-            connection.responseCode
-            Result.success(true)
-        } catch (e: Exception) {
-            Result.success(true)
-        }
-    }
-
-    private fun createLocalGroupCallSession(request: CreateGroupCallRequest): GroupCallSessionDto {
-        val code = (100000..999999).random().toString()
-        val participants = mutableListOf(
-            CallParticipantDto(
-                id = "user_me",
-                name = "Moi (Organisateur)",
-                avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                isHost = true,
-                isMuted = false,
-                isVideoOff = !request.isVideoCall
-            ),
-            CallParticipantDto(
-                id = "p_1",
-                name = "Grace Makiese",
-                avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                isMuted = false,
-                isVideoOff = false
-            ),
-            CallParticipantDto(
-                id = "p_2",
-                name = "Yannick Nguesso",
-                avatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-                isMuted = true,
-                isVideoOff = false
-            ),
-            CallParticipantDto(
-                id = "p_3",
-                name = "Sarah Mabiala",
-                avatar = "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
-                isMuted = false,
-                isVideoOff = true
-            )
-        )
-
-        return GroupCallSessionDto(
-            roomCode = code,
-            roomTitle = request.roomTitle.ifEmpty { "Visioconférence Groupe MBoté" },
-            isVideoCall = request.isVideoCall,
-            hostUserId = "user_me",
-            participants = participants
-        )
-    }
-
-    private fun getJoinedGroupCallSession(roomCode: String): GroupCallSessionDto {
-        return GroupCallSessionDto(
-            roomCode = roomCode,
-            roomTitle = "Réunion Visioconférence HD #$roomCode",
-            isVideoCall = true,
-            hostUserId = "p_1",
-            participants = listOf(
-                CallParticipantDto(
-                    id = "user_me",
-                    name = "Moi",
-                    avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                    isHost = false
-                ),
-                CallParticipantDto(
-                    id = "p_1",
-                    name = "Grace Makiese (Hôte)",
-                    avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                    isHost = true
-                ),
-                CallParticipantDto(
-                    id = "p_2",
-                    name = "Yannick Nguesso",
-                    avatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"
-                )
-            )
-        )
-    }
+    suspend fun leaveGroupCall(roomCode: String): Result<Boolean> =
+        request<Unit, Boolean>("/calls/group/leave/${roomCode.trim()}", "POST")
 }
