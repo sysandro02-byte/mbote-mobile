@@ -57,7 +57,7 @@ fun ParentalControlDialog(
         schoolHours: Boolean,
         isChildLinked: Boolean
     ) -> Unit,
-    onSendSosAlert: (String, String) -> Boolean = { _, _ -> true },
+    onSendSosAlert: (String, String) -> Unit = { _, _ -> },
     onUnlockPremium: () -> Unit = {},
     onOpenPremiumScreen: () -> Unit = {},
     linkedChild: LinkedChildInfo = LinkedChildInfo(),
