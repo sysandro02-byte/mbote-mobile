@@ -37,6 +37,21 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_password_reset_expiry ON password_reset_tokens(expires_at);
 
+-- Authentication challenges used by real registration and login OTP flows.
+CREATE TABLE IF NOT EXISTS auth_challenges (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    flow VARCHAR(20) NOT NULL CHECK (flow IN ('LOGIN', 'REGISTER')),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    email VARCHAR(255) NOT NULL,
+    code_hash CHAR(64) NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    attempts SMALLINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_auth_challenges_expiry ON auth_challenges(expires_at);
+CREATE INDEX IF NOT EXISTS idx_auth_challenges_email_flow ON auth_challenges(email, flow);
+
 -- 2. CHATS & CONVERSATIONS
 CREATE TABLE IF NOT EXISTS chats (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
