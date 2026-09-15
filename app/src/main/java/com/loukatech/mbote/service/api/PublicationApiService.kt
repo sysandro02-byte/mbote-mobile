@@ -139,7 +139,7 @@ class PublicationApiService {
 
     suspend fun createJob(fields: Map<String, String>): Result<JobOffer> =
         request("/jobs", "POST", fields).mapCatching { payload ->
-            val root = MboteBackendConfig.jsonParser.parseToJsonElement(payload).jsonObject
+            val root = responseObject(payload)
             MboteBackendConfig.jsonParser.decodeFromJsonElement<JobDto>(root.getValue("job")).toOffer()
         }
 
@@ -228,6 +228,11 @@ class PublicationApiService {
         }
     }
 
+    private fun responseObject(payload: String): JsonObject {
+        val root = MboteBackendConfig.jsonParser.parseToJsonElement(payload).jsonObject
+        return (root["data"] as? JsonObject) ?: root
+    }
+
     private fun responseArray(payload: String, vararg keys: String): JsonArray {
         val root = MboteBackendConfig.jsonParser.parseToJsonElement(payload)
         if (root is JsonArray) return root
@@ -252,7 +257,9 @@ class PublicationApiService {
         }
 
     suspend fun createActusPost(request: CreateActusPostRequest): Result<NewsPost> =
-        request("/actus/posts", "POST", request).mapCatching { mapActus(MboteBackendConfig.jsonParser.decodeFromString(it)) }
+        request("/actus/posts", "POST", request).mapCatching {
+            mapActus(MboteBackendConfig.jsonParser.decodeFromJsonElement(responseObject(it)))
+        }
 
     suspend fun reactToActusPost(postId: String, reaction: String): Result<Unit> =
         request("/actus/posts/$postId/reactions", "POST", ReactionRequest(reaction)).map { Unit }
@@ -276,7 +283,7 @@ class PublicationApiService {
 
     suspend fun shareActusPost(postId: String): Result<Int> =
         request("/actus/posts/$postId/shares", "POST", emptyMap<String, String>()).mapCatching {
-            MboteBackendConfig.jsonParser.decodeFromString<PublicationShareResponse>(it).shareCount
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<PublicationShareResponse>(responseObject(it)).shareCount
         }
 
     suspend fun fetchStatuses(currentUserId: String): Result<List<StatusItem>> = request<Unit>("/status")
@@ -288,7 +295,7 @@ class PublicationApiService {
 
     suspend fun createStatus(request: CreateStatusRequest, currentUserId: String): Result<StatusItem> =
         this.request("/status/publications", "POST", request).mapCatching {
-            mapStatus(MboteBackendConfig.jsonParser.decodeFromString(it), currentUserId)
+            mapStatus(MboteBackendConfig.jsonParser.decodeFromJsonElement(responseObject(it)), currentUserId)
         }
 
     suspend fun markStatusViewed(statusId: String): Result<Unit> =
