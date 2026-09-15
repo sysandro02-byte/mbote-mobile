@@ -70,22 +70,7 @@ class MboteViewModel(
     val childInstalledApps: StateFlow<List<ChildInstalledApp>> = _childInstalledApps.asStateFlow()
 
     // 2) Child Panic Button / Emergency GPS Location Alert State
-    private val _childPanicAlerts = MutableStateFlow<List<ChildPanicAlert>>(listOf(
-        ChildPanicAlert(
-            alertId = "PANIC-PREV-01",
-            childId = "MB-CHILD-88392",
-            childName = "Junior Loutala",
-            timestamp = "Hier à 18:42",
-            latitude = -4.2634,
-            longitude = 15.2429,
-            address = "Avenue de l'Indépendance, Poto-Poto, Brazzaville",
-            city = "Brazzaville, Congo",
-            batteryLevel = 92,
-            emergencyType = "Trajet École - Maison Sécurisé",
-            emergencyMessage = "Notification de position GPS transmise avec succès.",
-            isResolved = true
-        )
-    ))
+    private val _childPanicAlerts = MutableStateFlow<List<ChildPanicAlert>>(emptyList())
     val childPanicAlerts: StateFlow<List<ChildPanicAlert>> = _childPanicAlerts.asStateFlow()
 
     private val _activePanicAlert = MutableStateFlow<ChildPanicAlert?>(null)
