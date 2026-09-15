@@ -1034,6 +1034,14 @@ class MboteApiService {
         }
     }
 
+    suspend fun fetchAronQuestions(): Result<List<AronQuestion>> =
+        executeHttpRequest<Unit, List<AronQuestion>>(
+            endpoint = "/content/aron-questions",
+            method = "GET"
+        ) { json ->
+            responseArray(json).map { MboteBackendConfig.jsonParser.decodeFromJsonElement<AronQuestion>(it) }
+        }
+
     suspend fun fetchDiscoverProfiles(): Result<List<DiscoverProfile>> =
         executeHttpRequest<Unit, List<DiscoverProfile>>(
             endpoint = "/users/public?limit=100",
