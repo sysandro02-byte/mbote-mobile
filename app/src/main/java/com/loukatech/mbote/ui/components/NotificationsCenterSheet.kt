@@ -33,6 +33,7 @@ import com.loukatech.mbote.model.MboteNotification
 import com.loukatech.mbote.model.NotificationType
 import com.loukatech.mbote.ui.theme.PurplePrimary
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotificationsCenterSheet(
     notifications: List<MboteNotification>,
@@ -40,433 +41,65 @@ fun NotificationsCenterSheet(
     onNotificationClick: (MboteNotification) -> Unit,
     onMarkAllRead: () -> Unit,
     onClearAll: () -> Unit,
-    onSimulateFcmPush: (type: NotificationType) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     var selectedFilter by remember { mutableStateOf("Toutes") }
-    var showSimulateMenu by remember { mutableStateOf(false) }
-    var showWidgetCard by remember { mutableStateOf(true) }
-    var isSimulatingOffline by remember { mutableStateOf(false) }
-
-    val defaultRichNotifications = remember(notifications) {
-        if (notifications.size < 4) {
-            listOf(
-                MboteNotification(
-                    id = "notif_loukatech_views",
-                    type = NotificationType.SYSTEM,
-                    title = "LoukaTech",
-                    body = "a 18 nouvelles vues sur ses publications.",
-                    timestamp = "7 j",
-                    isRead = false,
-                    senderAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
-                    actionText = "LoukaTech"
-                ),
-                MboteNotification(
-                    id = "notif_followers_mbot",
-                    type = NotificationType.JOB_APPLICATION,
-                    title = "Mwamba Toto et Silas Sass",
-                    body = "vous suivent à présent sur MBoté.",
-                    timestamp = "21 j",
-                    isRead = false,
-                    senderAvatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150",
-                    actionText = "LoukaTech"
-                ),
-                MboteNotification(
-                    id = "notif_security_alert",
-                    type = NotificationType.SYSTEM,
-                    title = "Sécurité MBoté",
-                    body = "Nous avons détecté une nouvelle connexion depuis un appareil à Brazzaville.",
-                    timestamp = "3 j",
-                    isRead = true,
-                    senderAvatar = null,
-                    actionText = "Vérifier l'appareil"
-                ),
-                MboteNotification(
-                    id = "notif_comment_like",
-                    type = NotificationType.VIDEO_LIKE,
-                    title = "Hevecel Freud",
-                    body = "aime votre commentaire : « Testez MBoté HD Voice... »",
-                    timestamp = "2 j",
-                    isRead = true,
-                    senderAvatar = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150",
-                    actionText = "MBoté Feed"
-                ),
-                MboteNotification(
-                    id = "notif_mention_pub",
-                    type = NotificationType.MESSAGE,
-                    title = "BS GABON",
-                    body = "a mentionné votre nom et celui d'autres abonnés dans une publication.",
-                    timestamp = "19 j",
-                    isRead = true,
-                    senderAvatar = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150",
-                    actionText = "OSE-K SARL"
-                )
-            ) + notifications
-        } else {
-            notifications
-        }
-    }
-
-    val filteredNotifications = remember(defaultRichNotifications, selectedFilter) {
+    val filteredNotifications = remember(notifications, selectedFilter) {
         when (selectedFilter) {
-            "Messages" -> defaultRichNotifications.filter { it.type == NotificationType.MESSAGE }
-            "Emplois" -> defaultRichNotifications.filter { it.type == NotificationType.JOB_APPLICATION }
-            "Likes & Reels" -> defaultRichNotifications.filter { it.type == NotificationType.VIDEO_LIKE }
-            else -> defaultRichNotifications
+            "Messages" -> notifications.filter { it.type == NotificationType.MESSAGE }
+            "Emplois" -> notifications.filter { it.type == NotificationType.JOB_APPLICATION }
+            "Likes & Reels" -> notifications.filter { it.type == NotificationType.VIDEO_LIKE }
+            else -> notifications
         }
     }
-
-    val recentNotifications = remember(filteredNotifications) {
-        filteredNotifications.filter { !it.isRead || it.timestamp.contains("h") || it.timestamp.contains("j") && it.timestamp.takeWhile { c -> c.isDigit() }.toIntOrNull() ?: 10 < 10 }
-    }
-
-    val olderNotifications = remember(filteredNotifications, recentNotifications) {
-        filteredNotifications.filter { !recentNotifications.contains(it) }
-    }
-
-    val unreadCount = remember(defaultRichNotifications) { defaultRichNotifications.count { !it.isRead } }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = Color(0xFFF0F6FF), // Soft clean blue background matching Facebook/social reference
-            tonalElevation = 6.dp,
-            modifier = modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.94f)
-                .padding(4.dp)
-                .testTag("notifications_center_sheet")
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        modifier = modifier,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.92f).padding(horizontal = 16.dp)
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(bottom = if (isSimulatingOffline) 52.dp else 0.dp)
-                ) {
-                    // Header Bar (Large Title Notifications + Search Icon + Menu + Close)
-                    Surface(
-                        color = Color.White,
-                        tonalElevation = 2.dp,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    IconButton(
-                                        onClick = onDismiss,
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Menu,
-                                            contentDescription = "Menu",
-                                            tint = Color(0xFF0F172A)
-                                        )
-                                    }
-
-                                    Text(
-                                        text = "Notifications",
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF0F172A)
-                                    )
-
-                                    if (unreadCount > 0) {
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = Color(0xFFEF4444)
-                                        ) {
-                                            Text(
-                                                text = unreadCount.toString(),
-                                                color = Color.White,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    IconButton(
-                                        onClick = {
-                                            isSimulatingOffline = !isSimulatingOffline
-                                        },
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Outlined.Search,
-                                            contentDescription = "Rechercher",
-                                            tint = Color(0xFF0F172A)
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = onDismiss,
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .testTag("close_notifications")
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Close,
-                                            contentDescription = "Fermer",
-                                            tint = Color(0xFF64748B)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            // Action pills & Push FCM Test Button
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Surface(
-                                        shape = RoundedCornerShape(20.dp),
-                                        color = Color(0xFFEFF6FF),
-                                        modifier = Modifier.clickable { onMarkAllRead() }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(Icons.Outlined.DoneAll, contentDescription = null, tint = PurplePrimary, modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Tout marquer lue", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = PurplePrimary)
-                                        }
-                                    }
-
-                                    Surface(
-                                        shape = RoundedCornerShape(20.dp),
-                                        color = Color(0xFFFEF2F2),
-                                        modifier = Modifier.clickable { onClearAll() }
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(Icons.Outlined.DeleteSweep, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Effacer", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
-                                        }
-                                    }
-                                }
-
-                                Box {
-                                    Surface(
-                                        shape = RoundedCornerShape(20.dp),
-                                        color = PurplePrimary,
-                                        modifier = Modifier
-                                            .clickable { showSimulateMenu = true }
-                                            .testTag("simulate_fcm_button")
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(Icons.Outlined.NotificationsActive, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Test Push", fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                        }
-                                    }
-
-                                    DropdownMenu(
-                                        expanded = showSimulateMenu,
-                                        onDismissRequest = { showSimulateMenu = false }
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("💬 Push Message MBoté") },
-                                            onClick = {
-                                                showSimulateMenu = false
-                                                onSimulateFcmPush(NotificationType.MESSAGE)
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("💼 Push Opportunité Emploi") },
-                                            onClick = {
-                                                showSimulateMenu = false
-                                                onSimulateFcmPush(NotificationType.JOB_APPLICATION)
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("❤️ Push Interaction Reel") },
-                                            onClick = {
-                                                showSimulateMenu = false
-                                                onSimulateFcmPush(NotificationType.VIDEO_LIKE)
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Main Notification Feed
-                    LazyColumn(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(top = 10.dp, bottom = 16.dp)
-                    ) {
-                        // Section: Nouveau
-                        item {
-                            Text(
-                                text = "Nouveau",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color(0xFF0F172A),
-                                modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp)
-                            )
-                        }
-
-                        items(recentNotifications.ifEmpty { defaultRichNotifications.take(2) }, key = { "recent_${it.id}" }) { notif ->
-                            NotificationItemRowRefined(
-                                notification = notif,
-                                onClick = { onNotificationClick(notif) }
-                            )
-                        }
-
-                        // Embedded Feature / Promo Card ("Soyez informé(e) plus vite") matching image 1
-                        if (showWidgetCard) {
-                            item {
-                                Surface(
-                                    shape = RoundedCornerShape(18.dp),
-                                    color = Color.White,
-                                    border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                                    shadowElevation = 2.dp,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp)
-                                ) {
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(16.dp)
-                                    ) {
-                                        Text(
-                                            text = "Soyez informé(e) plus vite",
-                                            fontSize = 17.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF0F172A)
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            text = "Nouveau ! Vous pouvez suivre vos appels VoIP HD, alertes Caller ID IA et actualités MBoté directement sur votre écran d'accueil avec le widget MBoté.",
-                                            fontSize = 13.sp,
-                                            color = Color(0xFF334155),
-                                            lineHeight = 18.sp
-                                        )
-                                        Spacer(modifier = Modifier.height(14.dp))
-                                        
-                                        // Blue primary button
-                                        Button(
-                                            onClick = {
-                                                android.widget.Toast.makeText(context, "Widget MBoté ajouté à l'écran d'accueil !", android.widget.Toast.LENGTH_SHORT).show()
-                                                showWidgetCard = false
-                                            },
-                                            shape = RoundedCornerShape(12.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(42.dp)
-                                        ) {
-                                            Text("Ajouter le widget", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                        
-                                        Spacer(modifier = Modifier.height(8.dp))
-
-                                        // Gray secondary button
-                                        Button(
-                                            onClick = { showWidgetCard = false },
-                                            shape = RoundedCornerShape(12.dp),
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE2E8F0), contentColor = Color(0xFF1E293B)),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(42.dp)
-                                        ) {
-                                            Text("Plus tard", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Section: Plus ancien
-                        if (olderNotifications.isNotEmpty() || recentNotifications.isNotEmpty()) {
-                            item {
-                                Text(
-                                    text = "Plus ancien",
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color(0xFF0F172A),
-                                    modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 2.dp)
-                                )
-                            }
-
-                            items(olderNotifications.ifEmpty { defaultRichNotifications.drop(2) }, key = { "older_${it.id}" }) { notif ->
-                                NotificationItemRowRefined(
-                                    notification = notif,
-                                    onClick = { onNotificationClick(notif) }
-                                )
-                            }
-                        }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Notifications", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                IconButton(onClick = onDismiss, modifier = Modifier.testTag("close_notifications")) {
+                    Icon(Icons.Default.Close, contentDescription = "Fermer")
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Toutes", "Messages", "Emplois", "Likes & Reels").forEach { filter ->
+                    FilterChip(
+                        selected = selectedFilter == filter,
+                        onClick = { selectedFilter = filter },
+                        label = { Text(filter) }
+                    )
+                }
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onMarkAllRead) { Text("Tout marquer comme lu") }
+                TextButton(onClick = onClearAll) { Text("Effacer") }
+            }
+            if (filteredNotifications.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Outlined.NotificationsNone, contentDescription = null, modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(12.dp))
+                        Text("Aucune notification", fontWeight = FontWeight.SemiBold)
+                        Text("Les notifications reçues du serveur apparaîtront ici.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-
-                // Offline Network Notice Bar matching image 1
-                if (isSimulatingOffline) {
-                    Surface(
-                        color = Color(0xFF1E293B),
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = "Connexion impossible actuellement.",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            TextButton(
-                                onClick = { isSimulatingOffline = false },
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Text(
-                                    text = "RÉESSAYER",
-                                    color = Color(0xFF3B82F6),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                            }
-                        }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(vertical = 12.dp)
+                ) {
+                    items(filteredNotifications, key = { it.id }) { notification ->
+                        NotificationItemRowRefined(notification = notification, onClick = { onNotificationClick(notification) })
                     }
                 }
             }
