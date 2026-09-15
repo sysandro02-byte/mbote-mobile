@@ -41,7 +41,7 @@ jobs:
         run: npm test
 
   android:
-    name: Android lint, tests and production-connected APK
+    name: Android lint, tests and verified production-connected APK
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env: &android-test-env
@@ -71,12 +71,44 @@ jobs:
           test "$MBOTE_API_BASE_URL" = "https://mbote-backend.onrender.com/v1"
           test "$VITE_SOCKET_URL" = "https://mbote-backend.onrender.com"
           ! printf '%s\n%s\n' "$MBOTE_API_BASE_URL" "$VITE_SOCKET_URL" | grep -q 'example.invalid'
-      - name: Compile and build debug APK
+      - name: Build installable debug APK
         run: gradle --no-daemon --max-workers=2 --stacktrace clean assembleDebug
       - name: Run Android unit tests
         run: gradle --no-daemon --max-workers=2 --stacktrace testDebugUnitTest
       - name: Run Android lint
         run: gradle --no-daemon --max-workers=2 --stacktrace lintDebug
+      - name: Locate Android SDK build tools
+        id: android-tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          test -x "$BUILD_TOOLS/apksigner"
+          test -x "$BUILD_TOOLS/aapt"
+          echo "build_tools=$BUILD_TOOLS" >> "$GITHUB_OUTPUT"
+      - name: Verify APK signature and package
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          TOOLS="${{ steps.android-tools.outputs.build_tools }}"
+          test -s "$APK"
+          "$TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          BADGING="$($TOOLS/aapt dump badging "$APK")"
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "package: name='com.aistudio.mbote.krtwvx.debug'"
+          echo "$BADGING" | grep -q "sdkVersion:'26'"
+          echo "$BADGING" > app/build/outputs/apk/debug/mbote-apk-info.txt
+          sha256sum "$APK" > app/build/outputs/apk/debug/mbote-apk-sha256.txt
+      - name: Prepare test APK artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/build/test-apk
+          cp app/build/outputs/apk/debug/app-debug.apk app/build/test-apk/MBote-test.apk
+          cp app/build/outputs/apk/debug/mbote-apk-info.txt app/build/test-apk/
+          cp app/build/outputs/apk/debug/mbote-apk-sha256.txt app/build/test-apk/
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -86,11 +118,22 @@ jobs:
             app/build/reports/
             app/build/test-results/
           if-no-files-found: ignore
-      - name: Upload production-connected debug APK
-        if: success()
+      - name: Upload branch APK
+        if: github.ref != 'refs/heads/main' && success()
         uses: actions/upload-artifact@v4
         with:
           name: mbote-production-test-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/debug/mbote-apk-info.txt
+            app/build/outputs/apk/debug/mbote-apk-sha256.txt
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish verified installable test APK
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mbote-installable-test-apk
+          path: app/build/test-apk/
           if-no-files-found: error
           retention-days: 30
