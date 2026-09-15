@@ -23,7 +23,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.loukatech.mbote.data.AronQuestionsData
 import com.loukatech.mbote.model.AronQuestion
 import com.loukatech.mbote.ui.theme.MbotePurpleLight
 import com.loukatech.mbote.ui.theme.MbotePurplePrimary
@@ -32,17 +31,18 @@ import com.loukatech.mbote.ui.theme.MbotePurpleSoft
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AronQuestionsSheet(
+    questions: List<AronQuestion>,
     onDismiss: () -> Unit,
     onSelectQuestion: (AronQuestion) -> Unit,
     onStartEyeContactExercise: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var selectedSet by remember { mutableIntStateOf(0) } // 0 = Tous, 1, 2, 3
-    var featuredQuestion by remember { mutableStateOf(AronQuestionsData.getRandomQuestion()) }
+    var featuredQuestion by remember(questions) { mutableStateOf(questions.randomOrNull()) }
 
-    val filteredQuestions = remember(selectedSet) {
-        if (selectedSet == 0) AronQuestionsData.allQuestions
-        else AronQuestionsData.allQuestions.filter { it.setNumber == selectedSet }
+    val filteredQuestions = remember(questions, selectedSet) {
+        if (selectedSet == 0) questions
+        else questions.filter { it.setNumber == selectedSet }
     }
 
     ModalBottomSheet(
@@ -143,8 +143,7 @@ fun AronQuestionsSheet(
 
                         IconButton(
                             onClick = {
-                                featuredQuestion = AronQuestionsData.getRandomQuestion(
-                                    if (selectedSet == 0) null else selectedSet
+                                featuredQuestion = filteredQuestions.randomOrNull() null else selectedSet
                                 )
                             },
                             modifier = Modifier.size(32.dp)
