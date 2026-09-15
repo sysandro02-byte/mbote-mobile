@@ -316,3 +316,130 @@ CREATE INDEX IF NOT EXISTS idx_user_follows_followed ON user_follows(followed_id
 CREATE INDEX IF NOT EXISTS idx_short_views_video ON short_video_views(short_video_id);
 CREATE INDEX IF NOT EXISTS idx_short_shares_video ON short_video_shares(short_video_id);
 
+
+
+-- 11. REAL-TIME COLLABORATION AND INTERACTION STATE
+CREATE TABLE IF NOT EXISTS message_reactions (
+    message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    emoji VARCHAR(16) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (message_id, user_id, emoji)
+);
+
+CREATE TABLE IF NOT EXISTS chat_reads (
+    chat_id UUID REFERENCES chats(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    last_read_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (chat_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS channel_profiles (
+    chat_id UUID PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+    description TEXT NOT NULL DEFAULT '',
+    slug VARCHAR(120) UNIQUE NOT NULL,
+    privacy VARCHAR(20) NOT NULL DEFAULT 'public',
+    category VARCHAR(100),
+    banner_url TEXT
+);
+
+CREATE TABLE IF NOT EXISTS channel_subscriptions (
+    channel_id UUID REFERENCES chats(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (channel_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS status_reactions (
+    status_id UUID REFERENCES statuses(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    emoji VARCHAR(16) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (status_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS status_comments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    status_id UUID REFERENCES statuses(id) ON DELETE CASCADE,
+    author_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS status_shares (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    status_id UUID REFERENCES statuses(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS news_post_shares (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    news_post_id UUID REFERENCES news_posts(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS job_applications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    job_id UUID REFERENCES job_offers(id) ON DELETE CASCADE,
+    applicant_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    cv_url TEXT,
+    status VARCHAR(30) NOT NULL DEFAULT 'SUBMITTED',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE (job_id, applicant_id)
+);
+
+CREATE TABLE IF NOT EXISTS group_call_sessions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    room_code VARCHAR(32) UNIQUE NOT NULL,
+    host_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    is_video BOOLEAN NOT NULL DEFAULT TRUE,
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    ended_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE TABLE IF NOT EXISTS group_call_participants (
+    session_id UUID REFERENCES group_call_sessions(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    audio_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    video_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    screen_sharing BOOLEAN NOT NULL DEFAULT FALSE,
+    joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    left_at TIMESTAMP WITH TIME ZONE,
+    PRIMARY KEY (session_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS device_push_tokens (
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL,
+    platform VARCHAR(20) NOT NULL DEFAULT 'android',
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (user_id, token)
+);
+
+CREATE TABLE IF NOT EXISTS payment_intents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(50) NOT NULL,
+    provider_reference VARCHAR(255),
+    amount_fcfa BIGINT NOT NULL CHECK (amount_fcfa > 0),
+    phone VARCHAR(50) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS app_content (
+    content_key VARCHAR(120) PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_reactions_message ON message_reactions(message_id);
+CREATE INDEX IF NOT EXISTS idx_channel_subscriptions_user ON channel_subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_status_comments_status ON status_comments(status_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_job_applications_user ON job_applications(applicant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_group_calls_status ON group_call_sessions(status, created_at DESC);
