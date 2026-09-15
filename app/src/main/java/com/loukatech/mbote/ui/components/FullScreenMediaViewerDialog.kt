@@ -1,5 +1,10 @@
 package com.loukatech.mbote.ui.components
 
+import android.app.DownloadManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Environment
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
@@ -33,7 +38,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.loukatech.mbote.ui.theme.PurplePrimary
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -53,19 +57,7 @@ fun FullScreenMediaViewerDialog(
     var offset by remember { mutableStateOf(Offset.Zero) }
     var rotation by remember { mutableFloatStateOf(0f) }
 
-    var isPlaying by remember { mutableStateOf(isVideo) }
-    var videoProgress by remember { mutableFloatStateOf(0.35f) }
     var showControls by remember { mutableStateOf(true) }
-
-    // Auto-advance video progress simulation if playing
-    LaunchedEffect(isPlaying, isVideo) {
-        if (isVideo && isPlaying) {
-            while (isPlaying) {
-                delay(200)
-                videoProgress = (videoProgress + 0.015f).let { if (it > 1f) 0f else it }
-            }
-        }
-    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -120,44 +112,21 @@ fun FullScreenMediaViewerDialog(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                AsyncImage(
-                    model = mediaUrl,
-                    contentDescription = if (isVideo) "Vidéo plein écran" else "Image plein écran",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
+                if (isVideo) {
+                    Text("Lecture vidéo indisponible sur cette version", color = Color.White)
+                } else {
+                    AsyncImage(
+                        model = mediaUrl,
+                        contentDescription = "Image plein écran",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize().graphicsLayer {
                             scaleX = scale
                             scaleY = scale
                             translationX = offset.x
                             translationY = offset.y
                             rotationZ = rotation
                         }
-                )
-
-                // Video Play/Pause Overlay Button if video mode
-                if (isVideo) {
-                    AnimatedVisibility(
-                        visible = showControls || !isPlaying,
-                        enter = fadeIn(),
-                        exit = fadeOut()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(72.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.65f))
-                                .clickable { isPlaying = !isPlaying },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (isPlaying) "Pause" else "Lecture",
-                                tint = Color.White,
-                                modifier = Modifier.size(44.dp)
-                            )
-                        }
-                    }
+                    )
                 }
             }
 
@@ -228,7 +197,11 @@ fun FullScreenMediaViewerDialog(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             IconButton(
                                 onClick = {
-                                    Toast.makeText(context, "Lien de partage copié !", Toast.LENGTH_SHORT).show()
+                                    val intent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_TEXT, mediaUrl)
+                                    }
+                                    context.startActivity(Intent.createChooser(intent, "Partager le média"))
                                 },
                                 modifier = Modifier
                                     .size(38.dp)
@@ -245,7 +218,20 @@ fun FullScreenMediaViewerDialog(
 
                             IconButton(
                                 onClick = {
-                                    Toast.makeText(context, "Média enregistré dans la galerie MBoté !", Toast.LENGTH_SHORT).show()
+                                    runCatching {
+                                        val request = DownloadManager.Request(Uri.parse(mediaUrl))
+                                            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                            .setDestinationInExternalPublicDir(
+                                                Environment.DIRECTORY_DOWNLOADS,
+                                                "mbote-" + java.lang.System.currentTimeMillis()
+                                            )
+                                        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                                        manager.enqueue(request)
+                                    }.onSuccess {
+                                        Toast.makeText(context, "Téléchargement démarré", Toast.LENGTH_SHORT).show()
+                                    }.onFailure {
+                                        Toast.makeText(context, "Téléchargement impossible", Toast.LENGTH_SHORT).show()
+                                    }
                                 },
                                 modifier = Modifier
                                     .size(38.dp)
