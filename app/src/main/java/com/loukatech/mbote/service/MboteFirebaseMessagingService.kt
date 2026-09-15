@@ -11,13 +11,21 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.loukatech.mbote.MainActivity
 import com.loukatech.mbote.R
+import com.loukatech.mbote.service.api.MboteApiService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class MboteFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        android.util.Log.d("FCM", "Refreshed FCM token: $token")
-        // In production, sync token with backend server
+        MboteNotificationManager.updateFcmToken(token)
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            MboteApiService().registerPushToken(token)
+                .onFailure { android.util.Log.w("FCM", "FCM token sync deferred: ${it.message}") }
+        }
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
