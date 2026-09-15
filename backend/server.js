@@ -792,7 +792,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   }));
 
   // Jobs and applications are sourced exclusively from PostgreSQL.
-  app.get('/v1/jobs', auth, route(async (_req, res) => {
+  app.get('/v1/jobs', auth, route(async (req, res) => {
     const result = await db.query(
       `SELECT id,title,company,location,contract_type AS type,description,domain AS "activityDomain",
        contract_type AS duration,COALESCE(salary,'') AS salary,j.created_at AS "publishedAt",
