@@ -795,8 +795,14 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   app.get('/v1/jobs', auth, route(async (_req, res) => {
     const result = await db.query(
       `SELECT id,title,company,location,contract_type AS type,description,domain AS "activityDomain",
-       contract_type AS duration,COALESCE(salary,'') AS salary,created_at AS "publishedAt",
-       '' AS "expiresAt",'' AS url,company_logo AS "imageUrl" FROM job_offers ORDER BY created_at DESC`,
+       contract_type AS duration,COALESCE(salary,'') AS salary,j.created_at AS "publishedAt",
+       '' AS "expiresAt",'' AS url,company_logo AS "imageUrl",
+       (SELECT COUNT(*)::int FROM job_applications a WHERE a.job_id=j.id) AS "applicantsCount",
+       (SELECT COUNT(*)::int FROM job_likes l WHERE l.job_id=j.id) AS "likesCount",
+       EXISTS(SELECT 1 FROM job_likes l WHERE l.job_id=j.id AND l.user_id=$1) AS "isLiked",
+       EXISTS(SELECT 1 FROM job_bookmarks b WHERE b.job_id=j.id AND b.user_id=$1) AS "isSaved"
+       FROM job_offers j ORDER BY j.created_at DESC`,
+      [req.user.userId],
     );
     success(res, { jobs: result.rows });
   }));
@@ -813,6 +819,18 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   app.post('/v1/jobs/:jobId/apply', auth, route(async (req, res) => {
     await db.query('INSERT INTO job_applications (job_id,applicant_id,cv_url) VALUES ($1,$2,$3) ON CONFLICT (job_id,applicant_id) DO UPDATE SET cv_url=EXCLUDED.cv_url, created_at=NOW()', [req.params.jobId, req.user.userId, req.body.cvUrl || null]);
     success(res, true, 201);
+  }));
+
+  app.post('/v1/jobs/:jobId/like', auth, route(async (req,res)=>{
+    const inserted=await db.query('INSERT INTO job_likes(job_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING job_id',[req.params.jobId,req.user.userId]);
+    if(!inserted.rowCount)await db.query('DELETE FROM job_likes WHERE job_id=$1 AND user_id=$2',[req.params.jobId,req.user.userId]);
+    const count=await db.query('SELECT COUNT(*)::int AS count FROM job_likes WHERE job_id=$1',[req.params.jobId]);
+    success(res,{liked:inserted.rowCount>0,count:count.rows[0].count});
+  }));
+  app.post('/v1/jobs/:jobId/bookmark', auth, route(async (req,res)=>{
+    const inserted=await db.query('INSERT INTO job_bookmarks(job_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING job_id',[req.params.jobId,req.user.userId]);
+    if(!inserted.rowCount)await db.query('DELETE FROM job_bookmarks WHERE job_id=$1 AND user_id=$2',[req.params.jobId,req.user.userId]);
+    success(res,{saved:inserted.rowCount>0});
   }));
 
   // Status interactions and lifecycle.
