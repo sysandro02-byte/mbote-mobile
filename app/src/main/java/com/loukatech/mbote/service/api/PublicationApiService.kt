@@ -71,14 +71,19 @@ private data class JobDto(
     val publishedAt: String = "",
     val expiresAt: String = "",
     val url: String = "",
-    val imageUrl: String? = null
+    val imageUrl: String? = null,
+    val applicantsCount: Int = 0,
+    val likesCount: Int = 0,
+    val isLiked: Boolean = false,
+    val isSaved: Boolean = false
 ) {
     fun toOffer() = JobOffer(
         id = id, title = title, company = company, location = location,
         companyLogo = imageUrl, type = type, contractType = duration.ifBlank { type },
         workMode = "", experienceLevel = "", salary = salary, duration = duration,
         domain = activityDomain, description = description, postedDate = publishedAt,
-        deadline = expiresAt, applicantsCount = 0, likesCount = 0, applyUrl = url
+        deadline = expiresAt, applicantsCount = applicantsCount, likesCount = likesCount,
+        isLiked = isLiked, isSaved = isSaved, applyUrl = url
     )
 }
 
@@ -136,6 +141,12 @@ class PublicationApiService {
     suspend fun fetchJobs(): Result<List<JobOffer>> = request<Unit>("/jobs").mapCatching { payload ->
         responseArray(payload, "jobs").map { MboteBackendConfig.jsonParser.decodeFromJsonElement<JobDto>(it).toOffer() }
     }
+
+    suspend fun toggleJobLike(jobId: String): Result<Unit> =
+        request<Unit>("/jobs/$jobId/like", "POST").map { Unit }
+
+    suspend fun toggleJobBookmark(jobId: String): Result<Unit> =
+        request<Unit>("/jobs/$jobId/bookmark", "POST").map { Unit }
 
     suspend fun createJob(fields: Map<String, String>): Result<JobOffer> =
         request("/jobs", "POST", fields).mapCatching { payload ->
