@@ -34,6 +34,7 @@ class MboteViewModel(
     val meetings = repository.meetings
     val jobs = repository.jobs
     val discoverProfiles = repository.discoverProfiles
+    val aronQuestions = repository.aronQuestions
     val reports = repository.reports
 
     fun submitReport(type: String, targetName: String) {
