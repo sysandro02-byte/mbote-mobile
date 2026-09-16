@@ -55,22 +55,34 @@ jobs:
           login_file="$(mktemp)"
           trap 'rm -f "$health_file" "$login_file"' EXIT
 
-          health_code="$(curl --silent --show-error --location \
-            --connect-timeout 15 --max-time 60 \
-            --output "$health_file" --write-out '%{http_code}' \
-            "$API_ORIGIN/v1/health")"
+          curl_probe() {
+            local method="$1" url="$2" output="$3" data="${4:-}"
+            local code
+            for attempt in 1 2 3 4; do
+              if [ "$method" = POST ]; then
+                code="$(curl --silent --show-error --location --connect-timeout 15 --max-time 60 \
+                  --retry 2 --retry-delay 3 --retry-all-errors \
+                  --header 'Content-Type: application/json' --data "$data" \
+                  --output "$output" --write-out '%{http_code}' "$url")" || code="000"
+              else
+                code="$(curl --silent --show-error --location --connect-timeout 15 --max-time 60 \
+                  --retry 2 --retry-delay 3 --retry-all-errors \
+                  --output "$output" --write-out '%{http_code}' "$url")" || code="000"
+              fi
+              case "$code" in
+                000|429|500|502|503|504) sleep $((attempt * 5)) ;;
+                *) printf '%s' "$code"; return 0 ;;
+              esac
+            done
+            printf '%s' "$code"
+          }
+
+          health_code="$(curl_probe GET "$API_ORIGIN/v1/health" "$health_file")"
           cat "$health_file"
           test "$health_code" = "200"
           grep -q '"success"[[:space:]]*:[[:space:]]*true' "$health_file"
 
-          # Deliberately invalid credentials: a deployed auth route must reject
-          # them as 400/401, never 404. No real account or secret is used.
-          login_code="$(curl --silent --show-error --location \
-            --connect-timeout 15 --max-time 60 \
-            --header 'Content-Type: application/json' \
-            --data '{"email":"ci-route-probe@invalid.example","password":"not-a-real-password"}' \
-            --output "$login_file" --write-out '%{http_code}' \
-            "$API_ORIGIN/v1/auth/login")"
+          login_code="$(curl_probe POST "$API_ORIGIN/v1/auth/login" "$login_file" '{"email":"ci-route-probe@invalid.example","password":"not-a-real-password"}')"
           cat "$login_file"
           case "$login_code" in
             400|401) ;;
