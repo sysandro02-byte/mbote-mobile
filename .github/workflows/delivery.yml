@@ -6,6 +6,7 @@ on:
       - main
       - dev
       - codex/**
+      - fix/**
   pull_request:
     branches:
       - main
@@ -40,9 +41,55 @@ jobs:
       - name: Run backend tests
         run: npm test
 
+  production-api-contract:
+    name: Production API auth contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify /v1 health and login routes
+        shell: bash
+        env:
+          API_ORIGIN: https://mbote-backend.onrender.com
+        run: |
+          set -euo pipefail
+          health_file="$(mktemp)"
+          login_file="$(mktemp)"
+          trap 'rm -f "$health_file" "$login_file"' EXIT
+
+          health_code="$(curl --silent --show-error --location \
+            --connect-timeout 15 --max-time 60 \
+            --output "$health_file" --write-out '%{http_code}' \
+            "$API_ORIGIN/v1/health")"
+          cat "$health_file"
+          test "$health_code" = "200"
+          grep -q '"success"[[:space:]]*:[[:space:]]*true' "$health_file"
+
+          # Deliberately invalid credentials: a deployed auth route must reject
+          # them as 400/401, never 404. No real account or secret is used.
+          login_code="$(curl --silent --show-error --location \
+            --connect-timeout 15 --max-time 60 \
+            --header 'Content-Type: application/json' \
+            --data '{"email":"ci-route-probe@invalid.example","password":"not-a-real-password"}' \
+            --output "$login_file" --write-out '%{http_code}' \
+            "$API_ORIGIN/v1/auth/login")"
+          cat "$login_file"
+          case "$login_code" in
+            400|401) ;;
+            404)
+              echo 'ERROR: production /v1/auth/login route is missing (404).' >&2
+              exit 1
+              ;;
+            *)
+              echo "ERROR: unexpected production login status: $login_code" >&2
+              exit 1
+              ;;
+          esac
+
   android:
     name: Android lint, tests and stable signed QA APK
     runs-on: ubuntu-latest
+    needs:
+      - backend
+      - production-api-contract
     timeout-minutes: 35
     env: &android-test-env
       MBOTE_API_BASE_URL: https://mbote-backend.onrender.com/v1
