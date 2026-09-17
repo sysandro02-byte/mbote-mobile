@@ -16,9 +16,19 @@ if (envFile.exists()) {
         envProps.load(stream)
     }
 }
-val mboteApiBaseUrl = envProps.getProperty("MBOTE_API_BASE_URL")
+val configuredMboteApiBaseUrl = envProps.getProperty("MBOTE_API_BASE_URL")
     ?: System.getenv("MBOTE_API_BASE_URL")
     ?: "https://mbote-backend.onrender.com/v1"
+val mboteApiBaseUrl = configuredMboteApiBaseUrl.trim().trimEnd('/').let { url ->
+    require(url.startsWith("https://") || url.startsWith("http://")) {
+        "MBOTE_API_BASE_URL doit être une URL HTTP(S) valide"
+    }
+    when {
+        url.endsWith("/v1") -> url
+        url.endsWith("/api/v1") -> url
+        else -> "$url/v1"
+    }
+}
 val viteSocketUrl = envProps.getProperty("VITE_SOCKET_URL")
     ?: System.getenv("VITE_SOCKET_URL")
     ?: "https://mbote-backend.onrender.com"
