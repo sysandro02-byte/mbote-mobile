@@ -4,6 +4,8 @@ const { Pool } = require('pg');
 require('dotenv').config();
 
 const INTEGER_TYPES = new Set(['int2', 'int4', 'int8']);
+const TEXT_TYPES = new Set(['text', 'varchar', 'bpchar']);
+const LEGACY_ID_TYPES = new Set([...INTEGER_TYPES, ...TEXT_TYPES]);
 
 function q(value) {
   return `"${String(value).replace(/"/g, '""')}"`;
@@ -42,7 +44,7 @@ function safeRule(rule) {
 async function migrateLegacyIntegerEntity(db, table) {
   const idType = await getColumnType(db, table, 'id');
   if (!idType || idType.udt_name === 'uuid') return false;
-  if (!INTEGER_TYPES.has(idType.udt_name)) throw new Error(`Type ${table}.id historique non pris en charge: ${idType.udt_name}`);
+  if (!LEGACY_ID_TYPES.has(idType.udt_name)) throw new Error(`Type ${table}.id historique non pris en charge: ${idType.udt_name}`);
 
   const refs = await getForeignKeysTo(db, table);
   console.log(`[mbote-db] Migration UUID: ${table}.id=${idType.udt_name}, ${refs.length} FK(s)...`);
@@ -51,7 +53,7 @@ async function migrateLegacyIntegerEntity(db, table) {
     for (const ref of refs) {
       const refType = await getColumnType(db, ref.table_name, ref.column_name);
       if (!refType) continue;
-      if (refType.udt_name !== 'uuid' && !INTEGER_TYPES.has(refType.udt_name)) {
+      if (refType.udt_name !== 'uuid' && !LEGACY_ID_TYPES.has(refType.udt_name)) {
         throw new Error(`Référence historique non prise en charge: ${ref.table_name}.${ref.column_name} (${refType.udt_name})`);
       }
       await db.query(`ALTER TABLE ${q(ref.table_name)} DROP CONSTRAINT IF EXISTS ${q(ref.constraint_name)}`);
@@ -60,11 +62,11 @@ async function migrateLegacyIntegerEntity(db, table) {
     for (const ref of refs) {
       const refType = await getColumnType(db, ref.table_name, ref.column_name);
       if (!refType || refType.udt_name === 'uuid') continue;
+      await db.query(`ALTER TABLE ${q(ref.table_name)} ALTER COLUMN ${q(ref.column_name)} DROP DEFAULT`);
       await db.query(`ALTER TABLE ${q(ref.table_name)} ALTER COLUMN ${q(ref.column_name)} TYPE UUID USING ${deterministicUuidSql(table, q(ref.column_name))}`);
     }
 
-    // Legacy SERIAL/IDENTITY defaults (for example nextval(...)) cannot be cast to UUID.
-    // Remove the integer default first, convert the values, then install the UUID default.
+    // Legacy SERIAL/text defaults cannot be cast to UUID. Remove them before conversion.
     await db.query(`ALTER TABLE ${q(table)} ALTER COLUMN id DROP DEFAULT`);
     await db.query(`ALTER TABLE ${q(table)} ALTER COLUMN id TYPE UUID USING ${deterministicUuidSql(table, 'id')}`);
     await db.query(`ALTER TABLE ${q(table)} ALTER COLUMN id SET DEFAULT uuid_generate_v4()`);
