@@ -246,6 +246,11 @@ CREATE TABLE IF NOT EXISTS meetings (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Safe upgrades for legacy meeting tables created before scheduling fields existed.
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS duration_minutes INT NOT NULL DEFAULT 30;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'SCHEDULED';
+
 CREATE TABLE IF NOT EXISTS meeting_participants (
     meeting_id UUID REFERENCES meetings(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
