@@ -63,7 +63,10 @@ async function migrateLegacyIntegerEntity(db, table) {
       await db.query(`ALTER TABLE ${q(ref.table_name)} ALTER COLUMN ${q(ref.column_name)} TYPE UUID USING ${deterministicUuidSql(table, q(ref.column_name))}`);
     }
 
-    // Legacy SERIAL/IDENTITY defaults (for example nextval(...)) cannot be cast to UUID.\n    // Remove the integer default first, convert the values, then install the UUID default.\n    await db.query(`ALTER TABLE ${q(table)} ALTER COLUMN id DROP DEFAULT`);\n    await db.query(`ALTER TABLE ${q(table)} ALTER COLUMN id TYPE UUID USING ${deterministicUuidSql(table, 'id')}`);
+    // Legacy SERIAL/IDENTITY defaults (for example nextval(...)) cannot be cast to UUID.
+    // Remove the integer default first, convert the values, then install the UUID default.
+    await db.query(`ALTER TABLE ${q(table)} ALTER COLUMN id DROP DEFAULT`);
+    await db.query(`ALTER TABLE ${q(table)} ALTER COLUMN id TYPE UUID USING ${deterministicUuidSql(table, 'id')}`);
     await db.query(`ALTER TABLE ${q(table)} ALTER COLUMN id SET DEFAULT uuid_generate_v4()`);
 
     for (const ref of refs) {
