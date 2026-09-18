@@ -926,6 +926,13 @@ class MboteApiService {
         }
     }
 
+    suspend fun votePollApi(messageId: String, optionId: String): Result<Unit> =
+        executeHttpRequest<Map<String, String>, Unit>(
+            endpoint = "/messages/$messageId/poll-votes",
+            method = "POST",
+            requestBody = mapOf("optionId" to optionId)
+        ) { Unit }
+
     suspend fun markChatReadApi(chatId: String): Result<Boolean> =
         executeHttpRequest<Unit, Boolean>(endpoint = "/chats/$chatId/read", method = "POST") { true }
 
