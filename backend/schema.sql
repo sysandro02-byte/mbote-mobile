@@ -378,6 +378,22 @@ CREATE TABLE IF NOT EXISTS status_shares (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Safe upgrades for legacy status interaction tables. CREATE TABLE IF NOT EXISTS
+-- does not add columns to tables created by older MBoté releases.
+ALTER TABLE status_reactions ADD COLUMN IF NOT EXISTS status_id UUID REFERENCES statuses(id) ON DELETE CASCADE;
+ALTER TABLE status_reactions ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE status_reactions ADD COLUMN IF NOT EXISTS emoji VARCHAR(16);
+ALTER TABLE status_reactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+ALTER TABLE status_comments ADD COLUMN IF NOT EXISTS status_id UUID REFERENCES statuses(id) ON DELETE CASCADE;
+ALTER TABLE status_comments ADD COLUMN IF NOT EXISTS author_id UUID REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE status_comments ADD COLUMN IF NOT EXISTS text TEXT;
+ALTER TABLE status_comments ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+ALTER TABLE status_shares ADD COLUMN IF NOT EXISTS status_id UUID REFERENCES statuses(id) ON DELETE CASCADE;
+ALTER TABLE status_shares ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE status_shares ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
 CREATE TABLE IF NOT EXISTS news_post_shares (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     news_post_id UUID REFERENCES news_posts(id) ON DELETE CASCADE,
