@@ -852,42 +852,25 @@ class MboteRepository(
     }
 
     fun translateMessage(chatId: String, messageId: String, targetLanguage: String = "Lingala") {
-        _chats.update { chatList ->
-            chatList.map { chat ->
-                if (chat.id == chatId) {
-                    val updatedMessages = chat.messages.map { msg ->
-                        if (msg.id == messageId) {
-                            val translated = getInstantTranslation(msg.text, targetLanguage)
-                            msg.copy(
-                                translatedText = translated,
-                                targetLanguage = targetLanguage
+        val message = _chats.value.firstOrNull { it.id == chatId }?.messages?.firstOrNull { it.id == messageId }
+            ?: run {
+                _messagingError.value = "Message introuvable pour la traduction."
+                return
+            }
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.translateTextApi(message.text, targetLanguage)
+                .onSuccess { translated ->
+                    _chats.update { chatList ->
+                        chatList.map { chat ->
+                            if (chat.id != chatId) chat else chat.copy(
+                                messages = chat.messages.map { msg ->
+                                    if (msg.id == messageId) msg.copy(translatedText = translated, targetLanguage = targetLanguage) else msg
+                                }
                             )
-                        } else msg
+                        }
                     }
-                    chat.copy(messages = updatedMessages)
-                } else chat
-            }
-        }
-    }
-
-    private fun getInstantTranslation(text: String, targetLang: String): String {
-        return when (targetLang.lowercase()) {
-            "lingala" -> when {
-                text.contains("bonjour", true) || text.contains("salut", true) -> "Mbote na yo ! Ozali malamu ?"
-                text.contains("merci", true) -> "Matondi mingi !"
-                text.contains("comment", true) -> "Ndenge nini ?"
-                text.contains("réunion", true) -> "Likita ezali kobongisama malamu."
-                text.contains("bienvenue", true) -> "Boyei malamu na MBoté !"
-                else -> "Traduction Lingala : « $text » → [Maloba ya sika na Lingala ya pete]"
-            }
-            "français" -> when {
-                text.contains("mbote", true) -> "Bonjour ! Comment allez-vous ?"
-                text.contains("matondi", true) -> "Merci beaucoup !"
-                text.contains("maloba", true) -> "Ces paroles sont pleines de sagesse."
-                else -> "Traduction : « $text »"
-            }
-            "anglais" -> "English translation: \"$text\""
-            else -> "[Traduit en $targetLang] : $text"
+                }
+                .onFailure { _messagingError.value = it.message ?: "La traduction n’a pas pu être effectuée." }
         }
     }
 

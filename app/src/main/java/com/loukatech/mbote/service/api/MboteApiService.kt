@@ -926,6 +926,13 @@ class MboteApiService {
         }
     }
 
+    suspend fun translateTextApi(text: String, targetLanguage: String): Result<String> =
+        executeHttpRequest<Map<String, String>, String>(
+            endpoint = "/ai/translate",
+            method = "POST",
+            requestBody = mapOf("text" to text, "targetLanguage" to targetLanguage)
+        ) { json -> responseObject(json).string("translatedText") }
+
     suspend fun votePollApi(messageId: String, optionId: String): Result<Unit> =
         executeHttpRequest<Map<String, String>, Unit>(
             endpoint = "/messages/$messageId/poll-votes",
