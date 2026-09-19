@@ -482,6 +482,46 @@ CREATE TABLE IF NOT EXISTS payment_intents (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS gift_catalog (
+    id VARCHAR(80) PRIMARY KEY,
+    name VARCHAR(160) NOT NULL,
+    emoji VARCHAR(32) NOT NULL,
+    price_fcfa BIGINT NOT NULL CHECK (price_fcfa > 0),
+    description TEXT NOT NULL DEFAULT '',
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS user_gift_inventory (
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    gift_id VARCHAR(80) REFERENCES gift_catalog(id),
+    quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (user_id, gift_id)
+);
+
+CREATE TABLE IF NOT EXISTS gift_transactions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    sender_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    recipient_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    gift_id VARCHAR(80) REFERENCES gift_catalog(id),
+    quantity INT NOT NULL CHECK (quantity > 0),
+    amount_fcfa BIGINT NOT NULL CHECK (amount_fcfa > 0),
+    status VARCHAR(30) NOT NULL DEFAULT 'COMPLETED',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS wallet_withdrawals (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    amount_fcfa BIGINT NOT NULL CHECK (amount_fcfa > 0),
+    provider VARCHAR(80) NOT NULL,
+    destination_account VARCHAR(120) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS app_content (
     content_key VARCHAR(120) PRIMARY KEY,
     value JSONB NOT NULL,
