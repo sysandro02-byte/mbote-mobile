@@ -745,6 +745,28 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     await db.query("UPDATE messages SET status = 'READ' WHERE chat_id = $1 AND sender_id <> $2", [req.params.chatId, req.user.userId]);
     success(res, true);
   }));
+  app.post('/v1/messages/:messageId/poll-votes', auth, route(async (req, res) => {
+    const optionId = text(req.body.optionId, 'Option', 120);
+    const allowed = await db.query(
+      'SELECT 1 FROM messages m JOIN chat_participants cp ON cp.chat_id = m.chat_id WHERE m.id = $1 AND cp.user_id = $2',
+      [req.params.messageId, req.user.userId],
+    );
+    if (!allowed.rowCount) return failure(res, 404, 'Message introuvable');
+    const message = await db.query('SELECT metadata FROM messages WHERE id = $1', [req.params.messageId]);
+    const metadata = message.rows[0]?.metadata || {};
+    const poll = metadata.pollData;
+    if (!poll || !Array.isArray(poll.options)) return failure(res, 409, 'Ce message n’est pas un sondage');
+    const option = poll.options.find((item) => String(item.id) === optionId);
+    if (!option) return failure(res, 400, 'Option de sondage invalide');
+    poll.options = poll.options.map((item) => {
+      const voters = Array.isArray(item.voters) ? item.voters.map(String) : [];
+      const withoutMe = voters.filter((id) => id !== req.user.userId);
+      return { ...item, voters: String(item.id) === optionId ? [...withoutMe, req.user.userId] : withoutMe };
+    });
+    await db.query("UPDATE messages SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{pollData}', $2::jsonb, true) WHERE id = $1", [req.params.messageId, JSON.stringify(poll)]);
+    success(res, poll);
+  }));
+
   app.post('/v1/messages/:messageId/reactions', auth, route(async (req, res) => {
     const emoji = text(req.body.emoji, 'Réaction', 16);
     const allowed = await db.query(

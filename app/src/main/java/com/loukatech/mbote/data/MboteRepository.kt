@@ -766,7 +766,11 @@ class MboteRepository(
     }
 
     fun votePoll(chatId: String, messageId: String, optionId: String) {
-        _messagingError.value = "Le vote de sondage attend l'endpoint backend MBoté dédié. Aucun vote local simulé n'a été enregistré."
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.votePollApi(messageId, optionId)
+                .onSuccess { refreshMessagesForChat(chatId) }
+                .onFailure { _messagingError.value = it.message ?: "Le vote n’a pas pu être enregistré." }
+        }
     }
 
     fun sendLocation(
