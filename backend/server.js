@@ -640,6 +640,62 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   }));
 
 
+  app.get('/v1/gifts/catalog', auth, route(async (_req, res) => {
+    const result = await db.query('SELECT id,name,emoji,price_fcfa AS "priceFcfa",description FROM gift_catalog WHERE active=TRUE ORDER BY price_fcfa');
+    success(res, result.rows);
+  }));
+
+  app.get('/v1/gifts/me', auth, route(async (req, res) => {
+    const [inventory, transactions, withdrawals, wallet] = await Promise.all([
+      db.query('SELECT gift_id AS "giftId",quantity FROM user_gift_inventory WHERE user_id=$1', [req.user.userId]),
+      db.query(`SELECT gt.id,gt.gift_id AS "giftId",gc.name AS "giftName",gc.emoji,gt.amount_fcfa AS "amountFcfa",
+        gt.sender_id=$1 AS "isSent",COALESCE(u.full_name,'Utilisateur') AS "counterpartName",gt.status,gt.created_at AS "createdAt"
+        FROM gift_transactions gt JOIN gift_catalog gc ON gc.id=gt.gift_id
+        LEFT JOIN users u ON u.id=CASE WHEN gt.sender_id=$1 THEN gt.recipient_id ELSE gt.sender_id END
+        WHERE gt.sender_id=$1 OR gt.recipient_id=$1 ORDER BY gt.created_at DESC LIMIT 100`, [req.user.userId]),
+      db.query('SELECT id,amount_fcfa AS "amountFcfa",provider,destination_account AS "destinationAccount",status,created_at AS "createdAt" FROM wallet_withdrawals WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100', [req.user.userId]),
+      db.query('SELECT wallet_balance_fcfa AS "walletBalanceFcfa" FROM users WHERE id=$1', [req.user.userId]),
+    ]);
+    success(res, { inventory: inventory.rows, transactions: transactions.rows, withdrawals: withdrawals.rows, walletBalanceFcfa: Number(wallet.rows[0]?.walletBalanceFcfa || 0) });
+  }));
+
+  app.post('/v1/gifts/send', auth, route(async (req, res) => {
+    const giftId = text(req.body.giftId, 'Cadeau', 80);
+    const recipientId = text(req.body.recipientId, 'Destinataire', 80);
+    const quantity = Number(req.body.quantity || 1);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) return failure(res, 400, 'Quantité invalide');
+    await db.query('BEGIN');
+    try {
+      const gift = await db.query('SELECT id,price_fcfa FROM gift_catalog WHERE id=$1 AND active=TRUE', [giftId]);
+      if (!gift.rowCount) throw Object.assign(new Error('Cadeau introuvable'), { status: 404 });
+      const recipient = await db.query('SELECT id FROM users WHERE id=$1', [recipientId]);
+      if (!recipient.rowCount || recipientId === req.user.userId) throw Object.assign(new Error('Destinataire invalide'), { status: 400 });
+      const stock = await db.query('SELECT quantity FROM user_gift_inventory WHERE user_id=$1 AND gift_id=$2 FOR UPDATE', [req.user.userId, giftId]);
+      if (Number(stock.rows[0]?.quantity || 0) < quantity) throw Object.assign(new Error('Stock de cadeaux insuffisant'), { status: 409 });
+      await db.query('UPDATE user_gift_inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND gift_id=$2', [req.user.userId, giftId, quantity]);
+      const amount = Number(gift.rows[0].price_fcfa) * quantity;
+      const tx = await db.query("INSERT INTO gift_transactions(sender_id,recipient_id,gift_id,quantity,amount_fcfa,status) VALUES($1,$2,$3,$4,$5,'COMPLETED') RETURNING id", [req.user.userId, recipientId, giftId, quantity, amount]);
+      await db.query('COMMIT');
+      success(res, { transactionId: tx.rows[0].id, amountFcfa: amount });
+    } catch (error) { await db.query('ROLLBACK'); throw error; }
+  }));
+
+  app.post('/v1/wallet/withdrawals', auth, route(async (req, res) => {
+    const amount = Number(req.body.amountFcfa);
+    const provider = text(req.body.provider, 'Opérateur', 80);
+    const destination = text(req.body.destinationAccount, 'Compte destinataire', 120);
+    if (!Number.isSafeInteger(amount) || amount <= 0) return failure(res, 400, 'Montant invalide');
+    await db.query('BEGIN');
+    try {
+      const wallet = await db.query('SELECT wallet_balance_fcfa FROM users WHERE id=$1 FOR UPDATE', [req.user.userId]);
+      if (Number(wallet.rows[0]?.wallet_balance_fcfa || 0) < amount) throw Object.assign(new Error('Solde insuffisant'), { status: 409 });
+      await db.query('UPDATE users SET wallet_balance_fcfa=wallet_balance_fcfa-$2 WHERE id=$1', [req.user.userId, amount]);
+      const withdrawal = await db.query("INSERT INTO wallet_withdrawals(user_id,amount_fcfa,provider,destination_account,status) VALUES($1,$2,$3,$4,'PENDING') RETURNING id,status", [req.user.userId, amount, provider, destination]);
+      await db.query('COMMIT');
+      success(res, withdrawal.rows[0]);
+    } catch (error) { await db.query('ROLLBACK'); throw error; }
+  }));
+
   // Server-side media search and payment connectors keep provider secrets out of the APK.
   app.get('/v1/media/search', auth, route(async (req, res) => {
     if (!process.env.GIPHY_API_KEY) return failure(res, 503, 'La recherche GIF n’est pas configurée');

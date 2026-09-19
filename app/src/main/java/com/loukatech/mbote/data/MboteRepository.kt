@@ -1218,69 +1218,22 @@ class MboteRepository(
         _userProfile.update { it.copy(isPremium = isPremium) }
     }
 
-    fun sendGift(giftId: String, recipientName: String, multiplier: Int = 1): Boolean {
-        val currentState = _userGiftState.value
-        val currentCount = currentState.inventory[giftId] ?: 0
-        if (currentCount < multiplier) return false
-
-        val giftItem = currentState.storeGifts.find { it.id == giftId } ?: defaultGiftItems().find { it.id == giftId } ?: return false
-        val timeNow = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-        val totalAmount = giftItem.priceFcfa * multiplier
-
-        val newTransaction = GiftTransaction(
-            giftId = giftId,
-            giftName = if (multiplier > 1) "${giftItem.name} (x$multiplier)" else giftItem.name,
-            emoji = giftItem.emoji,
-            amountFcfa = totalAmount,
-            isReceived = false,
-            counterpartName = recipientName,
-            timestamp = "Aujourd'hui à $timeNow",
-            status = "Complété"
-        )
-
-        _userGiftState.update { current ->
-            val updatedInventory = current.inventory.toMutableMap()
-            updatedInventory[giftId] = (currentCount - multiplier).coerceAtLeast(0)
-            current.copy(
-                inventory = updatedInventory,
-                transactions = listOf(newTransaction) + current.transactions
-            )
-        }
-
-        _userProfile.update { u ->
-            u.copy(totalGiftsSentFcfa = u.totalGiftsSentFcfa + totalAmount)
+    fun sendGift(giftId: String, recipientId: String, multiplier: Int = 1): Boolean {
+        if (giftId.isBlank() || recipientId.isBlank() || multiplier < 1) return false
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.sendGiftApi(giftId, recipientId, multiplier)
+                .onSuccess { syncAllFromBackend() }
+                .onFailure { _messagingError.value = it.message ?: "Le cadeau n’a pas pu être envoyé." }
         }
         return true
     }
 
     fun cashoutVirtualGifts(amountFcfa: Long, destinationProvider: String, phoneNumber: String): Boolean {
-        val currentState = _userGiftState.value
-        if (currentState.totalVirtualEarnedFcfa < amountFcfa) return false
-
-        val timeNow = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-        val isInstant = destinationProvider.contains("MBoté", ignoreCase = true)
-        val newWithdrawal = WithdrawalTransaction(
-            amountFcfa = amountFcfa,
-            provider = destinationProvider,
-            destinationAccount = phoneNumber,
-            timestamp = "Aujourd'hui à $timeNow",
-            status = if (isInstant) WithdrawalStatus.COMPLETED else WithdrawalStatus.PENDING
-        )
-
-        _userGiftState.update { current ->
-            current.copy(
-                totalVirtualEarnedFcfa = (current.totalVirtualEarnedFcfa - amountFcfa).coerceAtLeast(0L),
-                withdrawals = listOf(newWithdrawal) + current.withdrawals,
-                transactions = current.transactions.map {
-                    if (it.isReceived && it.status == "Disponible") it.copy(status = "Encaissé ($destinationProvider)") else it
-                }
-            )
-        }
-        // Also credit user wallet if cashing out to MBoté Pay
-        if (isInstant) {
-            _userProfile.update { u ->
-                u.copy(walletBalanceFcfa = u.walletBalanceFcfa + amountFcfa)
-            }
+        if (amountFcfa <= 0 || destinationProvider.isBlank() || phoneNumber.isBlank()) return false
+        CoroutineScope(Dispatchers.IO).launch {
+            apiService.requestWalletWithdrawalApi(amountFcfa, destinationProvider, phoneNumber)
+                .onSuccess { syncAllFromBackend() }
+                .onFailure { _messagingError.value = it.message ?: "La demande de retrait a échoué." }
         }
         return true
     }
