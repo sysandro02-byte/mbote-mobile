@@ -1044,6 +1044,31 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res,true);
   }));
 
+  app.post('/v1/ai/translate', auth, route(async (req, res) => {
+    if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_MODEL) {
+      return failure(res, 503, 'La traduction IA est temporairement indisponible');
+    }
+    const source = text(req.body.text, 'Texte', 5000);
+    const targetLanguage = text(req.body.targetLanguage, 'Langue cible', 80);
+    const upstream = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(process.env.GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: source }] }],
+          systemInstruction: { parts: [{ text: `Traduis fidèlement le texte fourni vers ${targetLanguage}. Réponds uniquement avec la traduction, sans explication ni guillemets ajoutés.` }] },
+          generationConfig: { temperature: 0.1 },
+        }),
+      },
+    );
+    if (!upstream.ok) throw Object.assign(new Error('Le fournisseur de traduction n’a pas répondu'), { status: 502 });
+    const payload = await upstream.json();
+    const translatedText = String(payload?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+    if (!translatedText) throw Object.assign(new Error('Traduction vide reçue du fournisseur'), { status: 502 });
+    success(res, { translatedText, targetLanguage });
+  }));
+
   app.post('/v1/ai/smart-replies', auth, route(async (req, res) => {
     if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_MODEL) {
       return failure(res, 503, 'L’assistant IA est temporairement indisponible');
