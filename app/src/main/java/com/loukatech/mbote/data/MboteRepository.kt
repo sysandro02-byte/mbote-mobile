@@ -1489,9 +1489,21 @@ class MboteRepository(
         background: String? = null,
         visibility: String = "friends"
     ): Result<StatusItem> {
+        val normalizedType = mediaType.trim().lowercase().let { raw ->
+            when {
+                raw in setOf("text", "texte") -> "text"
+                raw in setOf("image", "photo") || raw.startsWith("image/") -> "image"
+                raw in setOf("audio", "voice", "vocal") || raw.startsWith("audio/") -> "audio"
+                raw in setOf("video", "vidéo") || raw.startsWith("video/") -> "video"
+                else -> "text"
+            }
+        }
         val content = mediaDataUrl?.takeIf(String::isNotBlank) ?: text.trim()
+        if (content.isBlank()) {
+            return Result.failure(IllegalArgumentException("Le statut doit contenir du texte ou un média."))
+        }
         val request = CreateStatusRequest(
-            type = mediaType,
+            type = normalizedType,
             content = content,
             background = background,
             visibility = visibility,
