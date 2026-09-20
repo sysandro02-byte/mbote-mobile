@@ -578,3 +578,16 @@ CREATE TABLE IF NOT EXISTS panic_alerts (
 );
 CREATE INDEX IF NOT EXISTS idx_parental_links_child ON parental_links(child_id);
 CREATE INDEX IF NOT EXISTS idx_panic_alerts_parent ON panic_alerts(parent_id, created_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS publication_uploads (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  surface VARCHAR(32) NOT NULL CHECK (surface IN ('short-videos','actus-videos')),
+  content_type VARCHAR(128) NOT NULL,
+  file_size BIGINT NOT NULL CHECK (file_size > 0 AND file_size <= 52428800),
+  content BYTEA NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_publication_uploads_owner_created
+  ON publication_uploads(owner_id, created_at DESC);
