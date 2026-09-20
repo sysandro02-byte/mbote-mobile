@@ -482,6 +482,8 @@ CREATE TABLE IF NOT EXISTS payment_intents (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+ALTER TABLE users ADD COLUMN IF NOT EXISTS gift_earnings_balance_fcfa BIGINT NOT NULL DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS gift_catalog (
     id VARCHAR(80) PRIMARY KEY,
     name VARCHAR(160) NOT NULL,
@@ -491,6 +493,16 @@ CREATE TABLE IF NOT EXISTS gift_catalog (
     active BOOLEAN NOT NULL DEFAULT TRUE,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+
+INSERT INTO gift_catalog(id,name,emoji,price_fcfa,description,active) VALUES
+('g_bronze','Médaille de bronze','🥉',1000,'Un geste chaleureux pour encourager le créateur',TRUE),
+('g_gold_ring','Bague en or','💍',3000,'Une attention précieuse pleine d’élégance',TRUE),
+('g_diamond','Diamant étincelant','💎',5000,'Un cadeau éclatant qui illumine le direct',TRUE),
+('g_gold_bar','Lingot d''or pur','🪙',10000,'Le symbole ultime de prestige et de soutien',TRUE),
+('g_crown','Couronne royale','👑',25000,'Récompense suprême pour les lives exceptionnels',TRUE)
+ON CONFLICT (id) DO UPDATE SET
+name=EXCLUDED.name,emoji=EXCLUDED.emoji,price_fcfa=EXCLUDED.price_fcfa,description=EXCLUDED.description,active=EXCLUDED.active,updated_at=NOW();
 
 CREATE TABLE IF NOT EXISTS user_gift_inventory (
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
@@ -533,6 +545,8 @@ CREATE INDEX IF NOT EXISTS idx_channel_subscriptions_user ON channel_subscriptio
 CREATE INDEX IF NOT EXISTS idx_status_comments_status ON status_comments(status_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_job_applications_user ON job_applications(applicant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_group_calls_status ON group_call_sessions(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_gift_transactions_recipient ON gift_transactions(recipient_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wallet_withdrawals_user ON wallet_withdrawals(user_id, created_at DESC);
 
 
 CREATE TABLE IF NOT EXISTS parental_link_tokens (

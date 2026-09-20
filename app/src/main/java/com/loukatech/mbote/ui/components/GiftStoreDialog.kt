@@ -46,20 +46,16 @@ fun GiftStoreDialog(
     val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Packs & Lots, 1: À l'unité
     var selectedProvider by remember { mutableStateOf("MTN Mobile Money") }
-    var phoneNumber by remember { mutableStateOf("+242 06 123 4567") }
     var isSuccess by remember { mutableStateOf(false) }
     var successMessage by remember { mutableStateOf("") }
 
     val paymentProviders = listOf(
         "MTN Mobile Money" to "📱",
-        "Airtel Money" to "📲",
-        "Orange Money" to "🟠",
-        "MBoté Pay (Portefeuille)" to "💜",
-        "Carte Bancaire (Visa/Mastercard)" to "💳"
+        "Airtel Money" to "📲"
     )
 
-    val bundles = remember { defaultGiftBundles() }
-    val singleGifts = remember { defaultGiftItems() }
+    val bundles = userGiftState.storeBundles
+    val singleGifts = userGiftState.storeGifts
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -194,7 +190,7 @@ fun GiftStoreDialog(
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "Achat Réussi !",
+                            text = "Paiement initié",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF10B981)
@@ -226,6 +222,16 @@ fun GiftStoreDialog(
                     ) {
                         if (selectedTab == 0) {
                             // BUNDLES LIST
+                            if (bundles.isEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Les packs seront affichés ici dès qu’ils seront publiés par le serveur MBoté.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(vertical = 24.dp)
+                                    )
+                                }
+                            }
                             items(bundles) { bundle ->
                                 Card(
                                     shape = RoundedCornerShape(16.dp),
@@ -326,6 +332,16 @@ fun GiftStoreDialog(
                             }
                         } else {
                             // SINGLE GIFTS LIST
+                            if (singleGifts.isEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Catalogue indisponible pour le moment. Réessayez après synchronisation.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(vertical = 24.dp)
+                                    )
+                                }
+                            }
                             items(singleGifts) { gift ->
                                 Card(
                                     shape = RoundedCornerShape(16.dp),

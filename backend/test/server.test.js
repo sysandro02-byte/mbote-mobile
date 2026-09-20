@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const jwt = require('jsonwebtoken');
 const { createApp } = require('../server');
 
 const secret = 'test-only-secret-that-is-long-enough-to-sign-jwts';
@@ -63,4 +64,41 @@ test('password recovery never simulates email delivery when Brevo is unavailable
     if (previousKey === undefined) delete process.env.BREVO_API_KEY;
     else process.env.BREVO_API_KEY = previousKey;
   }
+});
+
+
+test('gift state and withdrawals use server-side gift earnings', async () => {
+  const userId = '11111111-1111-4111-8111-111111111111';
+  const token = jwt.sign({ userId, email: 'gift@example.com', role: 'USER' }, secret, {
+    expiresIn: '30d', issuer: 'mbote-api', audience: 'mbote-mobile',
+  });
+  const executed = [];
+  const db = { query: async (sql) => {
+    executed.push(sql);
+    if (sql.includes('FROM user_gift_inventory')) return { rowCount: 1, rows: [{ giftId: 'g_bronze', quantity: 2 }] };
+    if (sql.includes('FROM gift_transactions')) return { rowCount: 0, rows: [] };
+    if (sql.includes('FROM wallet_withdrawals WHERE')) return { rowCount: 0, rows: [] };
+    if (sql.includes('SELECT wallet_balance_fcfa')) return { rowCount: 1, rows: [{ walletBalanceFcfa: 5000, giftEarningsBalanceFcfa: 7000 }] };
+    if (sql.includes('SELECT gift_earnings_balance_fcfa')) return { rowCount: 1, rows: [{ gift_earnings_balance_fcfa: 7000 }] };
+    if (sql.includes('INSERT INTO wallet_withdrawals')) return { rowCount: 1, rows: [{ id: 'withdraw-1', status: 'PENDING' }] };
+    return { rowCount: 1, rows: [] };
+  } };
+
+  await withServer(createApp({ db, jwtSecret: secret }), async (baseUrl) => {
+    const state = await fetch(`${baseUrl}/v1/gifts/me`, { headers: { authorization: `Bearer ${token}` } });
+    assert.equal(state.status, 200);
+    const body = await state.json();
+    assert.equal(body.data.giftEarningsBalanceFcfa, 7000);
+    assert.equal(body.data.walletBalanceFcfa, 5000);
+
+    const withdrawal = await fetch(`${baseUrl}/v1/wallet/withdrawals`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ amountFcfa: 2000, provider: 'MTN Mobile Money', destinationAccount: '+242060000000' }),
+    });
+    assert.equal(withdrawal.status, 200);
+  });
+
+  assert.ok(executed.some((sql) => sql.includes('UPDATE users SET gift_earnings_balance_fcfa=gift_earnings_balance_fcfa-$2')));
+  assert.ok(!executed.some((sql) => sql.includes('UPDATE users SET wallet_balance_fcfa=wallet_balance_fcfa-$2')));
 });
