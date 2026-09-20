@@ -1178,26 +1178,20 @@ class MboteViewModel(
         _selectedShortVideoForTip.value = null
     }
 
-    fun buyGiftBundle(bundle: GiftBundle, provider: String = "MBoté Pay / MTN MoMo"): Boolean {
-        if (!repository.isAuthenticated.value) return false
-        viewModelScope.launch {
-            repository.requestGiftPurchase(bundle.priceFcfa, provider)
-                .onSuccess { intent ->
-                    _publicationError.value = intent.instructions
-                        ?: "Paiement ${intent.status.lowercase()}. Référence ${intent.id}."
-                }
-                .onFailure { _publicationError.value = it.message }
-        }
-        return true
+    fun buyGiftBundle(bundle: GiftBundle, provider: String = "MTN Mobile Money"): Boolean {
+        _publicationError.value = "Les packs de cadeaux seront activés après publication du catalogue serveur."
+        return false
     }
 
-    fun buySingleGift(gift: GiftItem, count: Int = 1, provider: String = "MBoté Pay / MTN MoMo"): Boolean {
+    fun buySingleGift(gift: GiftItem, count: Int = 1, provider: String = "MTN Mobile Money"): Boolean {
         if (!repository.isAuthenticated.value || count <= 0) return false
         viewModelScope.launch {
-            repository.requestGiftPurchase(gift.priceFcfa * count, provider)
+            repository.requestGiftPurchase(gift, count, provider)
                 .onSuccess { intent ->
                     _publicationError.value = intent.instructions
                         ?: "Paiement ${intent.status.lowercase()}. Référence ${intent.id}."
+                    kotlinx.coroutines.delay(5000)
+                    repository.syncAllFromBackend()
                 }
                 .onFailure { _publicationError.value = it.message }
         }
@@ -1209,7 +1203,33 @@ class MboteViewModel(
     }
 
     fun buyBadge(badgeType: BadgeType, provider: String = "MTN Mobile Money"): Boolean {
-        return repository.buyBadge(badgeType, provider)
+        if (!repository.isAuthenticated.value) return false
+        viewModelScope.launch {
+            repository.requestBadgePurchase(badgeType, provider)
+                .onSuccess { intent ->
+                    _publicationError.value = intent.instructions
+                        ?: "Paiement ${intent.status.lowercase()}. Référence ${intent.id}."
+                    kotlinx.coroutines.delay(5000)
+                    repository.syncAllFromBackend()
+                }
+                .onFailure { _publicationError.value = it.message }
+        }
+        return true
+    }
+
+    fun topUpWallet(amountFcfa: Long, provider: String): Boolean {
+        if (!repository.isAuthenticated.value || amountFcfa <= 0) return false
+        viewModelScope.launch {
+            repository.requestWalletTopUp(amountFcfa, provider)
+                .onSuccess { intent ->
+                    _publicationError.value = intent.instructions
+                        ?: "Paiement ${intent.status.lowercase()}. Référence ${intent.id}."
+                    kotlinx.coroutines.delay(5000)
+                    repository.syncAllFromBackend()
+                }
+                .onFailure { _publicationError.value = it.message }
+        }
+        return true
     }
 
     fun updateGiftPrice(giftId: String, newPriceFcfa: Long) {
