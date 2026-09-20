@@ -654,9 +654,9 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
         LEFT JOIN users u ON u.id=CASE WHEN gt.sender_id=$1 THEN gt.recipient_id ELSE gt.sender_id END
         WHERE gt.sender_id=$1 OR gt.recipient_id=$1 ORDER BY gt.created_at DESC LIMIT 100`, [req.user.userId]),
       db.query('SELECT id,amount_fcfa AS "amountFcfa",provider,destination_account AS "destinationAccount",status,created_at AS "createdAt" FROM wallet_withdrawals WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100', [req.user.userId]),
-      db.query('SELECT wallet_balance_fcfa AS "walletBalanceFcfa" FROM users WHERE id=$1', [req.user.userId]),
+      db.query('SELECT wallet_balance_fcfa AS "walletBalanceFcfa", gift_earnings_balance_fcfa AS "giftEarningsBalanceFcfa" FROM users WHERE id=$1', [req.user.userId]),
     ]);
-    success(res, { inventory: inventory.rows, transactions: transactions.rows, withdrawals: withdrawals.rows, walletBalanceFcfa: Number(wallet.rows[0]?.walletBalanceFcfa || 0) });
+    success(res, { inventory: inventory.rows, transactions: transactions.rows, withdrawals: withdrawals.rows, walletBalanceFcfa: Number(wallet.rows[0]?.walletBalanceFcfa || 0), giftEarningsBalanceFcfa: Number(wallet.rows[0]?.giftEarningsBalanceFcfa || 0) });
   }));
 
   app.post('/v1/gifts/send', auth, route(async (req, res) => {
@@ -675,6 +675,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       await db.query('UPDATE user_gift_inventory SET quantity=quantity-$3,updated_at=NOW() WHERE user_id=$1 AND gift_id=$2', [req.user.userId, giftId, quantity]);
       const amount = Number(gift.rows[0].price_fcfa) * quantity;
       const tx = await db.query("INSERT INTO gift_transactions(sender_id,recipient_id,gift_id,quantity,amount_fcfa,status) VALUES($1,$2,$3,$4,$5,'COMPLETED') RETURNING id", [req.user.userId, recipientId, giftId, quantity, amount]);
+      await db.query('UPDATE users SET gift_earnings_balance_fcfa=gift_earnings_balance_fcfa+$2 WHERE id=$1', [recipientId, amount]);
       await db.query('COMMIT');
       success(res, { transactionId: tx.rows[0].id, amountFcfa: amount });
     } catch (error) { await db.query('ROLLBACK'); throw error; }
@@ -687,9 +688,9 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     if (!Number.isSafeInteger(amount) || amount <= 0) return failure(res, 400, 'Montant invalide');
     await db.query('BEGIN');
     try {
-      const wallet = await db.query('SELECT wallet_balance_fcfa FROM users WHERE id=$1 FOR UPDATE', [req.user.userId]);
-      if (Number(wallet.rows[0]?.wallet_balance_fcfa || 0) < amount) throw Object.assign(new Error('Solde insuffisant'), { status: 409 });
-      await db.query('UPDATE users SET wallet_balance_fcfa=wallet_balance_fcfa-$2 WHERE id=$1', [req.user.userId, amount]);
+      const wallet = await db.query('SELECT gift_earnings_balance_fcfa FROM users WHERE id=$1 FOR UPDATE', [req.user.userId]);
+      if (Number(wallet.rows[0]?.gift_earnings_balance_fcfa || 0) < amount) throw Object.assign(new Error('Gains cadeaux insuffisants'), { status: 409 });
+      await db.query('UPDATE users SET gift_earnings_balance_fcfa=gift_earnings_balance_fcfa-$2 WHERE id=$1', [req.user.userId, amount]);
       const withdrawal = await db.query("INSERT INTO wallet_withdrawals(user_id,amount_fcfa,provider,destination_account,status) VALUES($1,$2,$3,$4,'PENDING') RETURNING id,status", [req.user.userId, amount, provider, destination]);
       await db.query('COMMIT');
       success(res, withdrawal.rows[0]);
