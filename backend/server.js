@@ -1041,6 +1041,44 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   app.post('/v1/status/:statusId/shares', auth, route(async (req,res)=>{await db.query('INSERT INTO status_shares(status_id,user_id) VALUES($1,$2)',[req.params.statusId,req.user.userId]);success(res,true,201);}));
   app.delete('/v1/status/:statusId', auth, route(async (req,res)=>{const result=await db.query('DELETE FROM statuses WHERE id=$1 AND author_id=$2 RETURNING id',[req.params.statusId,req.user.userId]);return result.rowCount?success(res,true):failure(res,404,'Statut introuvable');}));
 
+  // LIVE: persisted sessions and viewer membership. Signaling events travel over Socket.IO below.
+  app.get('/v1/live', auth, route(async (req,res)=>{
+    const result=await db.query(
+      `SELECT l.id,l.title,l.host_id,u.full_name AS host_name,COALESCE(u.avatar_url,'') AS host_avatar,
+       l.status,l.started_at,l.ended_at,
+       (SELECT COUNT(*)::int FROM live_stream_viewers v WHERE v.stream_id=l.id AND v.left_at IS NULL) AS viewer_count
+       FROM live_streams l JOIN users u ON u.id=l.host_id
+       WHERE l.status='LIVE' ORDER BY l.started_at DESC LIMIT 50`
+    );
+    success(res,result.rows);
+  }));
+  app.post('/v1/live', auth, route(async(req,res)=>{
+    const title=text(req.body.title,'Titre du Live',255);
+    await db.query("UPDATE live_streams SET status='ENDED',ended_at=NOW() WHERE host_id=$1 AND status='LIVE'",[req.user.userId]);
+    const created=await db.query(
+      "INSERT INTO live_streams(host_id,title,status,started_at) VALUES($1,$2,'LIVE',NOW()) RETURNING id,title,status,started_at",
+      [req.user.userId,title],
+    );
+    await db.query('INSERT INTO live_stream_viewers(stream_id,user_id) VALUES($1,$2) ON CONFLICT(stream_id,user_id) DO UPDATE SET left_at=NULL,joined_at=NOW()',[created.rows[0].id,req.user.userId]);
+    success(res,created.rows[0],201);
+  }));
+  app.post('/v1/live/:streamId/join',auth,route(async(req,res)=>{
+    const live=await db.query("SELECT id,host_id,title,status FROM live_streams WHERE id=$1 AND status='LIVE'",[req.params.streamId]);
+    if(!live.rowCount)return failure(res,404,'Live introuvable ou terminé');
+    await db.query('INSERT INTO live_stream_viewers(stream_id,user_id) VALUES($1,$2) ON CONFLICT(stream_id,user_id) DO UPDATE SET left_at=NULL,joined_at=NOW()',[req.params.streamId,req.user.userId]);
+    success(res,live.rows[0]);
+  }));
+  app.post('/v1/live/:streamId/leave',auth,route(async(req,res)=>{
+    await db.query('UPDATE live_stream_viewers SET left_at=NOW() WHERE stream_id=$1 AND user_id=$2',[req.params.streamId,req.user.userId]);
+    success(res,true);
+  }));
+  app.post('/v1/live/:streamId/end',auth,route(async(req,res)=>{
+    const ended=await db.query("UPDATE live_streams SET status='ENDED',ended_at=NOW() WHERE id=$1 AND host_id=$2 AND status='LIVE' RETURNING id",[req.params.streamId,req.user.userId]);
+    if(!ended.rowCount)return failure(res,404,'Live actif introuvable');
+    await db.query('UPDATE live_stream_viewers SET left_at=COALESCE(left_at,NOW()) WHERE stream_id=$1',[req.params.streamId]);
+    success(res,true);
+  }));
+
   // Group call sessions never fall back to fabricated local participants.
   const groupCallDto = async (roomCode, viewerId) => {
     const sessionResult = await db.query('SELECT * FROM group_call_sessions WHERE room_code=$1',[roomCode.toUpperCase()]);
