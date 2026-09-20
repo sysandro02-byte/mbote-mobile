@@ -920,13 +920,20 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res, result.rows);
   }));
   app.post('/v1/actus/posts', auth, route(async (req, res) => {
+    const rawType = String(req.body.type || 'text').trim().toLowerCase();
+    const type = rawType.startsWith('image/') || rawType === 'photo' ? 'image'
+      : rawType.startsWith('video/') ? 'video'
+      : rawType.startsWith('audio/') || rawType === 'voice' || rawType === 'vocal' ? 'audio'
+      : rawType === 'texte' ? 'text' : rawType;
+    if (!['text','image','audio','video'].includes(type)) return failure(res, 400, 'Type de publication invalide');
     const content = text(req.body.content, 'Publication');
+    const description = type === 'text' ? content : String(req.body.thumbnail || '').trim();
     const created = await db.query(
       'INSERT INTO news_posts (author_id, category, title, content, image_url, media_type) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [req.user.userId, req.body.visibility || 'public', content.slice(0,255), content, req.body.type === 'text' ? null : req.body.content, String(req.body.type || 'text').toUpperCase()],
+      [req.user.userId, req.body.visibility || 'public', (description || content).slice(0,255), description || content, type === 'text' ? null : content, type.toUpperCase()],
     );
     const user = await db.query('SELECT full_name, avatar_url FROM users WHERE id=$1', [req.user.userId]);
-    success(res, { id: created.rows[0].id, author_id: req.user.userId, author_name: user.rows[0].full_name, author_avatar: user.rows[0].avatar_url || '', type: req.body.type || 'text', content, thumbnail: req.body.thumbnail || null, visibility: req.body.visibility || 'public', comment_count: 0, share_count: 0, reaction_count: 0, my_reaction: null, created_at: created.rows[0].created_at }, 201);
+    success(res, { id: created.rows[0].id, author_id: req.user.userId, author_name: user.rows[0].full_name, author_avatar: user.rows[0].avatar_url || '', type, content: type === 'text' ? content : created.rows[0].image_url, thumbnail: type === 'text' ? null : description, visibility: req.body.visibility || 'public', comment_count: 0, share_count: 0, reaction_count: 0, my_reaction: null, created_at: created.rows[0].created_at }, 201);
   }));
   app.post('/v1/actus/posts/:postId/reactions', auth, route(async (req, res) => {
     const existing = await db.query('SELECT 1 FROM news_post_likes WHERE news_post_id=$1 AND user_id=$2', [req.params.postId, req.user.userId]);
