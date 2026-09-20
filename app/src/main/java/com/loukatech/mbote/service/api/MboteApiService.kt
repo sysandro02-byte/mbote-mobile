@@ -351,6 +351,50 @@ data class PaymentIntentResponse(
 )
 
 @Serializable
+data class GiftCatalogItemDto(
+    val id: String,
+    val name: String,
+    val emoji: String,
+    val priceFcfa: Long,
+    val description: String = ""
+)
+
+@Serializable
+data class GiftInventoryItemDto(val giftId: String, val quantity: Int = 0)
+
+@Serializable
+data class GiftTransactionDto(
+    val id: String,
+    val giftId: String,
+    val giftName: String,
+    val emoji: String,
+    val amountFcfa: Long,
+    val isSent: Boolean = false,
+    val counterpartName: String = "Utilisateur",
+    val status: String = "COMPLETED",
+    val createdAt: String = ""
+)
+
+@Serializable
+data class WalletWithdrawalDto(
+    val id: String,
+    val amountFcfa: Long,
+    val provider: String,
+    val destinationAccount: String,
+    val status: String = "PENDING",
+    val createdAt: String = ""
+)
+
+@Serializable
+data class GiftStateResponse(
+    val inventory: List<GiftInventoryItemDto> = emptyList(),
+    val transactions: List<GiftTransactionDto> = emptyList(),
+    val withdrawals: List<WalletWithdrawalDto> = emptyList(),
+    val walletBalanceFcfa: Long = 0L,
+    val giftEarningsBalanceFcfa: Long = 0L
+)
+
+@Serializable
 private data class PublicMastaUserDto(
     val id: JsonElement,
     val name: String = "",
@@ -719,6 +763,16 @@ class MboteApiService {
             endpoint = "/media/search?type=$type&q=$safeQuery&limit=20"
         ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<MediaSearchResponse>(responseObject(json)).items }
     }
+
+    suspend fun fetchGiftCatalog(): Result<List<GiftCatalogItemDto>> =
+        executeHttpRequest<Unit, List<GiftCatalogItemDto>>(endpoint = "/gifts/catalog") { json ->
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<List<GiftCatalogItemDto>>(responseObject(json))
+        }
+
+    suspend fun fetchGiftState(): Result<GiftStateResponse> =
+        executeHttpRequest<Unit, GiftStateResponse>(endpoint = "/gifts/me") { json ->
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<GiftStateResponse>(responseObject(json))
+        }
 
     suspend fun sendGiftApi(giftId: String, recipientId: String, quantity: Int): Result<Unit> =
         executeHttpRequest<Map<String, Any>, Unit>(
