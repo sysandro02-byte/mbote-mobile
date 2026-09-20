@@ -5,6 +5,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.webrtc.*
@@ -43,6 +45,13 @@ class LiveWebRtcManager(
         if (broadcaster) startCapture()
         MboteSocketManager.connectLiveWebSocket(streamId)
         scope.launch { MboteSocketManager.liveSignals.collectLatest(::handleSignal) }
+        if (!broadcaster) {
+            scope.launch {
+                MboteSocketManager.liveSocketIdentity.filterNotNull().take(1).collect {
+                    requestStream()
+                }
+            }
+        }
     }
 
     fun eglContext(): EglBase.Context = egl.eglBaseContext
@@ -152,7 +161,7 @@ class LiveWebRtcManager(
                         pc.setLocalDescription(sdpObserver(), offer)
                         MboteSocketManager.sendLiveSignal(streamId, "OFFER", from, sdp=offer.description)
                     }, MediaConstraints())
-                } else if (!broadcaster && sdp.isNotBlank()) {
+                } else if (!broadcaster && sdp.isNotBlank() && sdp != "REQUEST_STREAM") {
                     val pc = newPeer(from)
                     pc.setRemoteDescription(sdpObserver(), SessionDescription(SessionDescription.Type.OFFER, sdp))
                     pc.createAnswer(sdpObserver { answer ->
