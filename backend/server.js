@@ -42,6 +42,93 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     catch { return failure(res, 401, 'Session expirée ou invalide'); }
   };
   const member = async (chatId, userId) => (await db.query('SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2', [chatId, userId])).rowCount > 0;
+  const paymentIntentsUrl = () => {
+    const base = String(process.env.PAYMENTS_API_URL || '').replace(/\/+$/, '');
+    if (!base) return '';
+    return /\/payment-intents$/i.test(base) ? base : `${base}/v1/payment-intents`;
+  };
+  const normalizePaymentProvider = (value) => {
+    const provider = String(value || '').trim().toLowerCase();
+    if (['mtn', 'mtn_momo', 'mtn mobile money', 'mtn momo'].includes(provider)) return 'mtn';
+    if (['airtel', 'airtel_money', 'airtel money'].includes(provider)) return 'airtel';
+    if (provider === 'gimac') return 'gimac';
+    throw Object.assign(new Error('Opérateur de paiement non pris en charge'), { status: 400 });
+  };
+  const normalizePaymentStatus = (value) => {
+    const status = String(value || 'pending').trim().toLowerCase();
+    if (status === 'succeeded' || status === 'success' || status === 'completed') return 'SUCCEEDED';
+    if (status === 'failed' || status === 'failure') return 'FAILED';
+    if (status === 'cancelled' || status === 'canceled') return 'CANCELLED';
+    if (status === 'refunded') return 'REFUNDED';
+    return 'PENDING';
+  };
+  const paymentDto = (row) => ({
+    intentId: row.id,
+    provider: row.provider,
+    status: row.status,
+    amount: Number(row.amount_fcfa),
+    currency: 'XAF',
+    purpose: row.purpose || 'GENERIC',
+    checkoutUrl: row.checkout_url || null,
+    fulfilled: Boolean(row.fulfilled_at),
+    instructions: row.status === 'PENDING'
+      ? 'Confirmez la demande Mobile Money sur votre téléphone. Le crédit sera appliqué uniquement après confirmation LoukaPay.'
+      : null,
+  });
+  const fulfillPaymentIntent = async (intentId) => {
+    await db.query('BEGIN');
+    try {
+      const locked = await db.query('SELECT * FROM payment_intents WHERE id=$1 FOR UPDATE', [intentId]);
+      const intent = locked.rows[0];
+      if (!intent || intent.status !== 'SUCCEEDED' || intent.fulfilled_at) {
+        await db.query('COMMIT');
+        return intent || null;
+      }
+      const payload = intent.payload || {};
+      if (intent.purpose === 'GIFT_PURCHASE') {
+        const giftId = String(payload.giftId || '');
+        const quantity = Number(payload.quantity || 0);
+        if (!giftId || !Number.isInteger(quantity) || quantity <= 0) throw new Error('Payload achat cadeau invalide');
+        await db.query(
+          `INSERT INTO user_gift_inventory(user_id,gift_id,quantity) VALUES($1,$2,$3)
+           ON CONFLICT (user_id,gift_id) DO UPDATE SET quantity=user_gift_inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,
+          [intent.user_id, giftId, quantity],
+        );
+      } else if (intent.purpose === 'BADGE_PURCHASE') {
+        const badgeId = String(payload.badgeId || '');
+        if (!badgeId) throw new Error('Payload achat badge invalide');
+        await db.query(
+          'INSERT INTO user_badges(user_id,badge_id) VALUES($1,$2) ON CONFLICT (user_id,badge_id) DO UPDATE SET active=TRUE',
+          [intent.user_id, badgeId],
+        );
+      } else if (intent.purpose === 'WALLET_TOPUP') {
+        await db.query('UPDATE users SET wallet_balance_fcfa=wallet_balance_fcfa+$2 WHERE id=$1', [intent.user_id, intent.amount_fcfa]);
+      }
+      const updated = await db.query('UPDATE payment_intents SET fulfilled_at=NOW(),updated_at=NOW() WHERE id=$1 RETURNING *', [intentId]);
+      await db.query('COMMIT');
+      return updated.rows[0];
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
+  };
+  const refreshPaymentIntent = async (intent) => {
+    if (!intent?.provider_reference || !paymentIntentsUrl() || !process.env.PAYMENTS_API_KEY) return intent;
+    if (['SUCCEEDED', 'FAILED', 'CANCELLED', 'REFUNDED'].includes(intent.status)) {
+      return intent.status === 'SUCCEEDED' && !intent.fulfilled_at ? await fulfillPaymentIntent(intent.id) : intent;
+    }
+    const upstream = await fetch(`${paymentIntentsUrl()}/${encodeURIComponent(intent.provider_reference)}`, {
+      headers: { authorization: `Bearer ${process.env.PAYMENTS_API_KEY}`, accept: 'application/json' },
+    });
+    if (!upstream.ok) throw Object.assign(new Error('LoukaPay n’a pas pu confirmer le statut du paiement'), { status: 502 });
+    const remote = await upstream.json();
+    const status = normalizePaymentStatus(remote.status);
+    const updated = await db.query(
+      'UPDATE payment_intents SET status=$2,checkout_url=COALESCE($3,checkout_url),updated_at=NOW() WHERE id=$1 RETURNING *',
+      [intent.id, status, remote.checkout_url || null],
+    );
+    return status === 'SUCCEEDED' ? await fulfillPaymentIntent(intent.id) : updated.rows[0];
+  };
   const messageDto = (row, userId) => ({ id: row.id, chatId: row.chat_id, senderId: row.sender_id, senderName: row.sender_name, senderAvatar: row.sender_avatar || '', text: row.text || '', timestamp: row.created_at, mediaType: row.media_type || 'NONE', mediaUrl: row.media_url, isStarred: Boolean(row.is_starred), isMine: row.sender_id === userId });
 
   const sendOtpEmail = async (email, code, flow) => {
@@ -717,38 +804,114 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res, { items });
   }));
 
-  app.post('/v1/payments/intents', auth, route(async (req, res) => {
-    if (!process.env.PAYMENTS_API_URL || !process.env.PAYMENTS_API_KEY) {
-      return failure(res, 503, 'Le connecteur de paiement n’est pas configuré');
-    }
-    const provider = text(req.body.provider, 'Opérateur', 50);
-    const amount = Number(req.body.amountFcfa);
-    const phone = text(req.body.phone, 'Téléphone', 50);
-    if (!Number.isSafeInteger(amount) || amount <= 0) return failure(res, 400, 'Montant invalide');
-    const local = await db.query(
-      'INSERT INTO payment_intents(user_id,provider,amount_fcfa,phone) VALUES($1,$2,$3,$4) RETURNING id',
-      [req.user.userId, provider, amount, phone],
+  app.get('/v1/badges/me', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT bc.id FROM user_badges ub JOIN badge_catalog bc ON bc.id=ub.badge_id
+        WHERE ub.user_id=$1 AND ub.active=TRUE ORDER BY ub.acquired_at`,
+      [req.user.userId],
     );
-    const upstream = await fetch(process.env.PAYMENTS_API_URL, {
+    success(res, result.rows.map((row) => row.id));
+  }));
+
+  app.post('/v1/payments/intents', auth, route(async (req, res) => {
+    if (!paymentIntentsUrl() || !process.env.PAYMENTS_API_KEY) {
+      return failure(res, 503, 'Le connecteur LoukaPay n’est pas configuré');
+    }
+    const provider = normalizePaymentProvider(req.body.provider);
+    const phone = text(req.body.phone, 'Téléphone', 50);
+    const purpose = String(req.body.purpose || 'GENERIC').trim().toUpperCase();
+    if (!['GENERIC', 'GIFT_PURCHASE', 'BADGE_PURCHASE', 'WALLET_TOPUP'].includes(purpose)) {
+      return failure(res, 400, 'Type de paiement invalide');
+    }
+
+    let amount = Number(req.body.amountFcfa);
+    let paymentPayload = {};
+    let description = 'Paiement MBoté';
+    if (purpose === 'GIFT_PURCHASE') {
+      const giftId = text(req.body.giftId, 'Cadeau', 80);
+      const quantity = Number(req.body.quantity || 1);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) return failure(res, 400, 'Quantité invalide');
+      const gift = await db.query('SELECT id,name,price_fcfa FROM gift_catalog WHERE id=$1 AND active=TRUE', [giftId]);
+      if (!gift.rowCount) return failure(res, 404, 'Cadeau introuvable');
+      amount = Number(gift.rows[0].price_fcfa) * quantity;
+      paymentPayload = { giftId, quantity };
+      description = `Achat MBoté: ${gift.rows[0].name} x${quantity}`;
+    } else if (purpose === 'BADGE_PURCHASE') {
+      const badgeId = text(req.body.badgeId, 'Badge', 80);
+      const badge = await db.query('SELECT id,title,price_fcfa FROM badge_catalog WHERE id=$1 AND active=TRUE', [badgeId]);
+      if (!badge.rowCount) return failure(res, 404, 'Badge introuvable');
+      const owned = await db.query('SELECT 1 FROM user_badges WHERE user_id=$1 AND badge_id=$2 AND active=TRUE', [req.user.userId, badgeId]);
+      if (owned.rowCount) return failure(res, 409, 'Badge déjà acquis');
+      amount = Number(badge.rows[0].price_fcfa);
+      paymentPayload = { badgeId };
+      description = `Badge MBoté: ${badge.rows[0].title}`;
+    } else {
+      if (!Number.isSafeInteger(amount) || amount <= 0) return failure(res, 400, 'Montant invalide');
+      if (purpose === 'WALLET_TOPUP') description = 'Recharge portefeuille MBoté';
+    }
+
+    const local = await db.query(
+      `INSERT INTO payment_intents(user_id,provider,amount_fcfa,phone,purpose,payload)
+       VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [req.user.userId, provider, amount, phone, purpose, JSON.stringify(paymentPayload)],
+    );
+    const intent = local.rows[0];
+    const upstream = await fetch(paymentIntentsUrl(), {
       method: 'POST',
-      headers: { authorization: `Bearer ${process.env.PAYMENTS_API_KEY}`, 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ intentId: local.rows[0].id, provider, amount, currency: 'XAF', phone, callbackUrl: process.env.PAYMENTS_CALLBACK_URL }),
+      headers: {
+        authorization: `Bearer ${process.env.PAYMENTS_API_KEY}`,
+        'idempotency-key': intent.id,
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        amount,
+        currency: 'XAF',
+        provider,
+        external_reference: intent.id,
+        description,
+        customer_reference: req.user.userId,
+        customer_msisdn: phone,
+        metadata: { mbote_intent_id: intent.id, mbote_purpose: purpose },
+      }),
     });
     if (!upstream.ok) {
-      await db.query("UPDATE payment_intents SET status='FAILED',updated_at=NOW() WHERE id=$1", [local.rows[0].id]);
-      throw Object.assign(new Error('L’opérateur de paiement a refusé la demande'), { status: 502 });
+      const detail = await upstream.text().catch(() => '');
+      await db.query("UPDATE payment_intents SET status='FAILED',updated_at=NOW() WHERE id=$1", [intent.id]);
+      throw Object.assign(new Error(`LoukaPay a refusé la demande${detail ? `: ${detail.slice(0, 180)}` : ''}`), { status: 502 });
     }
-    const payload = await upstream.json();
-    await db.query('UPDATE payment_intents SET provider_reference=$2,status=$3,updated_at=NOW() WHERE id=$1', [local.rows[0].id, payload.reference || null, String(payload.status || 'PENDING').toUpperCase()]);
-    success(res, {
-      intentId: local.rows[0].id,
-      status: String(payload.status || 'PENDING').toUpperCase(),
-      amount,
-      currency: 'XAF',
-      merchantCode: payload.merchantCode || null,
-      ussdCode: payload.ussdCode || null,
-      instructions: payload.instructions || null,
-    }, 201);
+    const remote = await upstream.json();
+    const status = normalizePaymentStatus(remote.status);
+    const updated = await db.query(
+      `UPDATE payment_intents SET provider_reference=$2,status=$3,checkout_url=$4,updated_at=NOW()
+       WHERE id=$1 RETURNING *`,
+      [intent.id, remote.id || null, status, remote.checkout_url || null],
+    );
+    const finalIntent = status === 'SUCCEEDED' ? await fulfillPaymentIntent(intent.id) : updated.rows[0];
+    success(res, paymentDto(finalIntent), 201);
+  }));
+
+  app.get('/v1/payments/intents/:intentId', auth, route(async (req, res) => {
+    const local = await db.query('SELECT * FROM payment_intents WHERE id=$1 AND user_id=$2', [req.params.intentId, req.user.userId]);
+    if (!local.rowCount) return failure(res, 404, 'Paiement introuvable');
+    const refreshed = await refreshPaymentIntent(local.rows[0]);
+    success(res, paymentDto(refreshed));
+  }));
+
+  app.get('/v1/payments/intents', auth, route(async (req, res) => {
+    const result = await db.query(
+      'SELECT * FROM payment_intents WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50',
+      [req.user.userId],
+    );
+    const refreshed = [];
+    for (const intent of result.rows) {
+      if (intent.status === 'PENDING' && intent.provider_reference) {
+        try { refreshed.push(await refreshPaymentIntent(intent)); } catch { refreshed.push(intent); }
+      } else if (intent.status === 'SUCCEEDED' && !intent.fulfilled_at) {
+        refreshed.push(await fulfillPaymentIntent(intent.id));
+      } else refreshed.push(intent);
+    }
+    success(res, refreshed.map(paymentDto));
   }));
 
   // Session, profile and public configuration contracts consumed by Android.

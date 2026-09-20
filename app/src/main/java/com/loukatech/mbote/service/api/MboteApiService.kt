@@ -336,19 +336,30 @@ data class MediaSearchItem(
 private data class MediaSearchResponse(val items: List<MediaSearchItem> = emptyList())
 
 @Serializable
-private data class PaymentIntentRequest(val provider: String, val amount: Long, val currency: String, val phone: String)
+private data class PaymentIntentRequest(
+    val provider: String,
+    val amountFcfa: Long = 0L,
+    val phone: String,
+    val purpose: String = "GENERIC",
+    val giftId: String? = null,
+    val quantity: Int? = null,
+    val badgeId: String? = null
+)
 
 @Serializable
 data class PaymentIntentResponse(
-    val id: String,
+    val intentId: String,
     val provider: String,
     val status: String,
     val amount: Long,
     val currency: String,
-    val merchantCode: String? = null,
-    val ussdCode: String? = null,
+    val purpose: String = "GENERIC",
+    val checkoutUrl: String? = null,
+    val fulfilled: Boolean = false,
     val instructions: String? = null
-)
+) {
+    val id: String get() = intentId
+}
 
 @Serializable
 data class GiftCatalogItemDto(
@@ -788,12 +799,35 @@ class MboteApiService {
             requestBody = mapOf("amountFcfa" to amountFcfa, "provider" to provider, "destinationAccount" to destinationAccount)
         ) { Unit }
 
-    suspend fun createPaymentIntent(provider: String, amountFcfa: Long, phone: String): Result<PaymentIntentResponse> =
+    suspend fun createPaymentIntent(
+        provider: String,
+        amountFcfa: Long,
+        phone: String,
+        purpose: String = "GENERIC",
+        giftId: String? = null,
+        quantity: Int? = null,
+        badgeId: String? = null
+    ): Result<PaymentIntentResponse> =
         executeHttpRequest(
             endpoint = "/payments/intents",
             method = "POST",
-            requestBody = PaymentIntentRequest(provider, amountFcfa, "XAF", phone)
+            requestBody = PaymentIntentRequest(provider, amountFcfa, phone, purpose, giftId, quantity, badgeId)
         ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<PaymentIntentResponse>(responseObject(json)) }
+
+    suspend fun fetchPaymentIntents(): Result<List<PaymentIntentResponse>> =
+        executeHttpRequest<Unit, List<PaymentIntentResponse>>(endpoint = "/payments/intents") { json ->
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<List<PaymentIntentResponse>>(responseArray(json))
+        }
+
+    suspend fun refreshPaymentIntent(intentId: String): Result<PaymentIntentResponse> =
+        executeHttpRequest<Unit, PaymentIntentResponse>(endpoint = "/payments/intents/$intentId") { json ->
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<PaymentIntentResponse>(responseObject(json))
+        }
+
+    suspend fun fetchMyBadges(): Result<List<String>> =
+        executeHttpRequest<Unit, List<String>>(endpoint = "/badges/me") { json ->
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<List<String>>(responseArray(json))
+        }
 
     suspend fun getRegistrationPublicConfig(): Result<RegistrationPublicConfig> =
         executeHttpRequest<Unit, RegistrationPublicConfig>(endpoint = "/public-settings") { json ->
