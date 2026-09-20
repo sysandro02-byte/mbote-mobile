@@ -13,6 +13,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.loukatech.mbote.service.api.MboteApiService
+import com.loukatech.mbote.service.LiveWebRtcManager
+import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoTrack
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -93,6 +96,8 @@ fun LiveBroadcastDialog(
     val lifecycleOwner = LocalLifecycleOwner.current
     var isLiveStarted by remember { mutableStateOf(false) }
     var activeStreamId by remember { mutableStateOf<String?>(null) }
+    var liveRtc by remember { mutableStateOf<LiveWebRtcManager?>(null) }
+    var localRtcTrack by remember { mutableStateOf<VideoTrack?>(null) }
     var isStartingLive by remember { mutableStateOf(false) }
     var cameraAllowed by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
     var microphoneAllowed by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) }
@@ -304,8 +309,18 @@ fun LiveBroadcastDialog(
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            // Real camera preview for the broadcaster; viewers receive media through the live signaling layer.
-            if (cameraAllowed) {
+            if (cameraAllowed && localRtcTrack != null && liveRtc != null) {
+                AndroidView(
+                    factory = { ctx ->
+                        SurfaceViewRenderer(ctx).also { renderer ->
+                            renderer.init(liveRtc!!.eglContext(), null)
+                            renderer.setMirror(true)
+                            localRtcTrack?.addSink(renderer)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else if (cameraAllowed) {
                 AndroidView(
                     factory = { ctx ->
                         PreviewView(ctx).also { previewView ->
@@ -319,8 +334,7 @@ fun LiveBroadcastDialog(
                                 }
                             }, ContextCompat.getMainExecutor(ctx))
                         }
-                    },
-                    modifier = Modifier.fillMaxSize()
+                    }, modifier = Modifier.fillMaxSize()
                 )
             } else {
                 Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
@@ -422,6 +436,9 @@ fun LiveBroadcastDialog(
                         if (streamId != null) {
                             coroutineScope.launch {
                                 com.loukatech.mbote.service.MboteSocketManager.sendLiveBroadcastStatus(streamId, "ENDED")
+                                liveRtc?.close()
+                                liveRtc = null
+                                localRtcTrack = null
                                 com.loukatech.mbote.service.MboteSocketManager.leaveLive(streamId)
                                 MboteApiService.endLive(streamId)
                                 onDismiss()
@@ -565,6 +582,13 @@ fun LiveBroadcastDialog(
                                     MboteApiService.createLive(liveTitle.trim())
                                         .onSuccess { live ->
                                             activeStreamId = live.id
+                                            liveRtc?.close()
+                                            liveRtc = LiveWebRtcManager(
+                                                context = context,
+                                                streamId = live.id,
+                                                broadcaster = true,
+                                                onLocalVideoTrack = { track -> localRtcTrack = track }
+                                            )
                                             com.loukatech.mbote.service.MboteSocketManager.connect()
                                             com.loukatech.mbote.service.MboteSocketManager.joinLive(live.id)
                                             com.loukatech.mbote.service.MboteSocketManager.sendLiveBroadcastStatus(live.id, "LIVE")
