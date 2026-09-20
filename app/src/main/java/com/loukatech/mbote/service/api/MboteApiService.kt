@@ -720,6 +720,20 @@ class MboteApiService {
         ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<MediaSearchResponse>(responseObject(json)).items }
     }
 
+    suspend fun sendGiftApi(giftId: String, recipientId: String, quantity: Int): Result<Unit> =
+        executeHttpRequest<Map<String, Any>, Unit>(
+            endpoint = "/gifts/send",
+            method = "POST",
+            requestBody = mapOf("giftId" to giftId, "recipientId" to recipientId, "quantity" to quantity)
+        ) { Unit }
+
+    suspend fun requestWalletWithdrawalApi(amountFcfa: Long, provider: String, destinationAccount: String): Result<Unit> =
+        executeHttpRequest<Map<String, Any>, Unit>(
+            endpoint = "/wallet/withdrawals",
+            method = "POST",
+            requestBody = mapOf("amountFcfa" to amountFcfa, "provider" to provider, "destinationAccount" to destinationAccount)
+        ) { Unit }
+
     suspend fun createPaymentIntent(provider: String, amountFcfa: Long, phone: String): Result<PaymentIntentResponse> =
         executeHttpRequest(
             endpoint = "/payments/intents",
