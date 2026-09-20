@@ -1705,12 +1705,18 @@ class MboteRepository(
         val details = listOf(description, workMode,
             requirements.joinToString(", "), benefits.joinToString(", "))
             .filter(String::isNotBlank).joinToString("\n")
+        if (title.isBlank() || company.isBlank() || location.isBlank() || description.isBlank()) {
+            return Result.failure(IllegalArgumentException("Titre, entreprise, lieu et description sont obligatoires."))
+        }
         return publicationApiService.createJob(mapOf(
             "title" to title.trim(), "company" to company.trim(), "location" to location.trim(),
-            "activityDomain" to domain.trim(), "type" to contractType, "duration" to contractType,
+            "activityDomain" to domain.trim().ifBlank { "Autre" },
+            "type" to contractType.trim().ifBlank { "CDI" },
+            "duration" to contractType.trim().ifBlank { "CDI" },
+            "workMode" to workMode.trim().ifBlank { "Sur site" },
             "salary" to salary.trim(), "description" to details,
             "applyEmail" to _userProfile.value.email.trim()
-        )).onSuccess { newJob -> _jobs.update { listOf(newJob) + it } }
+        )).onSuccess { newJob -> _jobs.update { listOf(newJob) + it.filterNot { job -> job.id == newJob.id } } }
     }
 
     fun updateUserProfile(name: String, bio: String, phone: String, city: String) {
