@@ -766,7 +766,7 @@ class MboteApiService {
 
     suspend fun fetchGiftCatalog(): Result<List<GiftCatalogItemDto>> =
         executeHttpRequest<Unit, List<GiftCatalogItemDto>>(endpoint = "/gifts/catalog") { json ->
-            MboteBackendConfig.jsonParser.decodeFromJsonElement<List<GiftCatalogItemDto>>(responseObject(json))
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<List<GiftCatalogItemDto>>(responseArray(json))
         }
 
     suspend fun fetchGiftState(): Result<GiftStateResponse> =
