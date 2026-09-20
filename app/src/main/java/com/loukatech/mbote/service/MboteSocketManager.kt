@@ -124,6 +124,7 @@ object MboteSocketManager {
                 client.on("receive_message") { args -> handleMessage(args.firstOrNull()) }
                 client.on("message:new") { args -> handleMessage(args.firstOrNull()) }
                 client.on("chat:typing") { args -> handleTyping(args.firstOrNull()) }
+                client.on("live:event") { args -> handleLiveEvent(args.firstOrNull()) }
                 client.on("user_typing") { args -> handleTyping(args.firstOrNull(), true) }
                 client.on("user_stop_typing") { args -> handleTyping(args.firstOrNull(), false) }
                 client.connect()
@@ -206,6 +207,37 @@ object MboteSocketManager {
     }
 
     fun clearTyping(chatId: String) = onRemotePartnerTypingReceived(chatId, "", false)
+
+    private fun handleLiveEvent(raw: Any?) {
+        val data = raw as? JSONObject ?: return
+        val event = LiveStreamSocketEvent(
+            type = data.optString("type"),
+            streamId = data.optString("streamId"),
+            senderName = data.optString("senderName", "Spectateur"),
+            payloadText = data.optString("payloadText").ifBlank { null },
+            emoji = data.optString("emoji").ifBlank { null },
+            giftId = data.optString("giftId").ifBlank { null },
+            giftName = data.optString("giftName").ifBlank { null },
+            giftEmoji = data.optString("giftEmoji").ifBlank { null },
+            giftValueFcfa = data.optLong("giftValueFcfa", 0),
+            viewerCount = data.optInt("viewerCount", 0),
+            status = data.optString("status").ifBlank { null },
+            badgeType = data.optString("badgeType").ifBlank { null },
+            timestamp = data.optLong("timestamp", System.currentTimeMillis())
+        )
+        if (event.type == "LIVE_VIEWER_COUNT" && event.streamId.isNotBlank()) {
+            _liveViewerCounts.update { it + (event.streamId to event.viewerCount) }
+        }
+        _liveStreamEvents.tryEmit(event)
+    }
+
+    fun joinLive(streamId: String) {
+        socket?.emit("live:join", JSONObject().put("streamId", streamId))
+    }
+
+    fun leaveLive(streamId: String) {
+        socket?.emit("live:leave", JSONObject().put("streamId", streamId))
+    }
 
     fun sendLiveComment(streamId: String, senderName: String, text: String, badgeType: String? = null) {
         socket?.emit("live:comment", JSONObject().put("streamId", streamId).put("text", text).put("badgeType", badgeType))
