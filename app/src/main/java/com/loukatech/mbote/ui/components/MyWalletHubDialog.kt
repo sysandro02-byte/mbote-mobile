@@ -38,7 +38,7 @@ fun MyWalletHubDialog(
     userProfile: UserProfile,
     userGiftState: UserGiftState,
     onCashout: (amount: Long, provider: String, phone: String) -> Unit,
-    onTopUpWallet: (amount: Long, provider: String) -> Unit,
+    onTopUpWallet: (amount: Long, provider: String) -> Boolean,
     onOpenBadgeStore: () -> Unit = {},
     onOpenGiftStore: () -> Unit = {},
     onDismiss: () -> Unit
@@ -486,9 +486,10 @@ fun MyWalletHubDialog(
                     onClick = {
                         val amount = topUpAmountText.toLongOrNull() ?: 0L
                         if (amount > 0) {
-                            onTopUpWallet(amount, topUpProvider)
-                            Toast.makeText(context, "✅ Portefeuille rechargé de $amount FCFA via $topUpProvider !", Toast.LENGTH_SHORT).show()
-                            showTopUpModal = false
+                            if (onTopUpWallet(amount, topUpProvider)) {
+                                Toast.makeText(context, "Paiement initié. Le portefeuille sera crédité après confirmation LoukaPay.", Toast.LENGTH_LONG).show()
+                                showTopUpModal = false
+                            }
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary)
