@@ -589,8 +589,6 @@ fun LiveBroadcastDialog(
                                                 broadcaster = true,
                                                 onLocalVideoTrack = { track -> localRtcTrack = track }
                                             )
-                                            com.loukatech.mbote.service.MboteSocketManager.connect()
-                                            com.loukatech.mbote.service.MboteSocketManager.joinLive(live.id)
                                             com.loukatech.mbote.service.MboteSocketManager.sendLiveBroadcastStatus(live.id, "LIVE")
                                             isLiveStarted = true
                                             Toast.makeText(context, "Direct MBoté démarré.", Toast.LENGTH_SHORT).show()
