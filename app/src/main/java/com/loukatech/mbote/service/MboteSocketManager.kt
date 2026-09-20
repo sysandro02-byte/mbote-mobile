@@ -21,6 +21,11 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import org.json.JSONObject
 import java.net.URI
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 
 enum class SocketConnectionState { DISCONNECTED, CONNECTING, CONNECTED, RECONNECTING }
 
@@ -67,6 +72,10 @@ object MboteSocketManager {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var socket: Socket? = null
     private var currentToken: String? = null
+    private var liveWebSocket: WebSocket? = null
+    private val liveHttpClient = OkHttpClient()
+    private val _liveSignals = MutableSharedFlow<JSONObject>(extraBufferCapacity = 128)
+    val liveSignals: SharedFlow<JSONObject> = _liveSignals.asSharedFlow()
 
     private val _connectionState = MutableStateFlow(SocketConnectionState.DISCONNECTED)
     val connectionState: StateFlow<SocketConnectionState> = _connectionState.asStateFlow()
@@ -229,6 +238,42 @@ object MboteSocketManager {
             _liveViewerCounts.update { it + (event.streamId to event.viewerCount) }
         }
         _liveStreamEvents.tryEmit(event)
+    }
+
+    fun connectLiveWebSocket(streamId: String) {
+        val token = MboteBackendConfig.authToken?.trim().orEmpty()
+        if (token.isBlank()) return
+        liveWebSocket?.close(1000, "reconnect")
+        val base = BuildConfig.VITE_SOCKET_URL.trimEnd('/').replaceFirst("https://", "wss://").replaceFirst("http://", "ws://")
+        val request = Request.Builder().url("$base/ws").build()
+        liveWebSocket = liveHttpClient.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                webSocket.send(JSONObject().put("type","AUTH").put("token",token).toString())
+            }
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val data = runCatching { JSONObject(text) }.getOrNull() ?: return
+                when (data.optString("type")) {
+                    "AUTH_OK" -> webSocket.send(JSONObject().put("type","LIVE_JOIN").put("streamId",streamId).toString())
+                    "LIVE_SIGNAL" -> _liveSignals.tryEmit(data)
+                    else -> handleLiveEvent(data)
+                }
+            }
+        })
+    }
+
+    fun sendLiveSignal(streamId: String, signalType: String, targetUserId: String? = null, sdp: String? = null, candidate: String? = null, sdpMid: String? = null, sdpMLineIndex: Int? = null) {
+        val payload = JSONObject().put("type","LIVE_SIGNAL").put("streamId",streamId).put("signalType",signalType)
+        targetUserId?.let { payload.put("targetUserId",it) }
+        sdp?.let { payload.put("sdp",it) }
+        candidate?.let { payload.put("candidate",it) }
+        sdpMid?.let { payload.put("sdpMid",it) }
+        sdpMLineIndex?.let { payload.put("sdpMLineIndex",it) }
+        liveWebSocket?.send(payload.toString())
+    }
+
+    fun disconnectLiveWebSocket() {
+        liveWebSocket?.close(1000, "Live terminé")
+        liveWebSocket = null
     }
 
     fun joinLive(streamId: String) {
