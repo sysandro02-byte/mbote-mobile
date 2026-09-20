@@ -76,6 +76,8 @@ object MboteSocketManager {
     private val liveHttpClient = OkHttpClient()
     private val _liveSignals = MutableSharedFlow<JSONObject>(extraBufferCapacity = 128)
     val liveSignals: SharedFlow<JSONObject> = _liveSignals.asSharedFlow()
+    private val _liveSocketIdentity = MutableStateFlow<String?>(null)
+    val liveSocketIdentity: StateFlow<String?> = _liveSocketIdentity.asStateFlow()
 
     private val _connectionState = MutableStateFlow(SocketConnectionState.DISCONNECTED)
     val connectionState: StateFlow<SocketConnectionState> = _connectionState.asStateFlow()
@@ -253,7 +255,7 @@ object MboteSocketManager {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 val data = runCatching { JSONObject(text) }.getOrNull() ?: return
                 when (data.optString("type")) {
-                    "AUTH_OK" -> webSocket.send(JSONObject().put("type","LIVE_JOIN").put("streamId",streamId).toString())
+                    "AUTH_OK" -> { _liveSocketIdentity.value = data.optString("userId").ifBlank { null }; webSocket.send(JSONObject().put("type","LIVE_JOIN").put("streamId",streamId).toString()) }
                     "LIVE_SIGNAL" -> _liveSignals.tryEmit(data)
                     else -> handleLiveEvent(data)
                 }
@@ -274,6 +276,7 @@ object MboteSocketManager {
     fun disconnectLiveWebSocket() {
         liveWebSocket?.close(1000, "Live terminé")
         liveWebSocket = null
+        _liveSocketIdentity.value = null
     }
 
     fun joinLive(streamId: String) {
