@@ -56,6 +56,7 @@ import com.loukatech.mbote.model.ChannelSummary
 import com.loukatech.mbote.model.ShortVideo
 import com.loukatech.mbote.model.StatusItem
 import com.loukatech.mbote.ui.components.CreateChannelDialog
+import com.loukatech.mbote.ui.components.LiveBroadcastDialog
 import com.loukatech.mbote.ui.theme.MbotePurpleLight
 import com.loukatech.mbote.ui.theme.MbotePurplePrimary
 import com.loukatech.mbote.ui.theme.MbotePurpleSoft
@@ -126,6 +127,7 @@ fun ActusScreen(
     var showCreateChannelDialog by remember { mutableStateOf(false) }
     var showPublishTypeMenu by remember { mutableStateOf(false) }
     var showNewActusModal by remember { mutableStateOf(false) }
+    var showLiveDialog by remember { mutableStateOf(false) }
     var submittingActus by remember { mutableStateOf(false) }
     var initialMediaType by remember { mutableStateOf("Photo") }
     var isRefreshing by remember { mutableStateOf(false) }
@@ -682,8 +684,11 @@ fun ActusScreen(
             PublishTypeMenu(
                 onSelectType = { typeLabel ->
                     showPublishTypeMenu = false
-                    initialMediaType = typeLabel
-                    showNewActusModal = true
+                    if (typeLabel == "Live") showLiveDialog = true
+                    else {
+                        initialMediaType = typeLabel
+                        showNewActusModal = true
+                    }
                 }
             )
         }
@@ -703,6 +708,13 @@ fun ActusScreen(
                 imageVector = if (showPublishTypeMenu) Icons.Default.Close else Icons.Default.Add,
                 contentDescription = "Publier sur Actus",
                 modifier = Modifier.size(28.dp)
+            )
+        }
+
+        if (showLiveDialog) {
+            LiveBroadcastDialog(
+                currentUserAvatar = "",
+                onDismiss = { showLiveDialog = false }
             )
         }
 
@@ -774,6 +786,11 @@ private fun PublishTypeMenu(
                 icon = Icons.Outlined.Videocam,
                 label = "Vidéo",
                 onClick = { onSelectType("Vidéo") }
+            )
+            PublishTypeMenuItem(
+                icon = Icons.Default.Sensors,
+                label = "Live",
+                onClick = { onSelectType("Live") }
             )
         }
     }
