@@ -57,6 +57,9 @@ import com.loukatech.mbote.model.ShortVideo
 import com.loukatech.mbote.model.StatusItem
 import com.loukatech.mbote.ui.components.CreateChannelDialog
 import com.loukatech.mbote.ui.components.LiveBroadcastDialog
+import com.loukatech.mbote.ui.components.LiveViewerDialog
+import com.loukatech.mbote.service.api.LiveStreamDto
+import com.loukatech.mbote.service.api.MboteApiService
 import com.loukatech.mbote.ui.theme.MbotePurpleLight
 import com.loukatech.mbote.ui.theme.MbotePurplePrimary
 import com.loukatech.mbote.ui.theme.MbotePurpleSoft
@@ -128,11 +131,20 @@ fun ActusScreen(
     var showPublishTypeMenu by remember { mutableStateOf(false) }
     var showNewActusModal by remember { mutableStateOf(false) }
     var showLiveDialog by remember { mutableStateOf(false) }
+    var activeLives by remember { mutableStateOf<List<LiveStreamDto>>(emptyList()) }
+    var selectedLive by remember { mutableStateOf<LiveStreamDto?>(null) }
     var submittingActus by remember { mutableStateOf(false) }
     var initialMediaType by remember { mutableStateOf("Photo") }
     var isRefreshing by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            MboteApiService.fetchActiveLives().onSuccess { activeLives = it }
+            delay(15_000)
+        }
+    }
 
     // Full screen media viewer state according to requirement (6)
     var activeFullScreenMediaUrl by remember { mutableStateOf<String?>(null) }
@@ -214,6 +226,7 @@ fun ActusScreen(
                 isRefreshing = true
                 onRefresh()
                 coroutineScope.launch {
+                    MboteApiService.fetchActiveLives().onSuccess { activeLives = it }
                     kotlinx.coroutines.delay(600)
                     isRefreshing = false
                 }
@@ -354,6 +367,96 @@ fun ActusScreen(
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
+                }
+            }
+
+            if (activeLives.isNotEmpty()) {
+                item {
+                    Column(modifier = Modifier.padding(top = 6.dp, bottom = 10.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(color = Color.Red, shape = RoundedCornerShape(6.dp)) {
+                                    Text(
+                                        text = " LIVE ",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "En direct maintenant",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = "${activeLives.size}",
+                                color = Color.Red,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(activeLives, key = { it.id }) { live ->
+                                Surface(
+                                    onClick = { selectedLive = live },
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                                    border = BorderStroke(1.dp, Color.Red.copy(alpha = 0.35f)),
+                                    modifier = Modifier.width(210.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Surface(color = Color.Red, shape = RoundedCornerShape(5.dp)) {
+                                                Text(
+                                                    "LIVE",
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 10.sp,
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                text = "${live.viewerCount} spectateurs",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            text = live.title,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp
+                                        )
+                                        if (live.hostName.isNotBlank()) {
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                text = live.hostName,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -715,6 +818,14 @@ fun ActusScreen(
             LiveBroadcastDialog(
                 currentUserAvatar = "",
                 onDismiss = { showLiveDialog = false }
+            )
+        }
+
+        selectedLive?.let { live ->
+            LiveViewerDialog(
+                live = live,
+                currentUserName = currentUserName,
+                onDismiss = { selectedLive = null }
             )
         }
 
