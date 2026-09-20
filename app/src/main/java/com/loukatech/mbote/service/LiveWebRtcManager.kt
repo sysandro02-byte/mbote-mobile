@@ -63,10 +63,21 @@ class LiveWebRtcManager(
 
     private fun newPeer(peerId: String): PeerConnection {
         return peers.getOrPut(peerId) {
-            val ice = listOf(
-                PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-                PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
-            )
+            val ice = buildList {
+                add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
+                add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer())
+                val turnUrl = com.loukatech.mbote.BuildConfig.MBOTE_TURN_URL.trim()
+                val turnUser = com.loukatech.mbote.BuildConfig.MBOTE_TURN_USERNAME
+                val turnCredential = com.loukatech.mbote.BuildConfig.MBOTE_TURN_CREDENTIAL
+                if (turnUrl.isNotBlank() && turnUser.isNotBlank() && turnCredential.isNotBlank()) {
+                    add(
+                        PeerConnection.IceServer.builder(turnUrl)
+                            .setUsername(turnUser)
+                            .setPassword(turnCredential)
+                            .createIceServer()
+                    )
+                }
+            }
             factory.createPeerConnection(ice, object : PeerConnection.Observer {
                 override fun onIceCandidate(c: IceCandidate) {
                     MboteSocketManager.sendLiveSignal(streamId, "ICE", peerId, candidate=c.sdp, sdpMid=c.sdpMid, sdpMLineIndex=c.sdpMLineIndex)
