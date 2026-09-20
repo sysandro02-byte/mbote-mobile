@@ -129,7 +129,7 @@ test('LoukaPay payment creation uses the real merchant API contract', async () =
   } };
   try {
     await withServer(createApp({ db, jwtSecret: secret }), async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/v1/payments/intents`, {
+      const response = await previousFetch(`${baseUrl}/v1/payments/intents`, {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ provider: 'mtn', phone: '242060000000', purpose: 'BADGE_PURCHASE', badgeId: 'badge_vip' }),
@@ -181,7 +181,7 @@ test('successful LoukaPay badge payment is fulfilled once on the server', async 
   } };
   try {
     await withServer(createApp({ db, jwtSecret: secret }), async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/v1/payments/intents/${intentId}`, { headers: { authorization: `Bearer ${token}` } });
+      const response = await previousFetch(`${baseUrl}/v1/payments/intents/${intentId}`, { headers: { authorization: `Bearer ${token}` } });
       assert.equal(response.status, 200);
       const body = await response.json();
       assert.equal(body.data.status, 'SUCCEEDED');
