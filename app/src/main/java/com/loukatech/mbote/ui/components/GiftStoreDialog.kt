@@ -222,6 +222,16 @@ fun GiftStoreDialog(
                     ) {
                         if (selectedTab == 0) {
                             // BUNDLES LIST
+                            if (bundles.isEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Les packs seront affichés ici dès qu’ils seront publiés par le serveur MBoté.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(vertical = 24.dp)
+                                    )
+                                }
+                            }
                             items(bundles) { bundle ->
                                 Card(
                                     shape = RoundedCornerShape(16.dp),
@@ -322,6 +332,16 @@ fun GiftStoreDialog(
                             }
                         } else {
                             // SINGLE GIFTS LIST
+                            if (singleGifts.isEmpty()) {
+                                item {
+                                    Text(
+                                        text = "Catalogue indisponible pour le moment. Réessayez après synchronisation.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(vertical = 24.dp)
+                                    )
+                                }
+                            }
                             items(singleGifts) { gift ->
                                 Card(
                                     shape = RoundedCornerShape(16.dp),
