@@ -1266,7 +1266,7 @@ if (require.main === module) {
       let message; try { message=JSON.parse(raw.toString()); } catch { return; }
       if(!identity) {
         if(message.type!=='AUTH') return socket.close(1008,'Authentification requise');
-        try { identity=jwt.verify(String(message.token||''),process.env.JWT_SECRET,{issuer:'mbote-api',audience:'mbote-mobile'}); socket.send(JSON.stringify({type:'AUTH_OK'})); }
+        try { identity=jwt.verify(String(message.token||''),process.env.JWT_SECRET,{issuer:'mbote-api',audience:'mbote-mobile'}); socket.mboteUserId=identity.userId; socket.send(JSON.stringify({type:'AUTH_OK',userId:identity.userId})); }
         catch { socket.close(1008,'Session invalide'); }
         return;
       }
@@ -1286,7 +1286,18 @@ if (require.main === module) {
       if(message.type==='LIVE_COMMENT') broadcastLive(streamId,{...base,type:'LIVE_COMMENT',payloadText:String(message.text||''),badgeType:message.badgeType||null});
       if(message.type==='LIVE_REACTION') broadcastLive(streamId,{...base,type:'LIVE_REACTION',emoji:String(message.emoji||'')});
       if(message.type==='LIVE_GIFT') broadcastLive(streamId,{...base,type:'LIVE_GIFT',giftId:message.giftId||null,giftName:message.giftName||null,giftEmoji:message.emoji||null,giftValueFcfa:Number(message.valueFcfa)||0});
-      if(message.type==='LIVE_SIGNAL') broadcastLive(streamId,{...message,fromUserId:identity.userId},socket);
+      if(message.type==='LIVE_SIGNAL') {
+        const signalType=String(message.signalType||'');
+        if(!['OFFER','ANSWER','ICE'].includes(signalType))return;
+        const packet={...message,type:'LIVE_SIGNAL',signalType,fromUserId:identity.userId};
+        const targetUserId=String(message.targetUserId||'');
+        if(targetUserId) {
+          const encoded=JSON.stringify(packet);
+          for(const client of (liveSockets.get(streamId)||new Set())) {
+            if(client!==socket && client.readyState===1 && client.mboteUserId===targetUserId) client.send(encoded);
+          }
+        } else broadcastLive(streamId,packet,socket);
+      }
       if(message.type==='LIVE_STATUS') broadcastLive(streamId,{...base,type:'LIVE_STATUS',status:String(message.status||'')});
     });
     socket.on('close',async()=>{
