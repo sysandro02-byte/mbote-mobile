@@ -255,7 +255,7 @@ object MboteSocketManager {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 val data = runCatching { JSONObject(text) }.getOrNull() ?: return
                 when (data.optString("type")) {
-                    "AUTH_OK" -> { _liveSocketIdentity.value = data.optString("userId").ifBlank { null }; webSocket.send(JSONObject().put("type","LIVE_JOIN").put("streamId",streamId).toString()) }
+                    "AUTH_OK" -> { webSocket.send(JSONObject().put("type","LIVE_JOIN").put("streamId",streamId).toString()); _liveSocketIdentity.value = data.optString("userId").ifBlank { null } }
                     "LIVE_SIGNAL" -> _liveSignals.tryEmit(data)
                     else -> handleLiveEvent(data)
                 }
@@ -280,26 +280,37 @@ object MboteSocketManager {
     }
 
     fun joinLive(streamId: String) {
-        socket?.emit("live:join", JSONObject().put("streamId", streamId))
+        liveWebSocket?.send(JSONObject().put("type","LIVE_JOIN").put("streamId",streamId).toString())
     }
 
     fun leaveLive(streamId: String) {
-        socket?.emit("live:leave", JSONObject().put("streamId", streamId))
+        liveWebSocket?.send(JSONObject().put("type","LIVE_LEAVE").put("streamId",streamId).toString())
     }
 
     fun sendLiveComment(streamId: String, senderName: String, text: String, badgeType: String? = null) {
-        socket?.emit("live:comment", JSONObject().put("streamId", streamId).put("text", text).put("badgeType", badgeType))
+        liveWebSocket?.send(
+            JSONObject().put("type","LIVE_COMMENT").put("streamId",streamId)
+                .put("senderName",senderName).put("text",text).put("badgeType",badgeType).toString()
+        )
     }
 
     fun sendLiveReaction(streamId: String, senderName: String, emoji: String) {
-        socket?.emit("live:reaction", JSONObject().put("streamId", streamId).put("emoji", emoji))
+        liveWebSocket?.send(
+            JSONObject().put("type","LIVE_REACTION").put("streamId",streamId)
+                .put("senderName",senderName).put("emoji",emoji).toString()
+        )
     }
 
     fun sendLiveGift(streamId: String, senderName: String, giftId: String, giftName: String, emoji: String, valueFcfa: Long) {
-        socket?.emit("live:gift", JSONObject().put("streamId", streamId).put("giftId", giftId).put("giftName", giftName).put("emoji", emoji).put("valueFcfa", valueFcfa))
+        liveWebSocket?.send(
+            JSONObject().put("type","LIVE_GIFT").put("streamId",streamId).put("senderName",senderName)
+                .put("giftId",giftId).put("giftName",giftName).put("emoji",emoji).put("valueFcfa",valueFcfa).toString()
+        )
     }
 
     fun sendLiveBroadcastStatus(streamId: String, status: String) {
-        socket?.emit("live:status", JSONObject().put("streamId", streamId).put("status", status))
+        liveWebSocket?.send(
+            JSONObject().put("type","LIVE_STATUS").put("streamId",streamId).put("status",status).toString()
+        )
     }
 }
