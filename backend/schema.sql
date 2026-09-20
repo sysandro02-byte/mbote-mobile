@@ -591,3 +591,23 @@ CREATE TABLE IF NOT EXISTS publication_uploads (
 );
 CREATE INDEX IF NOT EXISTS idx_publication_uploads_owner_created
   ON publication_uploads(owner_id, created_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS live_streams (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  host_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(255) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'LIVE' CHECK (status IN ('LIVE','ENDED')),
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ended_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_live_streams_status_started ON live_streams(status, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS live_stream_viewers (
+  stream_id UUID NOT NULL REFERENCES live_streams(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  left_at TIMESTAMPTZ,
+  PRIMARY KEY(stream_id,user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_live_stream_viewers_active ON live_stream_viewers(stream_id,left_at);
