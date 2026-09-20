@@ -594,6 +594,63 @@ class MboteRepository(
             return Result.success(Unit)
         }
 
+        apiService.fetchGiftCatalog().onSuccess { catalog ->
+            _userGiftState.update { current ->
+                current.copy(
+                    storeGifts = catalog.map { item ->
+                        GiftItem(
+                            id = item.id,
+                            name = item.name,
+                            emoji = item.emoji,
+                            priceFcfa = item.priceFcfa,
+                            description = item.description
+                        )
+                    }
+                )
+            }
+        }
+
+        apiService.fetchGiftState().onSuccess { remote ->
+            _userGiftState.update { current ->
+                current.copy(
+                    inventory = remote.inventory.associate { it.giftId to it.quantity },
+                    transactions = remote.transactions.map { tx ->
+                        GiftTransaction(
+                            id = tx.id,
+                            giftId = tx.giftId,
+                            giftName = tx.giftName,
+                            emoji = tx.emoji,
+                            amountFcfa = tx.amountFcfa,
+                            isReceived = !tx.isSent,
+                            counterpartName = tx.counterpartName,
+                            timestamp = tx.createdAt.ifBlank { "Récent" },
+                            status = when (tx.status.uppercase(Locale.ROOT)) {
+                                "COMPLETED" -> "Complété"
+                                "PENDING" -> "En attente"
+                                "FAILED" -> "Échoué"
+                                else -> tx.status
+                            }
+                        )
+                    },
+                    withdrawals = remote.withdrawals.map { withdrawal ->
+                        WithdrawalTransaction(
+                            id = withdrawal.id,
+                            amountFcfa = withdrawal.amountFcfa,
+                            provider = withdrawal.provider,
+                            destinationAccount = withdrawal.destinationAccount,
+                            timestamp = withdrawal.createdAt.ifBlank { "Récent" },
+                            status = runCatching {
+                                WithdrawalStatus.valueOf(withdrawal.status.uppercase(Locale.ROOT))
+                            }.getOrDefault(WithdrawalStatus.PENDING),
+                            referenceCode = "RET-${withdrawal.id.take(8).uppercase(Locale.ROOT)}"
+                        )
+                    },
+                    totalVirtualEarnedFcfa = remote.giftEarningsBalanceFcfa
+                )
+            }
+            _userProfile.update { it.copy(walletBalanceFcfa = remote.walletBalanceFcfa) }
+        }
+
         val chatsResult = apiService.fetchUserChats()
         if (chatsResult.isSuccess) {
             val remoteChats = chatsResult.getOrNull() ?: emptyList()
