@@ -1,6 +1,18 @@
 package com.loukatech.mbote.ui.components
 
 import android.widget.Toast
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.loukatech.mbote.service.api.MboteApiService
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -78,7 +90,16 @@ fun LiveBroadcastDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var isLiveStarted by remember { mutableStateOf(false) }
+    var activeStreamId by remember { mutableStateOf<String?>(null) }
+    var isStartingLive by remember { mutableStateOf(false) }
+    var cameraAllowed by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
+    var microphoneAllowed by remember { mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        cameraAllowed = result[Manifest.permission.CAMERA] == true || ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        microphoneAllowed = result[Manifest.permission.RECORD_AUDIO] == true || ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    }
     var liveTitle by remember { mutableStateOf("") }
     var viewerCount by remember { mutableStateOf(0) }
     var commentText by remember { mutableStateOf("") }
@@ -128,7 +149,7 @@ fun LiveBroadcastDialog(
             size = (28..40).random().toFloat()
         )
         floatingReactions.add(newReaction)
-        com.loukatech.mbote.service.MboteSocketManager.sendLiveReaction("default_live", "Moi", emoji)
+        activeStreamId?.let { com.loukatech.mbote.service.MboteSocketManager.sendLiveReaction(it, "Moi", emoji) }
 
         // Automatically clean up after animation duration
         coroutineScope.launch {
@@ -255,7 +276,7 @@ fun LiveBroadcastDialog(
 
                 triggerGiftOverlay("Moi", giftLabel, selectedGift.emoji, totalCost)
                 com.loukatech.mbote.service.MboteSocketManager.sendLiveGift(
-                    streamId = "default_live",
+                    streamId = activeStreamId ?: return,
                     senderName = "Moi",
                     giftId = giftId,
                     giftName = giftLabel,
@@ -283,12 +304,28 @@ fun LiveBroadcastDialog(
                 .fillMaxSize()
                 .background(Color.Black)
         ) {
-            // A real signaling media track is required; no local sample is rendered.
-            Box(
-                modifier = Modifier.fillMaxSize().background(Color.Black),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Connexion au flux Live…", color = Color.White.copy(alpha = 0.8f))
+            // Real camera preview for the broadcaster; viewers receive media through the live signaling layer.
+            if (cameraAllowed) {
+                AndroidView(
+                    factory = { ctx ->
+                        PreviewView(ctx).also { previewView ->
+                            val providerFuture = ProcessCameraProvider.getInstance(ctx)
+                            providerFuture.addListener({
+                                runCatching {
+                                    val provider = providerFuture.get()
+                                    val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
+                                    provider.unbindAll()
+                                    provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_FRONT_CAMERA, preview)
+                                }
+                            }, ContextCompat.getMainExecutor(ctx))
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                    Text("Autorisez la caméra et le microphone pour démarrer le Live.", color = Color.White)
+                }
             }
 
             // Dark gradient overlay
@@ -508,8 +545,26 @@ fun LiveBroadcastDialog(
                     Spacer(modifier = Modifier.height(24.dp))
                     Button(
                         onClick = {
-                            isLiveStarted = true
-                            Toast.makeText(context, "Direct MBoté démarré avec succès !", Toast.LENGTH_SHORT).show()
+                            if (!cameraAllowed || !microphoneAllowed) {
+                                permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+                            } else if (liveTitle.isBlank()) {
+                                Toast.makeText(context, "Ajoutez un titre au Live.", Toast.LENGTH_SHORT).show()
+                            } else if (!isStartingLive) {
+                                isStartingLive = true
+                                coroutineScope.launch {
+                                    MboteApiService.createLive(liveTitle.trim())
+                                        .onSuccess { live ->
+                                            activeStreamId = live.id
+                                            com.loukatech.mbote.service.MboteSocketManager.connect()
+                                            com.loukatech.mbote.service.MboteSocketManager.joinLive(live.id)
+                                            com.loukatech.mbote.service.MboteSocketManager.sendLiveBroadcastStatus(live.id, "LIVE")
+                                            isLiveStarted = true
+                                            Toast.makeText(context, "Direct MBoté démarré.", Toast.LENGTH_SHORT).show()
+                                        }
+                                        .onFailure { Toast.makeText(context, it.message ?: "Impossible de démarrer le Live.", Toast.LENGTH_LONG).show() }
+                                    isStartingLive = false
+                                }
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary),
                         shape = RoundedCornerShape(14.dp),
@@ -518,7 +573,7 @@ fun LiveBroadcastDialog(
                             .height(52.dp)
                             .testTag("start_live_button")
                     ) {
-                        Text("Commencer la diffusion en direct", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(if (isStartingLive) "Démarrage…" else "Commencer la diffusion en direct", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     }
                 }
             } else {
@@ -796,7 +851,7 @@ fun LiveBroadcastDialog(
                                             )
                                         )
                                         com.loukatech.mbote.service.MboteSocketManager.sendLiveComment(
-                                            streamId = "default_live",
+                                            streamId = activeStreamId ?: return@IconButton,
                                             senderName = "Moi",
                                             text = textToSend,
                                             badgeType = userBadges.firstOrNull()?.name
