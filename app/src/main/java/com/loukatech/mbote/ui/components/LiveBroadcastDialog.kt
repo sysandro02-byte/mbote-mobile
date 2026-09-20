@@ -417,7 +417,17 @@ fun LiveBroadcastDialog(
                 }
 
                 IconButton(
-                    onClick = onDismiss,
+                    onClick = {
+                        val streamId = activeStreamId
+                        if (streamId != null) {
+                            coroutineScope.launch {
+                                com.loukatech.mbote.service.MboteSocketManager.sendLiveBroadcastStatus(streamId, "ENDED")
+                                com.loukatech.mbote.service.MboteSocketManager.leaveLive(streamId)
+                                MboteApiService.endLive(streamId)
+                                onDismiss()
+                            }
+                        } else onDismiss()
+                    },
                     modifier = Modifier
                         .size(34.dp)
                         .clip(CircleShape)
