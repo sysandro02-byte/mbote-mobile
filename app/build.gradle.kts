@@ -74,7 +74,10 @@ android {
         buildConfigField("String", "VITE_SUPABASE_URL", "\"$viteSupabaseUrl\"")
         buildConfigField("String", "VITE_SUPABASE_ANON_KEY", "\"$viteSupabaseAnonKey\"")
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
-        buildConfigField("String", "GITHUB_CLIENT_ID", "\"$githubClientId\"")\n        buildConfigField("String", "MBOTE_TURN_URL", "\"$mboteTurnUrl\"")\n        buildConfigField("String", "MBOTE_TURN_USERNAME", "\"$mboteTurnUsername\"")\n        buildConfigField("String", "MBOTE_TURN_CREDENTIAL", "\"$mboteTurnCredential\"")
+        buildConfigField("String", "GITHUB_CLIENT_ID", "\"$githubClientId\"")
+        buildConfigField("String", "MBOTE_TURN_URL", "\"$mboteTurnUrl\"")
+        buildConfigField("String", "MBOTE_TURN_USERNAME", "\"$mboteTurnUsername\"")
+        buildConfigField("String", "MBOTE_TURN_CREDENTIAL", "\"$mboteTurnCredential\"")
     }
 
     signingConfigs {
