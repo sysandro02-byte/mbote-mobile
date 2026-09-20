@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('node:crypto');
 const { Pool } = require('pg');
+const { Server: SocketIOServer } = require('socket.io');
 
 const PORT = Number(process.env.PORT || 8080);
 const API_VERSION = '1.5.0';
@@ -1244,8 +1245,57 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
 
 if (require.main === module) {
   const db = createPool();
-  const server = createApp({ db }).listen(PORT, () => console.log(`MBoté API v${API_VERSION} écoute sur ${PORT}`));
-  const close = async () => { server.close(); await db.end(); };
+  const app = createApp({ db });
+  const server = app.listen(PORT, () => console.log(`MBoté API v${API_VERSION} écoute sur ${PORT}`));
+  const io = new SocketIOServer(server, {
+    cors: { origin: true, credentials: false },
+    transports: ['websocket', 'polling'],
+  });
+  io.use((socket,next)=>{
+    try {
+      const token=String(socket.handshake.auth?.token || socket.handshake.headers.authorization || '').replace(/^Bearer\\s+/i,'');
+      socket.user=jwt.verify(token,process.env.JWT_SECRET,{issuer:'mbote-api',audience:'mbote-mobile'});
+      next();
+    } catch { next(new Error('Authentification requise')); }
+  });
+  const liveViewerCount=async(streamId)=>{
+    const count=await db.query('SELECT COUNT(*)::int AS count FROM live_stream_viewers WHERE stream_id=$1 AND left_at IS NULL',[streamId]);
+    return count.rows[0]?.count || 0;
+  };
+  io.on('connection',(socket)=>{
+    socket.on('live:join',async(payload={})=>{
+      const streamId=String(payload.streamId||'');
+      if(!streamId)return;
+      const live=await db.query("SELECT 1 FROM live_streams WHERE id=$1 AND status='LIVE'",[streamId]).catch(()=>({rowCount:0}));
+      if(!live.rowCount)return;
+      await db.query('INSERT INTO live_stream_viewers(stream_id,user_id) VALUES($1,$2) ON CONFLICT(stream_id,user_id) DO UPDATE SET left_at=NULL,joined_at=NOW()',[streamId,socket.user.userId]);
+      socket.join(`live:${streamId}`);
+      io.to(`live:${streamId}`).emit('live:event',{type:'LIVE_VIEWER_COUNT',streamId,viewerCount:await liveViewerCount(streamId),timestamp:Date.now()});
+    });
+    socket.on('live:leave',async(payload={})=>{
+      const streamId=String(payload.streamId||''); if(!streamId)return;
+      await db.query('UPDATE live_stream_viewers SET left_at=NOW() WHERE stream_id=$1 AND user_id=$2',[streamId,socket.user.userId]).catch(()=>{});
+      socket.leave(`live:${streamId}`);
+      io.to(`live:${streamId}`).emit('live:event',{type:'LIVE_VIEWER_COUNT',streamId,viewerCount:await liveViewerCount(streamId),timestamp:Date.now()});
+    });
+    const relay=(name,type,mapper)=>(payload={})=>{
+      const streamId=String(payload.streamId||''); if(!streamId)return;
+      const event={type,streamId,senderName:String(payload.senderName||'Utilisateur MBoté'),timestamp:Date.now(),...mapper(payload)};
+      io.to(`live:${streamId}`).emit('live:event',event);
+    };
+    socket.on('live:comment',relay('live:comment','LIVE_COMMENT',p=>({payloadText:String(p.text||''),badgeType:p.badgeType||null})));
+    socket.on('live:reaction',relay('live:reaction','LIVE_REACTION',p=>({emoji:String(p.emoji||'')})));
+    socket.on('live:gift',relay('live:gift','LIVE_GIFT',p=>({giftId:p.giftId||null,giftName:p.giftName||null,giftEmoji:p.emoji||null,giftValueFcfa:Number(p.valueFcfa)||0})));
+    socket.on('live:signal',(payload={})=>{
+      const streamId=String(payload.streamId||''); if(!streamId)return;
+      socket.to(`live:${streamId}`).emit('live:signal',{...payload,fromUserId:socket.user.userId});
+    });
+    socket.on('live:status',(payload={})=>{
+      const streamId=String(payload.streamId||''); if(!streamId)return;
+      io.to(`live:${streamId}`).emit('live:event',{type:'LIVE_STATUS',streamId,status:String(payload.status||''),timestamp:Date.now()});
+    });
+  });
+  const close = async () => { io.close(); server.close(); await db.end(); };
   process.on('SIGINT', close); process.on('SIGTERM', close);
 }
 module.exports = { createApp, createPool };
