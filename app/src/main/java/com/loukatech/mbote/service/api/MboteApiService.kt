@@ -51,6 +51,21 @@ object MboteBackendConfig {
     }
 }
 
+@Serializable
+data class LiveStreamDto(
+    val id: String,
+    val title: String,
+    @SerialName("host_id") val hostId: String = "",
+    @SerialName("host_name") val hostName: String = "",
+    @SerialName("host_avatar") val hostAvatar: String = "",
+    val status: String = "LIVE",
+    @SerialName("viewer_count") val viewerCount: Int = 0,
+    @SerialName("started_at") val startedAt: String = ""
+)
+
+@Serializable
+private data class CreateLiveRequest(val title: String)
+
 // ---------------------------------------------------------------------------------
 // AUTH & USER DTOs
 // ---------------------------------------------------------------------------------
@@ -714,6 +729,30 @@ class MboteApiService {
             connection?.disconnect()
         }
     }
+
+    suspend fun fetchActiveLives(): Result<List<LiveStreamDto>> =
+        executeHttpRequest<Unit, List<LiveStreamDto>>("/live", deserialize = { body ->
+            val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<LiveStreamDto>>>(body)
+            response.data ?: emptyList()
+        })
+
+    suspend fun createLive(title: String): Result<LiveStreamDto> =
+        executeHttpRequest<CreateLiveRequest, LiveStreamDto>("/live", "POST", CreateLiveRequest(title), deserialize = { body ->
+            val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<LiveStreamDto>>(body)
+            response.data ?: error(response.error ?: "Création du Live impossible")
+        })
+
+    suspend fun joinLive(streamId: String): Result<LiveStreamDto> =
+        executeHttpRequest<Unit, LiveStreamDto>("/live/$streamId/join", "POST", deserialize = { body ->
+            val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<LiveStreamDto>>(body)
+            response.data ?: error(response.error ?: "Live inaccessible")
+        })
+
+    suspend fun leaveLive(streamId: String): Result<Boolean> =
+        executeHttpRequest<Unit, Boolean>("/live/$streamId/leave", "POST", deserialize = { true })
+
+    suspend fun endLive(streamId: String): Result<Boolean> =
+        executeHttpRequest<Unit, Boolean>("/live/$streamId/end", "POST", deserialize = { true })
 
     /**
      * Ping Server Health & measure Latency
