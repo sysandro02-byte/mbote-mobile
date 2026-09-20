@@ -1281,6 +1281,13 @@ if (require.main === module) {
         broadcastLive(streamId,{type:'LIVE_VIEWER_COUNT',streamId,viewerCount:await viewerCount(streamId),timestamp:Date.now()});
         return;
       }
+      if(message.type==='LIVE_LEAVE' && streamId && joinedStream===streamId) {
+        liveSockets.get(streamId)?.delete(socket);
+        await db.query('UPDATE live_stream_viewers SET left_at=NOW() WHERE stream_id=$1 AND user_id=$2',[streamId,identity.userId]).catch(()=>{});
+        joinedStream=null;
+        broadcastLive(streamId,{type:'LIVE_VIEWER_COUNT',streamId,viewerCount:await viewerCount(streamId),timestamp:Date.now()});
+        return;
+      }
       if(!streamId || joinedStream!==streamId)return;
       const base={streamId,senderName:String(message.senderName||'Utilisateur MBoté'),timestamp:Date.now()};
       if(message.type==='LIVE_COMMENT') broadcastLive(streamId,{...base,type:'LIVE_COMMENT',payloadText:String(message.text||''),badgeType:message.badgeType||null});
