@@ -985,7 +985,10 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res, result.rows);
   }));
   app.post('/v1/status/publications', auth, route(async (req, res) => {
-    const type = String(req.body.type||'text').toUpperCase();
+    const rawType = String(req.body.type || 'text').trim().toLowerCase();
+    const typeAliases = { text: 'TEXT', texte: 'TEXT', image: 'IMAGE', photo: 'IMAGE', audio: 'AUDIO', voice: 'AUDIO', vocal: 'AUDIO', video: 'VIDEO', 'vidéo': 'VIDEO' };
+    const type = typeAliases[rawType] || (rawType.startsWith('image/') ? 'IMAGE' : rawType.startsWith('audio/') ? 'AUDIO' : rawType.startsWith('video/') ? 'VIDEO' : null);
+    if (!type) return failure(res, 400, 'Type de statut invalide');
     const content = text(req.body.content,'Statut',5000);
     const created = await db.query(
       `INSERT INTO statuses (author_id,media_type,media_url,text,background_color,expires_at)
