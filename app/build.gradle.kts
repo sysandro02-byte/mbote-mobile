@@ -45,6 +45,15 @@ val googleClientId = envProps.getProperty("GOOGLE_CLIENT_ID")
 val githubClientId = envProps.getProperty("GITHUB_CLIENT_ID")
     ?: System.getenv("GITHUB_CLIENT_ID")
     ?: ""
+val mboteTurnUrl = envProps.getProperty("MBOTE_TURN_URL")
+    ?: System.getenv("MBOTE_TURN_URL")
+    ?: ""
+val mboteTurnUsername = envProps.getProperty("MBOTE_TURN_USERNAME")
+    ?: System.getenv("MBOTE_TURN_USERNAME")
+    ?: ""
+val mboteTurnCredential = envProps.getProperty("MBOTE_TURN_CREDENTIAL")
+    ?: System.getenv("MBOTE_TURN_CREDENTIAL")
+    ?: ""
 
 val qaKeystorePath = System.getenv("MBOTE_QA_KEYSTORE_PATH")
 val qaKeystorePassword = System.getenv("MBOTE_QA_KEYSTORE_PASSWORD")
