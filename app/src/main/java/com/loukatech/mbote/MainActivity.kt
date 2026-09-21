@@ -1,6 +1,8 @@
 package com.loukatech.mbote
 
 import android.os.Bundle
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -184,6 +186,7 @@ class MainActivity : ComponentActivity() {
             val isAuthenticated by viewModel.isAuthenticated.collectAsStateWithLifecycle()
             val isDataSyncing by viewModel.isDataSyncing.collectAsStateWithLifecycle()
             val publicationError by viewModel.publicationError.collectAsStateWithLifecycle()
+            val pendingPaymentCheckoutUrl by viewModel.pendingPaymentCheckoutUrl.collectAsStateWithLifecycle()
             val isPublishing by viewModel.isPublishing.collectAsStateWithLifecycle()
             val showLoginScreen by viewModel.showLoginScreen.collectAsStateWithLifecycle()
             val showAdminLoginDialog by viewModel.showAdminLoginDialog.collectAsStateWithLifecycle()
@@ -225,6 +228,16 @@ class MainActivity : ComponentActivity() {
                     android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show()
                     viewModel.clearPublicationError()
                 }
+            }
+
+            LaunchedEffect(pendingPaymentCheckoutUrl) {
+                val checkoutUrl = pendingPaymentCheckoutUrl ?: return@LaunchedEffect
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(checkoutUrl)))
+                }.onFailure {
+                    android.widget.Toast.makeText(context, "Impossible d’ouvrir LoukaPay.", android.widget.Toast.LENGTH_LONG).show()
+                }
+                viewModel.consumePaymentCheckoutUrl()
             }
             val isDarkTheme = when (userProfile.themeMode) {
                 AppThemeMode.LIGHT -> false
