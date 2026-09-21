@@ -188,7 +188,7 @@ class LiveWebRtcManager(
                 if (broadcaster && sdp == "REQUEST_STREAM") {
                     val connection = newPeer(from)
                     connection.createOffer(
-                        simpleSdpObserver { offer ->
+                        simpleSdpObserver(onCreated = { offer ->
                             connection.setLocalDescription(simpleSdpObserver(), offer)
                             MboteSocketManager.sendLiveSignal(
                                 streamId = streamId,
@@ -196,7 +196,7 @@ class LiveWebRtcManager(
                                 targetUserId = from,
                                 sdp = offer.description
                             )
-                        },
+                        }),
                         MediaConstraints()
                     )
                 } else if (!broadcaster && sdp.isNotBlank() && sdp != "REQUEST_STREAM") {
@@ -204,7 +204,7 @@ class LiveWebRtcManager(
                     connection.setRemoteDescription(
                         remoteSdpObserver(from) {
                             connection.createAnswer(
-                                simpleSdpObserver { answer ->
+                                simpleSdpObserver(onCreated = { answer ->
                                     connection.setLocalDescription(simpleSdpObserver(), answer)
                                     MboteSocketManager.sendLiveSignal(
                                         streamId = streamId,
@@ -212,7 +212,7 @@ class LiveWebRtcManager(
                                         targetUserId = from,
                                         sdp = answer.description
                                     )
-                                },
+                                }),
                                 MediaConstraints()
                             )
                         },
