@@ -174,6 +174,29 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     });
   }));
 
+  const legalPage = (title, body) => `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} — MBoté</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:860px;margin:40px auto;padding:0 20px;line-height:1.6;color:#18181b}h1,h2{color:#5b21b6}small{color:#71717a}</style></head><body><h1>${title}</h1>${body}<hr><small>MBoté — LoukaTech · Mise à jour: 21 septembre 2026 · Contact: contacts@loukatech.com</small></body></html>`;
+
+  app.get('/privacy', (_req,res) => res.type('html').send(legalPage('Politique de confidentialité', `
+    <p>MBoté traite les informations nécessaires à la création et à la sécurisation du compte, à la messagerie, aux publications, aux appels, aux réunions et aux fonctionnalités choisies par l’utilisateur.</p>
+    <h2>Données traitées</h2><p>Selon les fonctions utilisées: nom, identifiants de compte, adresse e-mail, numéro de téléphone, profil, contenus publiés, messages et métadonnées de communication, jetons de notification, ainsi que les médias transmis volontairement.</p>
+    <h2>Permissions de l’appareil</h2><p>La caméra et le microphone sont utilisés uniquement lorsque l’utilisateur lance une fonction qui les nécessite. La localisation et les contacts ne sont utilisés qu’après autorisation pour les fonctions correspondantes. Les notifications servent à signaler les nouveaux événements du compte.</p>
+    <h2>Sécurité et conservation</h2><p>Les échanges avec les serveurs utilisent HTTPS/WSS. Les données sont conservées le temps nécessaire au fonctionnement du service et aux obligations applicables. L’utilisateur peut supprimer son compte depuis l’application.</p>
+    <h2>Prestataires</h2><p>MBoté peut utiliser des prestataires techniques pour l’hébergement, la base de données, l’envoi d’e-mails, les notifications, l’intelligence artificielle et le relais WebRTC. Ils reçoivent uniquement les données nécessaires au service fourni.</p>
+    <h2>Vos choix</h2><p>Vous pouvez modifier vos informations, gérer les permissions Android, ajuster les notifications et demander la suppression du compte et des données associées.</p>
+  `)));
+
+  app.get('/account-deletion', (_req,res) => res.type('html').send(legalPage('Suppression du compte MBoté', `
+    <p>Pour supprimer votre compte dans l’application: ouvrez <strong>Paramètres → Compte → Supprimer mon compte</strong> et confirmez la demande.</p>
+    <p>Si vous n’avez plus accès à l’application, contactez <strong>contacts@loukatech.com</strong> depuis l’adresse e-mail associée au compte. Une vérification d’identité peut être demandée afin d’éviter la suppression frauduleuse d’un compte.</p>
+    <p>La suppression retire le compte et les données directement rattachées conformément aux règles de conservation applicables. Certaines données techniques ou obligations légales peuvent nécessiter une conservation limitée.</p>
+  `)));
+
+  app.get('/terms', (_req,res) => res.type('html').send(legalPage('Conditions d’utilisation', `
+    <p>MBoté est un service de communication et de réseau social. L’utilisateur est responsable du contenu qu’il publie et doit respecter les lois applicables, les droits des autres utilisateurs et les règles de sécurité du service.</p>
+    <p>Sont interdits notamment l’usurpation d’identité, le harcèlement, la fraude, la diffusion non autorisée de données personnelles, les contenus illicites et les tentatives de contourner la sécurité du service.</p>
+    <p>LoukaTech peut limiter ou suspendre un compte lorsque cela est nécessaire pour la sécurité du service ou le respect des règles applicables.</p>
+  `)));
+
   app.post('/v1/auth/register', route(async (req, res) => {
     const fullName = text(req.body.name || req.body.fullName, 'Nom complet', 255);
     const email = text(req.body.email, 'Email', 255).toLowerCase();
@@ -903,9 +926,17 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
 
   // Session, profile and public configuration contracts consumed by Android.
   app.post('/v1/auth/logout', auth, route(async (_req, res) => success(res, true)));
-  app.get('/v1/public-settings', route(async (_req, res) => {
+  app.get('/v1/public-settings', route(async (req, res) => {
     const result = await db.query("SELECT value FROM app_content WHERE content_key = 'registration_config'");
-    success(res, result.rows[0]?.value || { termsOfService: '', privacyPolicy: '', businessCategories: [] });
+    const origin = process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}`;
+    const configured = result.rows[0]?.value || {};
+    success(res, {
+      ...configured,
+      termsOfService: configured.termsOfService || `${origin}/terms`,
+      privacyPolicy: configured.privacyPolicy || `${origin}/privacy`,
+      accountDeletionUrl: configured.accountDeletionUrl || `${origin}/account-deletion`,
+      businessCategories: Array.isArray(configured.businessCategories) ? configured.businessCategories : [],
+    });
   }));
   app.put('/v1/users/me/profile', auth, route(async (req, res) => {
     const fields = [
