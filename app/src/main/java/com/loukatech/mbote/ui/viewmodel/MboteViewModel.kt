@@ -1026,7 +1026,7 @@ class MboteViewModel(
                 title = "💬 Test FCM Push - Nouveau Message",
                 body = "Grace Ondongo : 'MBoté ! Mon test FCM fonctionne parfaitement en arrière-plan !'",
                 timestamp = "À l'instant",
-                senderAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
+                senderAvatar = ""
             )
             NotificationType.JOB_APPLICATION -> MboteNotification(
                 type = NotificationType.JOB_APPLICATION,
