@@ -179,9 +179,6 @@ dependencies {
     implementation(libs.room.ktx)
     implementation(libs.okhttp)
     implementation(libs.webrtc)
-    implementation("io.socket:socket.io-client:2.1.1") {
-        exclude(group = "org.json", module = "json")
-    }
     implementation(libs.androidx.biometric)
     ksp(libs.room.compiler)
 
