@@ -92,62 +92,29 @@ fun AiSuggestedContactsSection(
         }
     }
 
-    val suggestedContacts = remember(calls, syncedContacts, hour) {
-        val baseList = mutableListOf<AiSuggestedContact>()
-
-        // Pre-defined sample contacts enriched with time-of-day IA heuristics
+    val suggestedContacts = remember(syncedContacts, hour) {
         val timeReason = when (hour) {
-            in 5..11 -> "Habitude en matinée • 96% IA"
-            in 12..17 -> "Frequent vers midi • 94% IA"
-            in 18..22 -> "Appels habituels du soir • 98% IA"
-            else -> "Urgence / Nuit suggéré • 91% IA"
+            in 5..11 -> "Contact MBoté disponible ce matin"
+            in 12..17 -> "Contact MBoté disponible cet après-midi"
+            in 18..22 -> "Contact MBoté disponible ce soir"
+            else -> "Contact MBoté synchronisé"
         }
-
-        baseList.add(
-            AiSuggestedContact(
-                id = "sugg_1",
-                name = "Grace Moukassa",
-                avatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
-                phoneNumber = "+242 06 612 3456",
-                recommendationReason = timeReason,
-                confidenceScore = 98,
-                timeContext = "$timeOfDayLabel • Échange fréquent"
-            )
-        )
-        baseList.add(
-            AiSuggestedContact(
-                id = "sugg_2",
-                name = "Docteur Grace",
-                avatar = "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=150",
-                phoneNumber = "+242 05 555 1234",
-                recommendationReason = "IA : Rappel médical conseillé",
-                confidenceScore = 93,
-                timeContext = "Suivi santé"
-            )
-        )
-        baseList.add(
-            AiSuggestedContact(
-                id = "sugg_3",
-                name = "Arnaud Nkouka",
-                avatar = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150",
-                phoneNumber = "+242 06 999 8877",
-                recommendationReason = "Dernier appel à cette heure hier",
-                confidenceScore = 90,
-                timeContext = "$timeOfDayLabel • Proche"
-            )
-        )
-        baseList.add(
-            AiSuggestedContact(
-                id = "sugg_4",
-                name = "Support MBoté VIP",
-                avatar = "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150",
-                phoneNumber = "+242 06 444 0000",
-                recommendationReason = "Assistance 24/7 conseillée",
-                confidenceScore = 88,
-                timeContext = "Service Client"
-            )
-        )
-        baseList
+        syncedContacts
+            .asSequence()
+            .filter { it.isMboteUser }
+            .take(4)
+            .map { contact ->
+                AiSuggestedContact(
+                    id = contact.id,
+                    name = contact.name,
+                    avatar = contact.avatarUrl.orEmpty(),
+                    phoneNumber = contact.phoneNumber,
+                    recommendationReason = timeReason,
+                    confidenceScore = 0,
+                    timeContext = timeOfDayLabel
+                )
+            }
+            .toList()
     }
 
     Card(
