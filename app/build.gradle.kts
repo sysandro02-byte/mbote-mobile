@@ -45,6 +45,10 @@ val viteSupabaseUrl = sanitizedEnvValue("VITE_SUPABASE_URL")
 val viteSupabaseAnonKey = sanitizedEnvValue("VITE_SUPABASE_ANON_KEY")
 val googleClientId = sanitizedEnvValue("GOOGLE_CLIENT_ID")
 val githubClientId = sanitizedEnvValue("GITHUB_CLIENT_ID")
+val firebaseAndroidApplicationId = sanitizedEnvValue("FIREBASE_ANDROID_APPLICATION_ID")
+val firebaseAndroidApiKey = sanitizedEnvValue("FIREBASE_ANDROID_API_KEY")
+val firebaseAndroidProjectId = sanitizedEnvValue("FIREBASE_ANDROID_PROJECT_ID")
+val firebaseAndroidSenderId = sanitizedEnvValue("FIREBASE_ANDROID_SENDER_ID")
 
 val qaKeystorePath = System.getenv("MBOTE_QA_KEYSTORE_PATH")
 val qaKeystorePassword = System.getenv("MBOTE_QA_KEYSTORE_PASSWORD")
@@ -89,6 +93,10 @@ android {
         buildConfigField("String", "VITE_SUPABASE_ANON_KEY", javaStringLiteral(viteSupabaseAnonKey))
         buildConfigField("String", "GOOGLE_CLIENT_ID", javaStringLiteral(googleClientId))
         buildConfigField("String", "GITHUB_CLIENT_ID", javaStringLiteral(githubClientId))
+        buildConfigField("String", "FIREBASE_ANDROID_APPLICATION_ID", javaStringLiteral(firebaseAndroidApplicationId))
+        buildConfigField("String", "FIREBASE_ANDROID_API_KEY", javaStringLiteral(firebaseAndroidApiKey))
+        buildConfigField("String", "FIREBASE_ANDROID_PROJECT_ID", javaStringLiteral(firebaseAndroidProjectId))
+        buildConfigField("String", "FIREBASE_ANDROID_SENDER_ID", javaStringLiteral(firebaseAndroidSenderId))
     }
 
     signingConfigs {
