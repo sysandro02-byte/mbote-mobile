@@ -1523,6 +1523,7 @@ if (require.main === module) {
     }
   }, 30_000);
   const liveSockets = new Map();
+  const rtcRooms = new Map();
   const userSockets = new Map();
   realtimeHub.sendToUser = (userId, event) => {
     const encoded = JSON.stringify(event);
@@ -1578,6 +1579,92 @@ if (require.main === module) {
         for(const row of recipients.rows) realtimeHub.sendToUser(String(row.user_id),packet);
         return;
       }
+      if(message.type==='CALL_RESPONSE') {
+        const roomCode=String(message.roomCode||'').trim().toUpperCase();
+        const status=String(message.status||'').toUpperCase();
+        if(!roomCode || !['ACCEPTED','REJECTED'].includes(status)) return;
+        const session=await db.query(
+          `SELECT s.id,s.host_id FROM group_call_sessions s
+            JOIN group_call_participants p ON p.session_id=s.id
+           WHERE s.room_code=$1 AND s.status='ACTIVE' AND p.user_id=$2`,
+          [roomCode,identity.userId],
+        );
+        if(!session.rowCount)return;
+        if(status==='REJECTED') {
+          await db.query('UPDATE group_call_participants SET left_at=NOW() WHERE session_id=$1 AND user_id=$2',[session.rows[0].id,identity.userId]);
+        }
+        realtimeHub.sendToUser(String(session.rows[0].host_id),{
+          type:'CALL_RESPONSE',roomCode,status,userId:String(identity.userId),userName:socket.mboteUserName||'Utilisateur MBoté',timestamp:Date.now()
+        });
+        return;
+      }
+      if(message.type==='CALL_END') {
+        const roomCode=String(message.roomCode||'').trim().toUpperCase();
+        if(!roomCode)return;
+        const session=await db.query(
+          `SELECT s.id,s.host_id FROM group_call_sessions s
+            JOIN group_call_participants p ON p.session_id=s.id
+           WHERE s.room_code=$1 AND s.status='ACTIVE' AND p.user_id=$2`,
+          [roomCode,identity.userId],
+        );
+        if(!session.rowCount)return;
+        const participants=await db.query('SELECT user_id FROM group_call_participants WHERE session_id=$1 AND left_at IS NULL',[session.rows[0].id]);
+        await db.query('UPDATE group_call_participants SET left_at=NOW() WHERE session_id=$1 AND user_id=$2',[session.rows[0].id,identity.userId]);
+        if(String(session.rows[0].host_id)===String(identity.userId)) {
+          await db.query("UPDATE group_call_sessions SET status='ENDED',ended_at=NOW() WHERE id=$1",[session.rows[0].id]);
+        }
+        for(const row of participants.rows) {
+          if(String(row.user_id)!==String(identity.userId)) realtimeHub.sendToUser(String(row.user_id),{type:'CALL_END',roomCode,userId:String(identity.userId),timestamp:Date.now()});
+        }
+        return;
+      }
+      if(message.type==='RTC_JOIN') {
+        const roomCode=String(message.roomCode||'').trim().toUpperCase();
+        if(!roomCode)return;
+        const session=await db.query(
+          `SELECT s.id FROM group_call_sessions s
+            JOIN group_call_participants p ON p.session_id=s.id
+           WHERE s.room_code=$1 AND s.status='ACTIVE' AND p.user_id=$2 AND p.left_at IS NULL`,
+          [roomCode,identity.userId],
+        );
+        if(!session.rowCount)return;
+        if(!socket.mboteRtcRooms)socket.mboteRtcRooms=new Set();
+        const room=rtcRooms.get(roomCode)||new Set();
+        const peers=[...room].filter((client)=>client!==socket&&client.readyState===1).map((client)=>({
+          userId:String(client.mboteUserId||''),userName:String(client.mboteUserName||'Utilisateur MBoté')
+        })).filter((peer)=>peer.userId);
+        room.add(socket);rtcRooms.set(roomCode,room);socket.mboteRtcRooms.add(roomCode);
+        socket.send(JSON.stringify({type:'RTC_PEERS',roomCode,peers,timestamp:Date.now()}));
+        const joined=JSON.stringify({type:'RTC_PEER_JOINED',roomCode,userId:String(identity.userId),userName:socket.mboteUserName||'Utilisateur MBoté',timestamp:Date.now()});
+        for(const client of room)if(client!==socket&&client.readyState===1)client.send(joined);
+        return;
+      }
+      if(message.type==='RTC_LEAVE') {
+        const roomCode=String(message.roomCode||'').trim().toUpperCase();
+        const room=rtcRooms.get(roomCode);
+        if(!room||!room.has(socket))return;
+        room.delete(socket);socket.mboteRtcRooms?.delete(roomCode);
+        if(!room.size)rtcRooms.delete(roomCode);
+        const left=JSON.stringify({type:'RTC_PEER_LEFT',roomCode,userId:String(identity.userId),timestamp:Date.now()});
+        for(const client of room)if(client.readyState===1)client.send(left);
+        return;
+      }
+      if(message.type==='RTC_SIGNAL') {
+        const roomCode=String(message.roomCode||'').trim().toUpperCase();
+        const targetUserId=String(message.targetUserId||'');
+        const signalType=String(message.signalType||'').toUpperCase();
+        const room=rtcRooms.get(roomCode);
+        if(!room||!room.has(socket)||!targetUserId||!['OFFER','ANSWER','ICE'].includes(signalType))return;
+        const packet=JSON.stringify({
+          type:'RTC_SIGNAL',roomCode,signalType,fromUserId:String(identity.userId),
+          sdp:message.sdp||null,candidate:message.candidate||null,sdpMid:message.sdpMid||null,
+          sdpMLineIndex:Number.isInteger(message.sdpMLineIndex)?message.sdpMLineIndex:null,timestamp:Date.now()
+        });
+        for(const client of room) {
+          if(client!==socket&&client.readyState===1&&String(client.mboteUserId)===targetUserId)client.send(packet);
+        }
+        return;
+      }
       const streamId=String(message.streamId||'');
       if(message.type==='LIVE_JOIN' && streamId) {
         const live=await db.query("SELECT host_id FROM live_streams WHERE id=$1 AND status='LIVE'",[streamId]);
@@ -1628,6 +1715,15 @@ if (require.main === module) {
         const userId=String(identity.userId);
         userSockets.get(userId)?.delete(socket);
         if(userSockets.get(userId)?.size===0) userSockets.delete(userId);
+      }
+      if(socket.mboteRtcRooms) {
+        for(const roomCode of [...socket.mboteRtcRooms]) {
+          const room=rtcRooms.get(roomCode);
+          room?.delete(socket);
+          if(room && !room.size)rtcRooms.delete(roomCode);
+          const left=JSON.stringify({type:'RTC_PEER_LEFT',roomCode,userId:String(identity?.userId||''),timestamp:Date.now()});
+          for(const client of (room||new Set()))if(client.readyState===1)client.send(left);
+        }
       }
       if(!identity||!joinedStream)return;
       liveSockets.get(joinedStream)?.delete(socket);
