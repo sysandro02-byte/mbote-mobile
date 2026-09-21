@@ -1340,10 +1340,19 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   };
   app.post('/v1/calls/group/create',auth,route(async(req,res)=>{
     const code=crypto.randomBytes(4).toString('hex').toUpperCase();
-    const created=await db.query('INSERT INTO group_call_sessions(room_code,host_id,title,is_video) VALUES($1,$2,$3,$4) RETURNING id',[code,req.user.userId,text(req.body.roomTitle,'Titre',255),req.body.isVideoCall!==false]);
-    await db.query('INSERT INTO group_call_participants(session_id,user_id,video_enabled) VALUES($1,$2,$3)',[created.rows[0].id,req.user.userId,req.body.isVideoCall!==false]);
-    const invitees=Array.isArray(req.body.participantIds)?req.body.participantIds.map(String):[];
-    if(invitees.length) await db.query('INSERT INTO group_call_participants(session_id,user_id,video_enabled) SELECT $1,unnest($2::uuid[]),$3 ON CONFLICT DO NOTHING',[created.rows[0].id,invitees,req.body.isVideoCall!==false]);
+    const title=text(req.body.roomTitle,'Titre',255);
+    const isVideo=req.body.isVideoCall!==false;
+    const invitees=Array.isArray(req.body.participantIds)?[...new Set(req.body.participantIds.map(String).filter((id)=>id!==String(req.user.userId)))]:[];
+    if(invitees.length) {
+      const valid=await db.query('SELECT id FROM users WHERE id=ANY($1::uuid[])',[invitees]);
+      if(valid.rowCount!==invitees.length)return failure(res,400,'Un ou plusieurs participants sont invalides');
+    }
+    const created=await db.query('INSERT INTO group_call_sessions(room_code,host_id,title,is_video) VALUES($1,$2,$3,$4) RETURNING id',[code,req.user.userId,title,isVideo]);
+    await db.query('INSERT INTO group_call_participants(session_id,user_id,video_enabled) VALUES($1,$2,$3)',[created.rows[0].id,req.user.userId,isVideo]);
+    if(invitees.length) await db.query('INSERT INTO group_call_participants(session_id,user_id,video_enabled) SELECT $1,unnest($2::uuid[]),$3 ON CONFLICT DO NOTHING',[created.rows[0].id,invitees,isVideo]);
+    const host=await db.query("SELECT full_name,COALESCE(avatar_url,'') AS avatar FROM users WHERE id=$1",[req.user.userId]);
+    const invite={type:'CALL_INVITE',roomCode:code,callerUserId:String(req.user.userId),callerName:host.rows[0]?.full_name||'Utilisateur MBoté',callerAvatar:host.rows[0]?.avatar||'',isVideo,title,timestamp:Date.now()};
+    for(const userId of invitees) realtimeHub.sendToUser(userId,invite);
     success(res,await groupCallDto(code,req.user.userId),201);
   }));
   app.post('/v1/calls/group/join/:roomCode',auth,route(async(req,res)=>{
