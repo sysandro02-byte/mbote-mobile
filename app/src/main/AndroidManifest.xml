@@ -58,6 +58,9 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Local app usage duration measurement" />
         </service>
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="mbote_push_notifications_channel" />
     </application>
 
 </manifest>
