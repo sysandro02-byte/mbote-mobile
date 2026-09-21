@@ -21,6 +21,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  production-audit:
+    name: Production source audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Reject simulations and embedded secrets
+        run: bash ci/production-audit.sh
+
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
@@ -45,6 +54,12 @@ jobs:
     name: Production API auth contract
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Production smoke contract
+        env:
+          API_ORIGIN: https://mbote-backend.onrender.com
+        run: bash ci/smoke-production.sh
       - name: Verify /v1 health and login routes
         shell: bash
         env:
@@ -100,6 +115,7 @@ jobs:
     name: Android lint, tests and stable signed QA APK
     runs-on: ubuntu-latest
     needs:
+      - production-audit
       - backend
       - production-api-contract
     timeout-minutes: 35
@@ -144,6 +160,17 @@ jobs:
           test "$MBOTE_API_BASE_URL" = "https://mbote-backend.onrender.com/v1"
           test "$VITE_SOCKET_URL" = "https://mbote-backend.onrender.com"
           ! printf '%s\n%s\n' "$MBOTE_API_BASE_URL" "$VITE_SOCKET_URL" | grep -q 'example.invalid'
+      - name: Verify production TURN configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$MBOTE_TURN_URL"
+          test -n "$MBOTE_TURN_USERNAME"
+          test -n "$MBOTE_TURN_CREDENTIAL"
+          case "$MBOTE_TURN_URL" in
+            turn:*|turns:*) ;;
+            *) echo "MBOTE_TURN_URL doit commencer par turn: ou turns:" >&2; exit 1 ;;
+          esac
       - name: Build installable QA APK
         run: gradle --no-daemon --max-workers=2 --stacktrace clean assembleQa
       - name: Run Android unit tests
