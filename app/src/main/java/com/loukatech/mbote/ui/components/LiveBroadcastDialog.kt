@@ -136,6 +136,25 @@ fun LiveBroadcastDialog(
 
     val coroutineScope = rememberCoroutineScope()
 
+    fun closeBroadcast() {
+        val streamId = activeStreamId
+        liveRtc?.close()
+        liveRtc = null
+        localRtcTrack = null
+        if (streamId == null) {
+            onDismiss()
+            return
+        }
+        coroutineScope.launch {
+            com.loukatech.mbote.service.MboteSocketManager.sendLiveBroadcastStatus(streamId, "ENDED")
+            com.loukatech.mbote.service.MboteSocketManager.leaveLive(streamId)
+            mboteApi.endLive(streamId)
+            activeStreamId = null
+            isLiveStarted = false
+            onDismiss()
+        }
+    }
+
     // Reset combo if idle for 3 seconds
     LaunchedEffect(comboCount) {
         if (comboCount > 0) {
@@ -302,7 +321,7 @@ fun LiveBroadcastDialog(
     }
 
     androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = ::closeBroadcast,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Box(
@@ -432,20 +451,7 @@ fun LiveBroadcastDialog(
                 }
 
                 IconButton(
-                    onClick = {
-                        val streamId = activeStreamId
-                        if (streamId != null) {
-                            coroutineScope.launch {
-                                com.loukatech.mbote.service.MboteSocketManager.sendLiveBroadcastStatus(streamId, "ENDED")
-                                liveRtc?.close()
-                                liveRtc = null
-                                localRtcTrack = null
-                                com.loukatech.mbote.service.MboteSocketManager.leaveLive(streamId)
-                                mboteApi.endLive(streamId)
-                                onDismiss()
-                            }
-                        } else onDismiss()
-                    },
+                    onClick = ::closeBroadcast,
                     modifier = Modifier
                         .size(34.dp)
                         .clip(CircleShape)
@@ -583,6 +589,7 @@ fun LiveBroadcastDialog(
                                     mboteApi.createLive(liveTitle.trim())
                                         .onSuccess { live ->
                                             activeStreamId = live.id
+                                            runCatching { ProcessCameraProvider.getInstance(context).get().unbindAll() }
                                             liveRtc?.close()
                                             liveRtc = LiveWebRtcManager(
                                                 context = context,
