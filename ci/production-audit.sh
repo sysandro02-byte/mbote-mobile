@@ -25,8 +25,12 @@ if grep -RInE 'AIza[0-9A-Za-z_-]{20,}|xkeysib-[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z_-
 fi
 
 grep -q 'https://mbote-backend.onrender.com/v1' app/build.gradle.kts
-grep -q 'MBOTE_TURN_URL' app/build.gradle.kts
-grep -q 'MBOTE_TURN_CREDENTIAL' app/build.gradle.kts
+grep -q 'applicationId = "com.loukatech.mbote"' app/build.gradle.kts
+
+if grep -RInE 'MBOTE_TURN_(USERNAME|CREDENTIAL)|SUPABASE_SERVICE_ROLE_KEY|BREVO_API_KEY|GEMINI_API_KEY|JWT_SECRET' app/src/main app/build.gradle.kts 2>/dev/null; then
+  echo "ERROR: secret serveur référencé dans le code Android" >&2
+  fail=1
+fi
 
 if [ "$fail" -ne 0 ]; then exit 1; fi
 echo "Production source audit: OK"
