@@ -5,6 +5,7 @@ import com.loukatech.mbote.service.api.IceServerDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.take
@@ -15,7 +16,7 @@ import org.webrtc.*
 /**
  * Native WebRTC transport for MBoté Live.
  * Broadcaster captures camera + microphone and creates one PeerConnection per viewer.
- * Viewers receive the remote MediaStream through the same signaling channel.
+ * Viewers receive the remote MediaStream through the authenticated signaling channel.
  */
 class LiveWebRtcManager(
     context: Context,
@@ -30,11 +31,16 @@ class LiveWebRtcManager(
     private val egl = EglBase.create()
     private val factory: PeerConnectionFactory
     private val peers = mutableMapOf<String, PeerConnection>()
+    private val pendingIce = mutableMapOf<String, MutableList<IceCandidate>>()
+    private val remoteDescriptionReady = mutableSetOf<String>()
+
     private var capturer: CameraVideoCapturer? = null
+    private var textureHelper: SurfaceTextureHelper? = null
     private var videoSource: VideoSource? = null
     private var audioSource: AudioSource? = null
     private var localVideo: VideoTrack? = null
     private var localAudio: AudioTrack? = null
+    @Volatile private var closed = false
 
     init {
         PeerConnectionFactory.initialize(
@@ -44,14 +50,20 @@ class LiveWebRtcManager(
             .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
             .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
             .createPeerConnectionFactory()
+
         if (broadcaster) startCapture()
         MboteSocketManager.connectLiveWebSocket(streamId)
-        scope.launch { MboteSocketManager.liveSignals.collectLatest(::handleSignal) }
+
+        scope.launch {
+            MboteSocketManager.liveSignals.collectLatest(::handleSignal)
+        }
+
         if (!broadcaster) {
             scope.launch {
-                MboteSocketManager.liveSocketIdentity.filterNotNull().take(1).collect {
-                    requestStream()
-                }
+                MboteSocketManager.liveSocketIdentity
+                    .filterNotNull()
+                    .take(1)
+                    .collect { requestStream() }
             }
         }
     }
@@ -60,120 +72,212 @@ class LiveWebRtcManager(
 
     private fun startCapture() {
         val enumerator = Camera2Enumerator(appContext)
-        val name = enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) }
-            ?: enumerator.deviceNames.firstOrNull() ?: return
-        capturer = enumerator.createCapturer(name, null)
+        val deviceName = enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) }
+            ?: enumerator.deviceNames.firstOrNull()
+            ?: return
+
+        capturer = enumerator.createCapturer(deviceName, null)
         videoSource = factory.createVideoSource(false)
-        val helper = SurfaceTextureHelper.create("MBoteLiveCapture", egl.eglBaseContext)
-        capturer?.initialize(helper, appContext, videoSource!!.capturerObserver)
+        textureHelper = SurfaceTextureHelper.create("MBoteLiveCapture", egl.eglBaseContext)
+        capturer?.initialize(textureHelper, appContext, videoSource!!.capturerObserver)
         capturer?.startCapture(720, 1280, 30)
+
         localVideo = factory.createVideoTrack("MBOTE_LIVE_VIDEO", videoSource).also(onLocalVideoTrack)
         audioSource = factory.createAudioSource(MediaConstraints())
-        localAudio = factory.createAudioTrack("MBOTE_LIVE_AUDIO", audioSource)
-    }
-
-    private fun newPeer(peerId: String): PeerConnection {
-        return peers.getOrPut(peerId) {
-            val ice = if (iceServerConfig.isNotEmpty()) {
-                iceServerConfig.flatMap { config ->
-                    config.urls.mapNotNull { url ->
-                        val normalized = url.trim()
-                        if (normalized.isBlank()) null else PeerConnection.IceServer.builder(normalized)
-                            .apply {
-                                if (config.username.isNotBlank()) setUsername(config.username)
-                                if (config.credential.isNotBlank()) setPassword(config.credential)
-                            }
-                            .createIceServer()
-                    }
-                }
-            } else {
-                listOf(
-                    PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-                    PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
-                )
-            }
-            factory.createPeerConnection(ice, object : PeerConnection.Observer {
-                override fun onIceCandidate(c: IceCandidate) {
-                    MboteSocketManager.sendLiveSignal(streamId, "ICE", peerId, candidate=c.sdp, sdpMid=c.sdpMid, sdpMLineIndex=c.sdpMLineIndex)
-                }
-                override fun onAddStream(stream: MediaStream) { stream.videoTracks.firstOrNull()?.let(onRemoteVideoTrack) }
-                override fun onTrack(transceiver: RtpTransceiver?) {
-                    (transceiver?.receiver?.track() as? VideoTrack)?.let(onRemoteVideoTrack)
-                }
-                override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
-                override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
-                override fun onIceConnectionReceivingChange(p0: Boolean) {}
-                override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
-                override fun onIceCandidatesRemoved(p0: Array<out IceCandidate>?) {}
-                override fun onRemoveStream(p0: MediaStream?) {}
-                override fun onDataChannel(p0: DataChannel?) {}
-                override fun onRenegotiationNeeded() {}
-                override fun onAddTrack(p0: RtpReceiver?, p1: Array<out MediaStream>?) {}
-            })!!.also { pc ->
-                if (broadcaster) {
-                    localVideo?.let { pc.addTrack(it, listOf("mbote-live")) }
-                    localAudio?.let { pc.addTrack(it, listOf("mbote-live")) }
-                }
-            }
+        localAudio = factory.createAudioTrack("MBOTE_LIVE_AUDIO", audioSource).apply {
+            setEnabled(true)
         }
     }
 
-    private fun sdpObserver(onCreated: (SessionDescription) -> Unit = {}): SdpObserver = object : SdpObserver {
-        override fun onCreateSuccess(sdp: SessionDescription) = onCreated(sdp)
-        override fun onSetSuccess() {}
+    private fun iceServers(): List<PeerConnection.IceServer> =
+        iceServerConfig.flatMap { config ->
+            config.urls.mapNotNull { rawUrl ->
+                val url = rawUrl.trim()
+                if (url.isBlank()) null else PeerConnection.IceServer.builder(url)
+                    .apply {
+                        if (config.username.isNotBlank()) setUsername(config.username)
+                        if (config.credential.isNotBlank()) setPassword(config.credential)
+                    }
+                    .createIceServer()
+            }
+        }.ifEmpty {
+            listOf(
+                PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+                PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+            )
+        }
+
+    private fun newPeer(peerId: String): PeerConnection =
+        peers.getOrPut(peerId) {
+            factory.createPeerConnection(iceServers(), object : PeerConnection.Observer {
+                override fun onIceCandidate(candidate: IceCandidate) {
+                    MboteSocketManager.sendLiveSignal(
+                        streamId = streamId,
+                        signalType = "ICE",
+                        targetUserId = peerId,
+                        candidate = candidate.sdp,
+                        sdpMid = candidate.sdpMid,
+                        sdpMLineIndex = candidate.sdpMLineIndex
+                    )
+                }
+
+                override fun onAddStream(stream: MediaStream?) {
+                    stream?.videoTracks?.firstOrNull()?.let(onRemoteVideoTrack)
+                }
+
+                override fun onTrack(transceiver: RtpTransceiver?) {
+                    (transceiver?.receiver?.track() as? VideoTrack)?.let(onRemoteVideoTrack)
+                }
+
+                override fun onSignalingChange(newState: PeerConnection.SignalingState?) {}
+                override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState?) {}
+                override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+                override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState?) {}
+                override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
+                override fun onRemoveStream(stream: MediaStream?) {}
+                override fun onDataChannel(dataChannel: DataChannel?) {}
+                override fun onRenegotiationNeeded() {}
+                override fun onAddTrack(receiver: RtpReceiver?, mediaStreams: Array<out MediaStream>?) {}
+            })!!.also { connection ->
+                if (broadcaster) {
+                    localVideo?.let { connection.addTrack(it, listOf("mbote-live")) }
+                    localAudio?.let { connection.addTrack(it, listOf("mbote-live")) }
+                }
+            }
+        }
+
+    private fun simpleSdpObserver(
+        onCreated: (SessionDescription) -> Unit = {},
+        onSet: () -> Unit = {},
+    ): SdpObserver = object : SdpObserver {
+        override fun onCreateSuccess(description: SessionDescription) = onCreated(description)
+        override fun onSetSuccess() = onSet()
         override fun onCreateFailure(error: String?) {}
         override fun onSetFailure(error: String?) {}
     }
 
+    private fun remoteSdpObserver(peerId: String, onReady: () -> Unit = {}): SdpObserver =
+        object : SdpObserver {
+            override fun onSetSuccess() {
+                remoteDescriptionReady.add(peerId)
+                pendingIce.remove(peerId)?.forEach { newPeer(peerId).addIceCandidate(it) }
+                onReady()
+            }
+
+            override fun onCreateSuccess(description: SessionDescription?) {}
+            override fun onCreateFailure(error: String?) {}
+            override fun onSetFailure(error: String?) {}
+        }
+
     /** Viewer announces readiness; broadcaster answers by creating an offer for that viewer. */
     fun requestStream() {
-        if (!broadcaster) MboteSocketManager.sendLiveSignal(streamId, "OFFER", sdp="REQUEST_STREAM")
+        if (!broadcaster && !closed) {
+            MboteSocketManager.sendLiveSignal(streamId, "OFFER", sdp = "REQUEST_STREAM")
+        }
     }
 
     private fun handleSignal(data: JSONObject) {
-        if (data.optString("streamId") != streamId) return
+        if (closed || data.optString("streamId") != streamId) return
+
         val from = data.optString("fromUserId")
         if (from.isBlank()) return
-        when (data.optString("signalType")) {
+
+        when (data.optString("signalType").uppercase()) {
             "OFFER" -> {
                 val sdp = data.optString("sdp")
                 if (broadcaster && sdp == "REQUEST_STREAM") {
-                    val pc = newPeer(from)
-                    pc.createOffer(sdpObserver { offer ->
-                        pc.setLocalDescription(sdpObserver(), offer)
-                        MboteSocketManager.sendLiveSignal(streamId, "OFFER", from, sdp=offer.description)
-                    }, MediaConstraints())
+                    val connection = newPeer(from)
+                    connection.createOffer(
+                        simpleSdpObserver { offer ->
+                            connection.setLocalDescription(simpleSdpObserver(), offer)
+                            MboteSocketManager.sendLiveSignal(
+                                streamId = streamId,
+                                signalType = "OFFER",
+                                targetUserId = from,
+                                sdp = offer.description
+                            )
+                        },
+                        MediaConstraints()
+                    )
                 } else if (!broadcaster && sdp.isNotBlank() && sdp != "REQUEST_STREAM") {
-                    val pc = newPeer(from)
-                    pc.setRemoteDescription(sdpObserver(), SessionDescription(SessionDescription.Type.OFFER, sdp))
-                    pc.createAnswer(sdpObserver { answer ->
-                        pc.setLocalDescription(sdpObserver(), answer)
-                        MboteSocketManager.sendLiveSignal(streamId, "ANSWER", from, sdp=answer.description)
-                    }, MediaConstraints())
+                    val connection = newPeer(from)
+                    connection.setRemoteDescription(
+                        remoteSdpObserver(from) {
+                            connection.createAnswer(
+                                simpleSdpObserver { answer ->
+                                    connection.setLocalDescription(simpleSdpObserver(), answer)
+                                    MboteSocketManager.sendLiveSignal(
+                                        streamId = streamId,
+                                        signalType = "ANSWER",
+                                        targetUserId = from,
+                                        sdp = answer.description
+                                    )
+                                },
+                                MediaConstraints()
+                            )
+                        },
+                        SessionDescription(SessionDescription.Type.OFFER, sdp)
+                    )
                 }
             }
+
             "ANSWER" -> {
-                if (broadcaster) peers[from]?.setRemoteDescription(
-                    sdpObserver(), SessionDescription(SessionDescription.Type.ANSWER, data.optString("sdp"))
+                if (!broadcaster) return
+                val sdp = data.optString("sdp")
+                if (sdp.isBlank()) return
+                val connection = newPeer(from)
+                connection.setRemoteDescription(
+                    remoteSdpObserver(from),
+                    SessionDescription(SessionDescription.Type.ANSWER, sdp)
                 )
             }
+
             "ICE" -> {
-                val pc = newPeer(from)
-                pc.addIceCandidate(IceCandidate(data.optString("sdpMid"), data.optInt("sdpMLineIndex"), data.optString("candidate")))
+                val candidateText = data.optString("candidate")
+                if (candidateText.isBlank()) return
+                val candidate = IceCandidate(
+                    data.optString("sdpMid").ifBlank { null },
+                    data.optInt("sdpMLineIndex", 0),
+                    candidateText
+                )
+                val connection = newPeer(from)
+                if (remoteDescriptionReady.contains(from)) {
+                    connection.addIceCandidate(candidate)
+                } else {
+                    pendingIce.getOrPut(from) { mutableListOf() }.add(candidate)
+                }
             }
         }
     }
 
-    fun switchCamera() { capturer?.switchCamera(null) }
+    fun switchCamera() {
+        if (!closed) capturer?.switchCamera(null)
+    }
 
     fun close() {
+        if (closed) return
+        closed = true
+
+        MboteSocketManager.disconnectLiveWebSocket()
+        scope.cancel()
+
         runCatching { capturer?.stopCapture() }
         capturer?.dispose()
-        peers.values.forEach { it.close(); it.dispose() }
+        textureHelper?.dispose()
+
+        peers.values.forEach { connection ->
+            runCatching { connection.close() }
+            connection.dispose()
+        }
         peers.clear()
-        localVideo?.dispose(); localAudio?.dispose()
-        videoSource?.dispose(); audioSource?.dispose()
-        factory.dispose(); egl.release()
-        MboteSocketManager.disconnectLiveWebSocket()
+        pendingIce.clear()
+        remoteDescriptionReady.clear()
+
+        localVideo?.dispose()
+        localAudio?.dispose()
+        videoSource?.dispose()
+        audioSource?.dispose()
+        factory.dispose()
+        egl.release()
     }
 }
