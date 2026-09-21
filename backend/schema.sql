@@ -611,3 +611,19 @@ CREATE TABLE IF NOT EXISTS live_stream_viewers (
   PRIMARY KEY(stream_id,user_id)
 );
 CREATE INDEX IF NOT EXISTS idx_live_stream_viewers_active ON live_stream_viewers(stream_id,left_at);
+
+
+CREATE TABLE IF NOT EXISTS friend_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  sender_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  receiver_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','ACCEPTED','DECLINED')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  responded_at TIMESTAMPTZ,
+  CONSTRAINT friend_requests_not_self CHECK (sender_id <> receiver_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_friend_requests_pair_active
+  ON friend_requests (LEAST(sender_id, receiver_id), GREATEST(sender_id, receiver_id))
+  WHERE status IN ('PENDING','ACCEPTED');
+CREATE INDEX IF NOT EXISTS idx_friend_requests_receiver_status ON friend_requests(receiver_id,status,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_friend_requests_sender_status ON friend_requests(sender_id,status,created_at DESC);
