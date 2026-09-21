@@ -60,6 +60,10 @@ class MboteRepository(
     private val _isOffline = MutableStateFlow(false)
     val isOffline: StateFlow<Boolean> = _isOffline.asStateFlow()
 
+    private val _productionReadiness = MutableStateFlow(ProductionReadiness())
+    val productionReadiness: StateFlow<ProductionReadiness> = _productionReadiness.asStateFlow()
+
+
     private val _cachedMessageCount = MutableStateFlow(0)
     val cachedMessageCount: StateFlow<Int> = _cachedMessageCount.asStateFlow()
 
@@ -86,6 +90,13 @@ class MboteRepository(
     }
 
     suspend fun getRegistrationPublicConfig(): Result<RegistrationPublicConfig> = apiService.getRegistrationPublicConfig()
+
+    suspend fun refreshProductionReadiness(): Result<ProductionReadiness> {
+        val result = apiService.getProductionReadiness()
+        result.onSuccess { _productionReadiness.value = it }
+        return result
+    }
+
 
     suspend fun verifyRegistrationOtp(pendingUserId: String, otp: String): Result<Unit> {
         return applyVerifiedSession(apiService.verifyRegistrationOtp(pendingUserId, otp))
