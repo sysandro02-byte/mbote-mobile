@@ -392,7 +392,8 @@ private data class PaymentIntentRequest(
     val provider: String,
     @SerialName("amountFcfa") val amountFcfa: Long,
     val currency: String,
-    val phone: String
+    val phone: String,
+    val note: String = ""
 )
 
 @Serializable
@@ -401,6 +402,11 @@ data class PaymentIntentResponse(
     val status: String,
     val amount: Long,
     val currency: String,
+    val provider: String = "",
+    val providerReference: String? = null,
+    val checkoutUrl: String? = null,
+    val receiptUrl: String? = null,
+    val checkoutRequired: Boolean = false,
     val merchantCode: String? = null,
     val ussdCode: String? = null,
     val instructions: String? = null
@@ -906,11 +912,11 @@ class MboteApiService {
             requestBody = mapOf("amountFcfa" to amountFcfa, "provider" to provider, "destinationAccount" to destinationAccount)
         ) { Unit }
 
-    suspend fun createPaymentIntent(provider: String, amountFcfa: Long, phone: String): Result<PaymentIntentResponse> =
+    suspend fun createPaymentIntent(provider: String, amountFcfa: Long, phone: String, note: String = ""): Result<PaymentIntentResponse> =
         executeHttpRequest(
             endpoint = "/payments/intents",
             method = "POST",
-            requestBody = PaymentIntentRequest(provider, amountFcfa, "XAF", phone)
+            requestBody = PaymentIntentRequest(provider, amountFcfa, "XAF", phone, note)
         ) { json -> MboteBackendConfig.jsonParser.decodeFromJsonElement<PaymentIntentResponse>(responseObject(json)) }
 
     suspend fun getRegistrationPublicConfig(): Result<RegistrationPublicConfig> =
