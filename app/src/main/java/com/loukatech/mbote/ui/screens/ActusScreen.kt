@@ -138,10 +138,11 @@ fun ActusScreen(
     var isRefreshing by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val mboteApi = remember { MboteApiService() }
 
     LaunchedEffect(Unit) {
         while (true) {
-            MboteApiService.fetchActiveLives().onSuccess { activeLives = it }
+            mboteApi.fetchActiveLives().onSuccess { activeLives = it }
             delay(15_000)
         }
     }
@@ -226,7 +227,7 @@ fun ActusScreen(
                 isRefreshing = true
                 onRefresh()
                 coroutineScope.launch {
-                    MboteApiService.fetchActiveLives().onSuccess { activeLives = it }
+                    mboteApi.fetchActiveLives().onSuccess { activeLives = it }
                     kotlinx.coroutines.delay(600)
                     isRefreshing = false
                 }
