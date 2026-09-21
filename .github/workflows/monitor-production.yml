@@ -22,6 +22,32 @@ jobs:
           cat "$body"
           test "$code" = "200"
           grep -q '"status":"online"' "$body"
+          node - "$body" <<'NODE'
+          const fs = require('node:fs');
+          const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const data = payload.data || payload;
+          if (!Number.isFinite(data.databaseLatencyMs) || data.databaseLatencyMs > 5000) {
+            console.error('PostgreSQL health latency is too high', data.databaseLatencyMs);
+            process.exit(1);
+          }
+          if (!Number.isFinite(data.uptimeSec)) {
+            console.error('Backend health payload is incomplete');
+            process.exit(1);
+          }
+          NODE
+          rm -f "$body"
+
+      - name: Check public legal pages and RTC protection
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin="https://mbote-backend.onrender.com"
+          for path in /privacy /terms /account-deletion; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 30 "$origin$path")"
+            test "$code" = "200"
+          done
+          rtc_code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 30 "$origin/v1/rtc/ice-servers")"
+          test "$rtc_code" = "401"
 
       - name: Check authenticated WebSocket gateway
         shell: bash
