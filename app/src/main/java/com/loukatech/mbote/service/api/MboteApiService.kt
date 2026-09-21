@@ -422,6 +422,36 @@ private data class PublicMastaUserDto(
     @SerialName("suggestion_reason") val suggestionReason: String = "Compte public MBoté"
 )
 
+
+@Serializable
+private data class BackendMastaUserDto(
+    val id: JsonElement,
+    val name: String = "",
+    val avatar: String = "",
+    val infoSubtitle: String = "",
+    val mutualFriendsCount: Int = 0,
+    val mutualFriendsAvatars: List<String> = emptyList(),
+    val isOnline: Boolean = false,
+    val city: String = "",
+    val timeBadge: String? = null,
+    val subType: String = "SUGGESTIONS"
+)
+
+@Serializable
+data class FriendRequestDto(
+    val id: String,
+    val userId: String,
+    val name: String,
+    val phone: String = "",
+    val avatarUrl: String = "",
+    val isIncoming: Boolean,
+    val timestamp: String = "",
+    val status: String = "PENDING"
+)
+
+@Serializable
+private data class CreateFriendRequestRequest(val targetUserId: String)
+
 @Serializable
 private data class BackendShortVideoDto(
     val id: JsonElement,
@@ -1139,21 +1169,52 @@ class MboteApiService {
      */
     suspend fun fetchMastaUsers(): Result<List<MastaUser>> {
         return executeHttpRequest<Unit, List<MastaUser>>(
-            endpoint = "/users/public?limit=100",
+            endpoint = "/masta/users",
             method = "GET"
         ) { json ->
-            responseArray(json).map { MboteBackendConfig.jsonParser.decodeFromJsonElement<PublicMastaUserDto>(it) }.map { user ->
+            responseArray(json).map { MboteBackendConfig.jsonParser.decodeFromJsonElement<BackendMastaUserDto>(it) }.map { user ->
                 MastaUser(
                     id = user.id.toString().trim('"'),
-                    name = user.name.ifBlank { user.username },
-                    avatar = user.avatar.orEmpty(),
-                    infoSubtitle = user.bio?.takeIf(String::isNotBlank) ?: user.suggestionReason,
-                    city = user.city.orEmpty(),
-                    subType = if (user.relationshipStatus == "accepted") MastaSubOption.FRIENDS else MastaSubOption.SUGGESTIONS
+                    name = user.name,
+                    avatar = user.avatar,
+                    infoSubtitle = user.infoSubtitle,
+                    mutualFriendsCount = user.mutualFriendsCount,
+                    mutualFriendsAvatars = user.mutualFriendsAvatars,
+                    isOnline = user.isOnline,
+                    city = user.city,
+                    timeBadge = user.timeBadge,
+                    subType = runCatching { MastaSubOption.valueOf(user.subType) }.getOrDefault(MastaSubOption.SUGGESTIONS)
                 )
             }
         }
     }
+
+    suspend fun fetchFriendRequests(): Result<List<FriendRequestDto>> =
+        executeHttpRequest<Unit, List<FriendRequestDto>>(
+            endpoint = "/masta/requests",
+            method = "GET"
+        ) { json ->
+            MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<List<FriendRequestDto>>>(json).data ?: emptyList()
+        }
+
+    suspend fun sendFriendRequest(targetUserId: String): Result<String> =
+        executeHttpRequest<CreateFriendRequestRequest, String>(
+            endpoint = "/masta/requests",
+            method = "POST",
+            requestBody = CreateFriendRequestRequest(targetUserId)
+        ) { json -> responseObject(json).string("id") }
+
+    suspend fun acceptFriendRequest(requestId: String): Result<Boolean> =
+        executeHttpRequest<Unit, Boolean>(
+            endpoint = "/masta/requests/$requestId/accept",
+            method = "POST"
+        ) { true }
+
+    suspend fun declineOrCancelFriendRequest(requestId: String): Result<Boolean> =
+        executeHttpRequest<Unit, Boolean>(
+            endpoint = "/masta/requests/$requestId",
+            method = "DELETE"
+        ) { true }
 
     suspend fun fetchAronQuestions(): Result<List<AronQuestion>> =
         executeHttpRequest<Unit, List<AronQuestion>>(
