@@ -66,6 +66,20 @@ val qaSigningConfigured = listOf(
     qaKeyPassword,
 ).all { !it.isNullOrBlank() }
 
+val releaseKeystorePath = System.getenv("MBOTE_RELEASE_KEYSTORE_PATH")
+val releaseKeystorePassword = System.getenv("MBOTE_RELEASE_KEYSTORE_PASSWORD")
+val releaseKeyAlias = System.getenv("MBOTE_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = System.getenv("MBOTE_RELEASE_KEY_PASSWORD")
+val releaseSigningConfigured = listOf(
+    releaseKeystorePath,
+    releaseKeystorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
+val configuredVersionCode = System.getenv("MBOTE_VERSION_CODE")?.toIntOrNull() ?: 1
+val configuredVersionName = System.getenv("MBOTE_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.0.0"
+
 android {
     namespace = "com.loukatech.mbote"
     compileSdk = 36
@@ -74,8 +88,8 @@ android {
         applicationId = "com.aistudio.mbote.krtwvx"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = configuredVersionCode
+        versionName = configuredVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "VITE_SOCKET_URL", "\"$viteSocketUrl\"")
@@ -98,11 +112,21 @@ android {
                 keyPassword = qaKeyPassword
             }
         }
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseKeystorePath!!)
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
