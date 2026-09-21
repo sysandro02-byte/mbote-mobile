@@ -147,6 +147,8 @@ class MboteViewModel(
     val isPublishing: StateFlow<Boolean> = _isPublishing.asStateFlow()
     private val _publicationError = MutableStateFlow<String?>(null)
     val publicationError: StateFlow<String?> = _publicationError.asStateFlow()
+    private val _pendingPaymentCheckoutUrl = MutableStateFlow<String?>(null)
+    val pendingPaymentCheckoutUrl: StateFlow<String?> = _pendingPaymentCheckoutUrl.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -159,6 +161,10 @@ class MboteViewModel(
     fun clearPublicationError() {
         _publicationError.value = null
         repository.clearMessagingError()
+    }
+
+    fun consumePaymentCheckoutUrl() {
+        _pendingPaymentCheckoutUrl.value = null
     }
 
     fun triggerDataSync() {
@@ -753,7 +759,10 @@ class MboteViewModel(
         viewModelScope.launch {
             _isPublishing.value = true
             repository.sendPaymentTransfer(chatId, amount, provider, phone, note, isRequest)
-                .onSuccess { _showPaymentSheet.value = false }
+                .onSuccess { checkoutUrl ->
+                    _showPaymentSheet.value = false
+                    _pendingPaymentCheckoutUrl.value = checkoutUrl
+                }
                 .onFailure { _publicationError.value = it.message ?: "Paiement impossible." }
             _isPublishing.value = false
         }
