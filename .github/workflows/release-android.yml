@@ -1,0 +1,122 @@
+name: Production Android release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: Version publique (ex. 1.0.0)
+        required: true
+        default: "1.0.0"
+      version_code:
+        description: VersionCode Android entier et croissant
+        required: true
+        default: "100"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-android-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build signed production APK and AAB
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MBOTE_API_BASE_URL: https://mbote-backend.onrender.com/v1
+      VITE_SOCKET_URL: https://mbote-backend.onrender.com
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+      MBOTE_TURN_URL: ${{ secrets.MBOTE_TURN_URL }}
+      MBOTE_TURN_USERNAME: ${{ secrets.MBOTE_TURN_USERNAME }}
+      MBOTE_TURN_CREDENTIAL: ${{ secrets.MBOTE_TURN_CREDENTIAL }}
+      MBOTE_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.MBOTE_RELEASE_KEYSTORE_PASSWORD }}
+      MBOTE_RELEASE_KEY_ALIAS: ${{ secrets.MBOTE_RELEASE_KEY_ALIAS }}
+      MBOTE_RELEASE_KEY_PASSWORD: ${{ secrets.MBOTE_RELEASE_KEY_PASSWORD }}
+      MBOTE_VERSION_NAME: ${{ inputs.version_name }}
+      MBOTE_VERSION_CODE: ${{ inputs.version_code }}
+      GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4g -Dkotlin.daemon.jvm.options=-Xmx2g
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Production source audit
+        run: bash ci/production-audit.sh
+
+      - name: Validate required production secrets
+        shell: bash
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.MBOTE_RELEASE_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "$MBOTE_TURN_URL"
+          test -n "$MBOTE_TURN_USERNAME"
+          test -n "$MBOTE_TURN_CREDENTIAL"
+          test -n "$RELEASE_KEYSTORE_B64"
+          test -n "$MBOTE_RELEASE_KEYSTORE_PASSWORD"
+          test -n "$MBOTE_RELEASE_KEY_ALIAS"
+          test -n "$MBOTE_RELEASE_KEY_PASSWORD"
+          [[ "$MBOTE_VERSION_CODE" =~ ^[0-9]+$ ]]
+          case "$MBOTE_TURN_URL" in turn:*|turns:*) ;; *) exit 1 ;; esac
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.10.2
+
+      - name: Prepare production upload keystore
+        shell: bash
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.MBOTE_RELEASE_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/mbote-release"
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/mbote-release/upload-keystore.jks"
+          test -s "$RUNNER_TEMP/mbote-release/upload-keystore.jks"
+          echo "MBOTE_RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/mbote-release/upload-keystore.jks" >> "$GITHUB_ENV"
+
+      - name: Backend tests
+        working-directory: backend
+        run: |
+          npm ci
+          npm test
+
+      - name: Production API smoke
+        run: bash ci/smoke-production.sh
+
+      - name: Build signed release APK and AAB
+        run: gradle --no-daemon --max-workers=2 clean assembleRelease bundleRelease
+
+      - name: Verify signed artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          AAB="app/build/outputs/bundle/release/app-release.aab"
+          test -s "$APK"
+          test -s "$AAB"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          jarsigner -verify -strict "$AAB"
+          sha256sum "$APK" "$AAB" > app/build/outputs/MBote-release-sha256.txt
+
+      - name: Upload production artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mbote-production-${{ inputs.version_name }}
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/bundle/release/app-release.aab
+            app/build/outputs/MBote-release-sha256.txt
+          if-no-files-found: error
+          retention-days: 90
