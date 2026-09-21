@@ -29,15 +29,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.loukatech.mbote.model.SyncedContact
-
-data class FriendRequest(
-    val id: String,
-    val name: String,
-    val phone: String,
-    val avatarUrl: String?,
-    val isIncoming: Boolean, // true = request received, false = request sent
-    val timestamp: String = "Il y a 2h"
-)
+import com.loukatech.mbote.service.api.FriendRequestDto
 
 /**
  * Masta (Amis & Contacts MBoté) Management Hub:
@@ -53,50 +45,15 @@ fun MastaHubSheet(
     onVoiceCall: (SyncedContact) -> Unit,
     onVideoCall: (SyncedContact) -> Unit,
     onAddNewMasta: (name: String, phone: String, isMboteUser: Boolean) -> Unit,
+    friendRequests: List<FriendRequestDto> = emptyList(),
+    onAcceptFriendRequest: (String) -> Unit = {},
+    onDeclineOrCancelFriendRequest: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var showAddMastaDialog by remember { mutableStateOf(false) }
     var selectedTab by remember { mutableStateOf("Mes Masta") } // "Mes Masta", "Demandes"
     var selectedFilter by remember { mutableStateOf("Tous") } // "Tous", "Sur MBoté", "En ligne"
-
-    // Initial Friend Requests state (Received & Sent)
-    val friendRequests = remember {
-        mutableStateListOf(
-            FriendRequest(
-                id = "fr_1",
-                name = "Kevine Moundele",
-                phone = "+242 06 987 65 43",
-                avatarUrl = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                isIncoming = true,
-                timestamp = "Aujourd'hui à 14:20"
-            ),
-            FriendRequest(
-                id = "fr_2",
-                name = "Glodi Mavoungou",
-                phone = "+243 81 234 56 78",
-                avatarUrl = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-                isIncoming = true,
-                timestamp = "Hier à 18:45"
-            ),
-            FriendRequest(
-                id = "fr_3",
-                name = "Grâce Kamba",
-                phone = "+242 05 112 23 34",
-                avatarUrl = "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
-                isIncoming = false,
-                timestamp = "Envoyée il y a 3h"
-            ),
-            FriendRequest(
-                id = "fr_4",
-                name = "Chancel Mbemba",
-                phone = "+243 99 888 77 66",
-                avatarUrl = "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
-                isIncoming = false,
-                timestamp = "Envoyée hier"
-            )
-        )
-    }
 
     val incomingCount = friendRequests.count { it.isIncoming }
 
@@ -119,17 +76,6 @@ fun MastaHubSheet(
             onDismiss = { showAddMastaDialog = false },
             onConfirm = { name, phone, isMboteUser ->
                 onAddNewMasta(name, phone, isMboteUser)
-                // Also add to sent friend requests
-                friendRequests.add(
-                    FriendRequest(
-                        id = "fr_${System.currentTimeMillis()}",
-                        name = name,
-                        phone = phone,
-                        avatarUrl = null,
-                        isIncoming = false,
-                        timestamp = "À l'instant"
-                    )
-                )
                 showAddMastaDialog = false
             }
         )
@@ -427,14 +373,8 @@ fun MastaHubSheet(
                                 items(incomingRequests, key = { it.id }) { req ->
                                     FriendRequestCard(
                                         request = req,
-                                        onAccept = {
-                                            // Add to contacts and remove from requests
-                                            onAddNewMasta(req.name, req.phone, true)
-                                            friendRequests.remove(req)
-                                        },
-                                        onDecline = {
-                                            friendRequests.remove(req)
-                                        }
+                                        onAccept = { onAcceptFriendRequest(req.id) },
+                                        onDecline = { onDeclineOrCancelFriendRequest(req.id) }
                                     )
                                 }
                             }
@@ -472,9 +412,7 @@ fun MastaHubSheet(
                                     FriendRequestCard(
                                         request = req,
                                         onAccept = {},
-                                        onDecline = {
-                                            friendRequests.remove(req)
-                                        }
+                                        onDecline = { onDeclineOrCancelFriendRequest(req.id) }
                                     )
                                 }
                             }
@@ -488,7 +426,7 @@ fun MastaHubSheet(
 
 @Composable
 private fun FriendRequestCard(
-    request: FriendRequest,
+    request: FriendRequestDto,
     onAccept: () -> Unit,
     onDecline: () -> Unit
 ) {
@@ -511,7 +449,7 @@ private fun FriendRequestCard(
                     .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
-                if (request.avatarUrl != null) {
+                if (request.avatarUrl.isNotBlank()) {
                     AsyncImage(
                         model = request.avatarUrl,
                         contentDescription = request.name,
