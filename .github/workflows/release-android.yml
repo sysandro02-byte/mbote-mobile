@@ -31,9 +31,6 @@ jobs:
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-      MBOTE_TURN_URL: ${{ secrets.MBOTE_TURN_URL }}
-      MBOTE_TURN_USERNAME: ${{ secrets.MBOTE_TURN_USERNAME }}
-      MBOTE_TURN_CREDENTIAL: ${{ secrets.MBOTE_TURN_CREDENTIAL }}
       MBOTE_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.MBOTE_RELEASE_KEYSTORE_PASSWORD }}
       MBOTE_RELEASE_KEY_ALIAS: ${{ secrets.MBOTE_RELEASE_KEY_ALIAS }}
       MBOTE_RELEASE_KEY_PASSWORD: ${{ secrets.MBOTE_RELEASE_KEY_PASSWORD }}
@@ -53,15 +50,11 @@ jobs:
           RELEASE_KEYSTORE_B64: ${{ secrets.MBOTE_RELEASE_KEYSTORE_B64 }}
         run: |
           set -euo pipefail
-          test -n "$MBOTE_TURN_URL"
-          test -n "$MBOTE_TURN_USERNAME"
-          test -n "$MBOTE_TURN_CREDENTIAL"
           test -n "$RELEASE_KEYSTORE_B64"
           test -n "$MBOTE_RELEASE_KEYSTORE_PASSWORD"
           test -n "$MBOTE_RELEASE_KEY_ALIAS"
           test -n "$MBOTE_RELEASE_KEY_PASSWORD"
           [[ "$MBOTE_VERSION_CODE" =~ ^[0-9]+$ ]]
-          case "$MBOTE_TURN_URL" in turn:*|turns:*) ;; *) exit 1 ;; esac
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -107,6 +100,11 @@ jobs:
           test -s "$AAB"
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          BADGING="$("$BUILD_TOOLS/aapt" dump badging "$APK")"
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "package: name='com.loukatech.mbote'"
+          echo "$BADGING" | grep -q "versionCode='$MBOTE_VERSION_CODE'"
+          echo "$BADGING" | grep -q "versionName='$MBOTE_VERSION_NAME'"
           jarsigner -verify -strict "$AAB"
           sha256sum "$APK" "$AAB" > app/build/outputs/MBote-release-sha256.txt
 
