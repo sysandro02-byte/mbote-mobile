@@ -971,67 +971,183 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res, { items });
   }));
 
-  app.post('/v1/payments/callback', route(async (req, res) => {
-    const secret = String(process.env.PAYMENTS_WEBHOOK_SECRET || '');
-    if (!secret) return failure(res, 503, 'Webhook paiement non configuré');
-    const supplied = String(req.get('x-mbote-signature') || req.get('x-signature') || '').replace(/^sha256=/i, '').trim();
-    const expected = crypto.createHmac('sha256', secret).update(req.rawBody || Buffer.from(JSON.stringify(req.body || {}))).digest('hex');
-    if (!supplied || supplied.length !== expected.length ||
-        !crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
-      return failure(res, 401, 'Signature webhook invalide');
+  const normalizeLoukaPayProvider = (value) => {
+    const provider = String(value || '').trim().toLowerCase();
+    if (provider.includes('mtn')) return 'mtn';
+    if (provider.includes('airtel')) return 'airtel';
+    if (provider.includes('gimac')) return 'gimac';
+    return null;
+  };
+  const loukaPayStatus = (value) => {
+    switch (String(value || '').trim().toLowerCase()) {
+      case 'succeeded': return 'COMPLETED';
+      case 'failed': return 'FAILED';
+      case 'cancelled':
+      case 'refunded': return 'CANCELLED';
+      case 'created':
+      case 'pending':
+      default: return 'PENDING';
     }
-    const intentId = text(req.body.intentId, 'Référence paiement', 100);
-    const status = String(req.body.status || '').toUpperCase();
-    if (!['PENDING','COMPLETED','FAILED','CANCELLED'].includes(status)) return failure(res, 400, 'Statut paiement invalide');
+  };
+  const loukaPayBaseUrl = () => {
+    const explicit = String(process.env.LOUKAPAY_BASE_URL || '').trim().replace(/\/$/, '');
+    if (explicit) return explicit;
+    return String(process.env.PAYMENTS_API_URL || '').trim().replace(/\/v1\/payment-intents\/?$/, '');
+  };
+  const verifyLoukaPayWebhook = (rawBody, signatureHeader) => {
+    const secret = String(process.env.PAYMENTS_WEBHOOK_SECRET || '').trim();
+    if (!secret || !signatureHeader) return false;
+    const values = Object.fromEntries(String(signatureHeader).split(',').map((part) => part.trim().split('=', 2)));
+    const timestamp = Number(values.t);
+    const supplied = String(values.v1 || '');
+    if (!Number.isFinite(timestamp) || !/^[a-f0-9]{64}$/i.test(supplied)) return false;
+    if (Math.abs(Math.floor(Date.now() / 1000) - timestamp) > 300) return false;
+    const body = Buffer.isBuffer(rawBody) ? rawBody.toString('utf8') : String(rawBody || '');
+    const expected = crypto.createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
+    const a = Buffer.from(supplied, 'hex');
+    const b = Buffer.from(expected, 'hex');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  };
+
+  app.post('/v1/payments/callback', route(async (req, res) => {
+    if (!process.env.PAYMENTS_WEBHOOK_SECRET) return failure(res, 503, 'Webhook paiement non configuré');
+    const signature = req.get('x-loukapay-signature');
+    if (!verifyLoukaPayWebhook(req.rawBody || Buffer.from(JSON.stringify(req.body || {})), signature)) {
+      return failure(res, 401, 'Signature webhook LoukaPay invalide');
+    }
+    const payment = req.body?.data?.payment || {};
+    const intentId = String(payment.external_reference || '').trim();
+    if (!/^[0-9a-f-]{36}$/i.test(intentId)) return failure(res, 400, 'Référence MBoté invalide');
+    const status = loukaPayStatus(payment.status);
     const result = await db.query(
-      'UPDATE payment_intents SET status=$2, provider_reference=COALESCE($3,provider_reference), updated_at=NOW() WHERE id=$1 RETURNING id,status,provider_reference',
-      [intentId, status, req.body.reference || null],
+      `UPDATE payment_intents
+          SET status=$2,
+              provider_reference=COALESCE($3,provider_reference),
+              updated_at=NOW()
+        WHERE id=$1
+        RETURNING id,user_id,status,provider_reference`,
+      [intentId, status, payment.id || null],
     );
-    if (!result.rowCount) return failure(res, 404, 'Paiement introuvable');
-    success(res, result.rows[0]);
+    if (!result.rowCount) return failure(res, 404, 'Paiement MBoté introuvable');
+    const row = result.rows[0];
+    if (row.user_id) {
+      realtimeHub.sendToUser(String(row.user_id), {
+        type: 'PAYMENT_STATUS',
+        intentId: String(row.id),
+        status: row.status,
+        providerReference: row.provider_reference || '',
+        timestamp: Date.now(),
+      });
+      if (status !== 'PENDING') {
+        void sendPushToUser(String(row.user_id), {
+          title: status === 'COMPLETED' ? 'Paiement confirmé' : status === 'FAILED' ? 'Paiement échoué' : 'Paiement annulé',
+          body: status === 'COMPLETED' ? 'Votre paiement LoukaPay a été confirmé.' : 'Le statut de votre paiement LoukaPay a été mis à jour.',
+        }, { type: 'payment_status', intentId: String(row.id), status }).catch(() => {});
+      }
+    }
+    success(res, { accepted: true, intentId: row.id, status: row.status });
   }));
 
   app.get('/v1/payments/intents/:intentId', auth, route(async (req, res) => {
-    const result = await db.query(
+    let result = await db.query(
       'SELECT id,provider,provider_reference AS "providerReference",amount_fcfa AS "amountFcfa",status,created_at AS "createdAt",updated_at AS "updatedAt" FROM payment_intents WHERE id=$1 AND user_id=$2',
       [req.params.intentId, req.user.userId],
     );
     if (!result.rowCount) return failure(res, 404, 'Paiement introuvable');
+    const current = result.rows[0];
+    if (current.status === 'PENDING' && current.providerReference && process.env.PAYMENTS_API_KEY && loukaPayBaseUrl()) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+      try {
+        const upstream = await fetch(`${loukaPayBaseUrl()}/v1/payment-intents/${encodeURIComponent(current.providerReference)}`, {
+          headers: { authorization: `Bearer ${process.env.PAYMENTS_API_KEY}`, accept: 'application/json' },
+          signal: controller.signal,
+        });
+        if (upstream.ok) {
+          const payload = await upstream.json();
+          const mapped = loukaPayStatus(payload.status);
+          await db.query('UPDATE payment_intents SET status=$2,updated_at=NOW() WHERE id=$1', [current.id, mapped]);
+          result.rows[0].status = mapped;
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    }
     success(res, result.rows[0]);
   }));
 
   app.post('/v1/payments/intents', auth, route(async (req, res) => {
     if (!process.env.PAYMENTS_API_URL || !process.env.PAYMENTS_API_KEY) {
-      return failure(res, 503, 'Le connecteur de paiement n’est pas configuré');
+      return failure(res, 503, 'LoukaPay n’est pas configuré');
     }
-    const provider = text(req.body.provider, 'Opérateur', 50);
+    const provider = normalizeLoukaPayProvider(req.body.provider);
+    if (!provider) return failure(res, 400, 'Opérateur non pris en charge par LoukaPay');
     const amount = Number(req.body.amountFcfa);
     const phone = text(req.body.phone, 'Téléphone', 50);
     if (!Number.isSafeInteger(amount) || amount <= 0) return failure(res, 400, 'Montant invalide');
+
     const local = await db.query(
       'INSERT INTO payment_intents(user_id,provider,amount_fcfa,phone) VALUES($1,$2,$3,$4) RETURNING id',
       [req.user.userId, provider, amount, phone],
     );
-    const upstream = await fetch(process.env.PAYMENTS_API_URL, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${process.env.PAYMENTS_API_KEY}`, 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ intentId: local.rows[0].id, provider, amount, currency: 'XAF', phone, callbackUrl: process.env.PAYMENTS_CALLBACK_URL }),
-    });
-    if (!upstream.ok) {
-      await db.query("UPDATE payment_intents SET status='FAILED',updated_at=NOW() WHERE id=$1", [local.rows[0].id]);
-      throw Object.assign(new Error('L’opérateur de paiement a refusé la demande'), { status: 502 });
+    const localIntentId = String(local.rows[0].id);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    try {
+      const upstream = await fetch(process.env.PAYMENTS_API_URL, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${process.env.PAYMENTS_API_KEY}`,
+          'content-type': 'application/json',
+          accept: 'application/json',
+          'idempotency-key': `mbote_${localIntentId}`,
+        },
+        body: JSON.stringify({
+          amount,
+          currency: 'XAF',
+          provider,
+          external_reference: localIntentId,
+          description: String(req.body.note || 'Paiement MBoté').slice(0, 255),
+          customer_reference: String(req.user.userId),
+          customer_msisdn: phone,
+          metadata: { source: 'mbote', mbote_user_id: String(req.user.userId) },
+        }),
+        signal: controller.signal,
+      });
+      const payload = await upstream.json().catch(() => ({}));
+      if (!upstream.ok) {
+        await db.query("UPDATE payment_intents SET status='FAILED',updated_at=NOW() WHERE id=$1", [localIntentId]);
+        const detail = payload?.error === 'admin_approval_required'
+          ? 'Les paiements LoukaPay en production ne sont pas encore autorisés.'
+          : 'LoukaPay a refusé la demande de paiement.';
+        throw Object.assign(new Error(detail), { status: upstream.status >= 400 && upstream.status < 500 ? 409 : 502 });
+      }
+      const status = loukaPayStatus(payload.status);
+      await db.query(
+        'UPDATE payment_intents SET provider_reference=$2,status=$3,updated_at=NOW() WHERE id=$1',
+        [localIntentId, payload.id || null, status],
+      );
+      success(res, {
+        intentId: localIntentId,
+        status,
+        amount,
+        currency: 'XAF',
+        provider,
+        providerReference: payload.id || null,
+        checkoutUrl: payload.checkout_url || null,
+        receiptUrl: payload.receipt_url || null,
+        checkoutRequired: Boolean(payload.checkout_required),
+        instructions: payload.checkout_required ? 'Finalisez le paiement dans LoukaPay.' : 'Confirmez la demande Mobile Money sur votre téléphone.',
+      }, 201);
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        await db.query("UPDATE payment_intents SET status='FAILED',updated_at=NOW() WHERE id=$1", [localIntentId]);
+        throw Object.assign(new Error('LoukaPay a dépassé le délai de réponse'), { status: 504 });
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    const payload = await upstream.json();
-    await db.query('UPDATE payment_intents SET provider_reference=$2,status=$3,updated_at=NOW() WHERE id=$1', [local.rows[0].id, payload.reference || null, String(payload.status || 'PENDING').toUpperCase()]);
-    success(res, {
-      intentId: local.rows[0].id,
-      status: String(payload.status || 'PENDING').toUpperCase(),
-      amount,
-      currency: 'XAF',
-      merchantCode: payload.merchantCode || null,
-      ussdCode: payload.ussdCode || null,
-      instructions: payload.instructions || null,
-    }, 201);
   }));
 
   // Session, profile and public configuration contracts consumed by Android.
