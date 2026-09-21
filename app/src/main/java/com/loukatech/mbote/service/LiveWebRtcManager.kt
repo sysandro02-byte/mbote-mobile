@@ -85,30 +85,7 @@ class LiveWebRtcManager(
                             .setPassword(turnCredential)
                             .createIceServer()
                     )
-                } else if (com.loukatech.mbote.BuildConfig.BUILD_TYPE != "release") {
-                    // Public Open Relay Project fallback for QA/dev only.
-                    // Production releases must use MBOTE_TURN_* private credentials.
-                    val publicUser = "openrelayproject"
-                    val publicCredential = "openrelayproject"
-                    add(
-                        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-                            .setUsername(publicUser)
-                            .setPassword(publicCredential)
-                            .createIceServer()
-                    )
-                    add(
-                        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
-                            .setUsername(publicUser)
-                            .setPassword(publicCredential)
-                            .createIceServer()
-                    )
-                    add(
-                        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
-                            .setUsername(publicUser)
-                            .setPassword(publicCredential)
-                            .createIceServer()
-                    )
-                }
+                }}
             }
             factory.createPeerConnection(ice, object : PeerConnection.Observer {
                 override fun onIceCandidate(c: IceCandidate) {
