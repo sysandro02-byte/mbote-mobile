@@ -9,6 +9,16 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+fun sanitizedEnvValue(name: String, fallback: String = ""): String =
+    (envProps.getProperty(name) ?: System.getenv(name) ?: fallback).trim()
+
+fun javaStringLiteral(value: String): String =
+    """ + value
+        .replace("\\", "\\\\")
+        .replace(""", "\\"")
+        .replace("\r", "\\r")
+        .replace("\n", "\\n") + """
+
 val envProps = Properties()
 val envFile = rootProject.file(".env")
 if (envFile.exists()) {
@@ -29,31 +39,14 @@ val mboteApiBaseUrl = configuredMboteApiBaseUrl.trim().trimEnd('/').let { url ->
         else -> "$url/v1"
     }
 }
-val viteSocketUrl = envProps.getProperty("VITE_SOCKET_URL")
-    ?: System.getenv("VITE_SOCKET_URL")
-    ?: "https://mbote-backend.onrender.com"
-val viteSupabaseUrl = envProps.getProperty("VITE_SUPABASE_URL")
-    ?: System.getenv("VITE_SUPABASE_URL")
-    ?: ""
-val viteSupabaseAnonKey = envProps.getProperty("VITE_SUPABASE_ANON_KEY")
-    ?: System.getenv("VITE_SUPABASE_ANON_KEY")
-    ?: ""
-
-val googleClientId = envProps.getProperty("GOOGLE_CLIENT_ID")
-    ?: System.getenv("GOOGLE_CLIENT_ID")
-    ?: ""
-val githubClientId = envProps.getProperty("GITHUB_CLIENT_ID")
-    ?: System.getenv("GITHUB_CLIENT_ID")
-    ?: ""
-val mboteTurnUrl = envProps.getProperty("MBOTE_TURN_URL")
-    ?: System.getenv("MBOTE_TURN_URL")
-    ?: ""
-val mboteTurnUsername = envProps.getProperty("MBOTE_TURN_USERNAME")
-    ?: System.getenv("MBOTE_TURN_USERNAME")
-    ?: ""
-val mboteTurnCredential = envProps.getProperty("MBOTE_TURN_CREDENTIAL")
-    ?: System.getenv("MBOTE_TURN_CREDENTIAL")
-    ?: ""
+val viteSocketUrl = sanitizedEnvValue("VITE_SOCKET_URL", "https://mbote-backend.onrender.com")
+val viteSupabaseUrl = sanitizedEnvValue("VITE_SUPABASE_URL")
+val viteSupabaseAnonKey = sanitizedEnvValue("VITE_SUPABASE_ANON_KEY")
+val googleClientId = sanitizedEnvValue("GOOGLE_CLIENT_ID")
+val githubClientId = sanitizedEnvValue("GITHUB_CLIENT_ID")
+val mboteTurnUrl = sanitizedEnvValue("MBOTE_TURN_URL")
+val mboteTurnUsername = sanitizedEnvValue("MBOTE_TURN_USERNAME")
+val mboteTurnCredential = sanitizedEnvValue("MBOTE_TURN_CREDENTIAL")
 
 val qaKeystorePath = System.getenv("MBOTE_QA_KEYSTORE_PATH")
 val qaKeystorePassword = System.getenv("MBOTE_QA_KEYSTORE_PASSWORD")
@@ -92,15 +85,15 @@ android {
         versionName = configuredVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "VITE_SOCKET_URL", "\"$viteSocketUrl\"")
-        buildConfigField("String", "MBOTE_API_BASE_URL", "\"$mboteApiBaseUrl\"")
-        buildConfigField("String", "VITE_SUPABASE_URL", "\"$viteSupabaseUrl\"")
-        buildConfigField("String", "VITE_SUPABASE_ANON_KEY", "\"$viteSupabaseAnonKey\"")
-        buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
-        buildConfigField("String", "GITHUB_CLIENT_ID", "\"$githubClientId\"")
-        buildConfigField("String", "MBOTE_TURN_URL", "\"$mboteTurnUrl\"")
-        buildConfigField("String", "MBOTE_TURN_USERNAME", "\"$mboteTurnUsername\"")
-        buildConfigField("String", "MBOTE_TURN_CREDENTIAL", "\"$mboteTurnCredential\"")
+        buildConfigField("String", "VITE_SOCKET_URL", javaStringLiteral(viteSocketUrl))
+        buildConfigField("String", "MBOTE_API_BASE_URL", javaStringLiteral(mboteApiBaseUrl))
+        buildConfigField("String", "VITE_SUPABASE_URL", javaStringLiteral(viteSupabaseUrl))
+        buildConfigField("String", "VITE_SUPABASE_ANON_KEY", javaStringLiteral(viteSupabaseAnonKey))
+        buildConfigField("String", "GOOGLE_CLIENT_ID", javaStringLiteral(googleClientId))
+        buildConfigField("String", "GITHUB_CLIENT_ID", javaStringLiteral(githubClientId))
+        buildConfigField("String", "MBOTE_TURN_URL", javaStringLiteral(mboteTurnUrl))
+        buildConfigField("String", "MBOTE_TURN_USERNAME", javaStringLiteral(mboteTurnUsername))
+        buildConfigField("String", "MBOTE_TURN_CREDENTIAL", javaStringLiteral(mboteTurnCredential))
     }
 
     signingConfigs {
