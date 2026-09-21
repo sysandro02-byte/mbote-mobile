@@ -576,8 +576,76 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res, { id: created.rows[0].id, authorName: user.rows[0].full_name, authorUsername: user.rows[0].username || '', authorAvatar: user.rows[0].avatar_url || '', text: created.rows[0].text, timestamp: created.rows[0].created_at, likesCount: 0, isLiked: false }, 201);
   }));
   app.get('/v1/masta/users', auth, route(async (req, res) => {
-    const result = await db.query('SELECT id, full_name AS name, COALESCE(avatar_url, \'\') AS avatar, COALESCE(city, country, \'\') AS "infoSubtitle", 0 AS "mutualFriendsCount", ARRAY[]::text[] AS "mutualFriendsAvatars", false AS "isOnline", COALESCE(city, \'\') AS city, NULL::text AS "timeBadge", \'FRIENDS\' AS "subType" FROM users WHERE id <> $1 ORDER BY created_at DESC LIMIT 100', [req.user.userId]);
+    const result = await db.query(
+      `SELECT u.id, u.full_name AS name, COALESCE(u.avatar_url,'') AS avatar,
+              COALESCE(u.city,u.country,'') AS "infoSubtitle", 0 AS "mutualFriendsCount",
+              ARRAY[]::text[] AS "mutualFriendsAvatars", false AS "isOnline",
+              COALESCE(u.city,'') AS city, NULL::text AS "timeBadge",
+              CASE
+                WHEN EXISTS(SELECT 1 FROM friend_requests f WHERE f.status='ACCEPTED' AND ((f.sender_id=$1 AND f.receiver_id=u.id) OR (f.receiver_id=$1 AND f.sender_id=u.id))) THEN 'FRIENDS'
+                WHEN EXISTS(SELECT 1 FROM friend_requests f WHERE f.status='PENDING' AND f.receiver_id=$1 AND f.sender_id=u.id) THEN 'RECEIVED'
+                WHEN EXISTS(SELECT 1 FROM friend_requests f WHERE f.status='PENDING' AND f.sender_id=$1 AND f.receiver_id=u.id) THEN 'SENT'
+                ELSE 'SUGGESTIONS'
+              END AS "subType"
+         FROM users u
+        WHERE u.id<>$1
+          AND NOT EXISTS(SELECT 1 FROM blocked_users b WHERE (b.blocker_id=$1 AND b.blocked_id=u.id) OR (b.blocker_id=u.id AND b.blocked_id=$1))
+        ORDER BY u.created_at DESC LIMIT 100`,
+      [req.user.userId],
+    );
     success(res, result.rows);
+  }));
+
+  app.get('/v1/masta/requests', auth, route(async (req, res) => {
+    const result = await db.query(
+      `SELECT f.id,
+              CASE WHEN f.receiver_id=$1 THEN f.sender_id ELSE f.receiver_id END AS "userId",
+              u.full_name AS name, COALESCE(u.phone,'') AS phone, COALESCE(u.avatar_url,'') AS "avatarUrl",
+              (f.receiver_id=$1) AS "isIncoming", f.created_at AS timestamp, f.status
+         FROM friend_requests f
+         JOIN users u ON u.id=CASE WHEN f.receiver_id=$1 THEN f.sender_id ELSE f.receiver_id END
+        WHERE (f.sender_id=$1 OR f.receiver_id=$1) AND f.status='PENDING'
+        ORDER BY f.created_at DESC`,
+      [req.user.userId],
+    );
+    success(res,result.rows);
+  }));
+
+  app.post('/v1/masta/requests', auth, route(async (req,res)=>{
+    const targetUserId=text(req.body.targetUserId,'Utilisateur',80);
+    if(targetUserId===req.user.userId) return failure(res,400,'Vous ne pouvez pas vous ajouter vous-même');
+    const target=await db.query('SELECT id FROM users WHERE id=$1',[targetUserId]);
+    if(!target.rowCount) return failure(res,404,'Utilisateur introuvable');
+    const blocked=await db.query('SELECT 1 FROM blocked_users WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)',[req.user.userId,targetUserId]);
+    if(blocked.rowCount) return failure(res,409,'Cette demande ne peut pas être envoyée');
+    const existing=await db.query(
+      "SELECT id,status FROM friend_requests WHERE ((sender_id=$1 AND receiver_id=$2) OR (sender_id=$2 AND receiver_id=$1)) AND status IN ('PENDING','ACCEPTED')",
+      [req.user.userId,targetUserId],
+    );
+    if(existing.rowCount) return failure(res,409,existing.rows[0].status==='ACCEPTED'?'Vous êtes déjà Masta':'Une demande est déjà en attente');
+    const created=await db.query(
+      "INSERT INTO friend_requests(sender_id,receiver_id,status) VALUES($1,$2,'PENDING') RETURNING id,created_at",
+      [req.user.userId,targetUserId],
+    );
+    success(res,created.rows[0],201);
+  }));
+
+  app.post('/v1/masta/requests/:requestId/accept', auth, route(async (req,res)=>{
+    const accepted=await db.query(
+      "UPDATE friend_requests SET status='ACCEPTED',responded_at=NOW() WHERE id=$1 AND receiver_id=$2 AND status='PENDING' RETURNING id,sender_id",
+      [req.params.requestId,req.user.userId],
+    );
+    if(!accepted.rowCount) return failure(res,404,'Demande introuvable');
+    success(res,{id:accepted.rows[0].id,friendUserId:accepted.rows[0].sender_id});
+  }));
+
+  app.delete('/v1/masta/requests/:requestId', auth, route(async (req,res)=>{
+    const removed=await db.query(
+      "UPDATE friend_requests SET status='DECLINED',responded_at=NOW() WHERE id=$1 AND (sender_id=$2 OR receiver_id=$2) AND status='PENDING' RETURNING id",
+      [req.params.requestId,req.user.userId],
+    );
+    if(!removed.rowCount) return failure(res,404,'Demande introuvable');
+    success(res,true);
   }));
 
   app.get('/v1/users/public', auth, route(async (req, res) => {
