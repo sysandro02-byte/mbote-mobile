@@ -1376,6 +1376,28 @@ class MboteRepository(
         }
     }
 
+    suspend fun createDirectChatByUserId(userId: String, displayName: String, avatar: String = ""): Result<Chat> {
+        if (userId.isBlank()) return Result.failure(IllegalArgumentException("Utilisateur MBoté invalide."))
+        _chats.value.firstOrNull { chat -> chat.participants.any { it.id == userId } && !chat.isGroup }?.let {
+            return Result.success(it)
+        }
+        val dto = apiService.createDirectChatApi(userId).getOrElse { return Result.failure(it) }
+        val chat = Chat(
+            id = dto.id,
+            name = dto.name.takeUnless { it.isBlank() || it == "Discussion" } ?: displayName,
+            avatar = dto.avatar.ifBlank { avatar },
+            lastMessage = dto.lastMessage,
+            lastMessageTime = dto.lastMessageTime,
+            unreadCount = dto.unreadCount,
+            isOnline = dto.isOnline,
+            isGroup = false,
+            participants = dto.participants.map { Participant(it.id, it.name, it.avatar, it.isOnline, it.role) },
+            disappearingTimerSec = dto.disappearingDurationSec
+        )
+        _chats.update { listOf(chat) + it.filterNot { current -> current.id == chat.id } }
+        return Result.success(chat)
+    }
+
     suspend fun createDirectChat(name: String, initialMessage: String): Result<Chat> {
         val contact = _mastaUsers.value.firstOrNull { it.name.equals(name, ignoreCase = true) }
             ?: return Result.failure(IllegalArgumentException("Sélectionnez un utilisateur MBoté réel dans Masta."))
