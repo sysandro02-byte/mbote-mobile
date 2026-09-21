@@ -1197,30 +1197,42 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       [req.user.userId, provider, amount, phone],
     );
     const localIntentId = String(local.rows[0].id);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 20000);
+    const common = {
+      amount,
+      currency: 'XAF',
+      external_reference: localIntentId,
+      description: String(req.body.note || 'Paiement MBoté').slice(0, 255),
+      customer_reference: String(req.user.userId),
+      metadata: { source: 'mbote', mbote_user_id: String(req.user.userId), requested_provider: provider },
+    };
+    const requestLoukaPay = async (body, idempotencySuffix = '') => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      try {
+        const upstream = await fetch(process.env.PAYMENTS_API_URL, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${process.env.PAYMENTS_API_KEY}`,
+            'content-type': 'application/json',
+            accept: 'application/json',
+            'idempotency-key': `mbote_${localIntentId}${idempotencySuffix}`,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        return { upstream, payload: await upstream.json().catch(() => ({})) };
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
     try {
-      const upstream = await fetch(process.env.PAYMENTS_API_URL, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${process.env.PAYMENTS_API_KEY}`,
-          'content-type': 'application/json',
-          accept: 'application/json',
-          'idempotency-key': `mbote_${localIntentId}`,
-        },
-        body: JSON.stringify({
-          amount,
-          currency: 'XAF',
-          provider,
-          external_reference: localIntentId,
-          description: String(req.body.note || 'Paiement MBoté').slice(0, 255),
-          customer_reference: String(req.user.userId),
-          customer_msisdn: phone,
-          metadata: { source: 'mbote', mbote_user_id: String(req.user.userId) },
-        }),
-        signal: controller.signal,
-      });
-      const payload = await upstream.json().catch(() => ({}));
+      let { upstream, payload } = await requestLoukaPay({ ...common, provider, customer_msisdn: phone });
+      if (!upstream.ok && upstream.status >= 500) {
+        const fallback = await requestLoukaPay(common, '_checkout');
+        upstream = fallback.upstream;
+        payload = fallback.payload;
+      }
       if (!upstream.ok) {
         await db.query("UPDATE payment_intents SET status='FAILED',updated_at=NOW() WHERE id=$1", [localIntentId]);
         const detail = payload?.error === 'admin_approval_required'
@@ -1251,8 +1263,6 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
         throw Object.assign(new Error('LoukaPay a dépassé le délai de réponse'), { status: 504 });
       }
       throw error;
-    } finally {
-      clearTimeout(timer);
     }
   }));
 
