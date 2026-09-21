@@ -95,9 +95,15 @@ jobs:
           code="$(curl -sS -o "$body" -w '%{http_code}' --connect-timeout 15 --max-time 45 https://mbote-backend.onrender.com/v1/readiness)"
           cat "$body"
           test "$code" = "200"
+          grep -q '"coreReady":true' "$body"
+          grep -q '"releaseReady":true' "$body"
           grep -q '"database":true' "$body"
           grep -q '"emailOtp":true' "$body"
           grep -q '"liveTurn":true' "$body"
+          grep -q '"ai":true' "$body"
+          grep -q '"payments":true' "$body"
+          grep -q '"paymentWebhook":true' "$body"
+          grep -q '"push":true' "$body"
 
 
       - name: Build signed release APK and AAB
