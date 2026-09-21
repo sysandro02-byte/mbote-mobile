@@ -9,7 +9,7 @@ const { Pool } = require('pg');
 const { WebSocketServer } = require('ws');
 
 const PORT = Number(process.env.PORT || 8080);
-const API_VERSION = '1.5.0';
+const API_VERSION = '1.6.0';
 
 function createPool() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL est requis.');
@@ -26,6 +26,49 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   if (!jwtSecret || jwtSecret.length < 32) throw new Error('JWT_SECRET doit contenir au moins 32 caractères.');
 
   const app = express();
+  const rateBuckets = new Map();
+  const rateLimit = ({ windowMs, max, keyPrefix }) => (req, res, next) => {
+    const now = Date.now();
+    const clientKey = `${keyPrefix}:${req.ip || req.socket?.remoteAddress || 'unknown'}`;
+    const current = rateBuckets.get(clientKey);
+    if (!current || current.resetAt <= now) {
+      rateBuckets.set(clientKey, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    current.count += 1;
+    if (current.count > max) {
+      res.set('Retry-After', String(Math.max(1, Math.ceil((current.resetAt - now) / 1000))));
+      return res.status(429).json({ success: false, error: 'Trop de requêtes. Réessayez dans quelques instants.' });
+    }
+    if (rateBuckets.size > 10000) {
+      for (const [key, value] of rateBuckets) if (value.resetAt <= now) rateBuckets.delete(key);
+    }
+    return next();
+  };
+  app.set('trust proxy', 1);
+  app.use((req, res, next) => {
+    const requestId = String(req.get('x-request-id') || crypto.randomUUID()).replace(/[^A-Za-z0-9._-]/g, '').slice(0, 80) || crypto.randomUUID();
+    const startedAt = Date.now();
+    req.requestId = requestId;
+    res.set('X-Request-Id', requestId);
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('X-Frame-Options', 'DENY');
+    res.set('Referrer-Policy', 'no-referrer');
+    res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    res.on('finish', () => {
+      const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+      console.log(JSON.stringify({
+        level,
+        event: 'http_request',
+        requestId,
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        durationMs: Date.now() - startedAt,
+      }));
+    });
+    next();
+  });
   const origins = (allowedOrigins || '').split(',').map((item) => item.trim()).filter(Boolean);
   const route = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
   const success = (res, data, status = 200) => res.status(status).json({ success: true, data });
@@ -93,6 +136,8 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   // Keep this raw-body middleware before express.json so Android can upload real video bytes.
   app.use('/v1/uploads/:surface', express.raw({ type: ['video/*', 'application/octet-stream'], limit: '50mb' }));
   app.use(express.json({ limit: '5mb' }));
+  app.use('/v1', rateLimit({ windowMs: 60_000, max: 600, keyPrefix: 'api' }));
+  app.use('/v1/auth', rateLimit({ windowMs: 15 * 60_000, max: 60, keyPrefix: 'auth' }));
 
   app.post('/v1/uploads/:surface', auth, route(async (req, res) => {
     const surface = req.params.surface;
@@ -117,7 +162,17 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     res.send(found.rows[0].content);
   }));
 
-  app.get(['/health', '/v1/health'], route(async (_req, res) => { await db.query('SELECT 1'); success(res, { status: 'online', version: API_VERSION, timestamp: new Date().toISOString() }); }));
+  app.get(['/health', '/v1/health'], route(async (_req, res) => {
+    const started = Date.now();
+    await db.query('SELECT 1');
+    success(res, {
+      status: 'online',
+      version: API_VERSION,
+      databaseLatencyMs: Date.now() - started,
+      uptimeSec: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString(),
+    });
+  }));
 
   app.post('/v1/auth/register', route(async (req, res) => {
     const fullName = text(req.body.name || req.body.fullName, 'Nom complet', 255);
@@ -1239,7 +1294,18 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res, { suggestions: suggestions.filter((item) => typeof item === 'string' && item.trim()).slice(0, 3) });
   }));
 
-  app.use((error, _req, res, _next) => { if (error.status) return failure(res, error.status, error.message); console.error('[mbote-api]', error); return failure(res, 500, 'Erreur interne du serveur'); });
+  app.use((error, req, res, _next) => {
+    if (error.status) return failure(res, error.status, error.message);
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'unhandled_request_error',
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      error: error?.message || 'Unknown error',
+    }));
+    return failure(res, 500, 'Erreur interne du serveur');
+  });
   return app;
 }
 
@@ -1247,7 +1313,17 @@ if (require.main === module) {
   const db = createPool();
   const app = createApp({ db });
   const server = app.listen(PORT, () => console.log(`MBoté API v${API_VERSION} écoute sur ${PORT}`));
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
+  const heartbeat = setInterval(() => {
+    for (const socket of wss.clients) {
+      if (socket.isAlive === false) {
+        socket.terminate();
+        continue;
+      }
+      socket.isAlive = false;
+      socket.ping();
+    }
+  }, 30_000);
   const liveSockets = new Map();
   const broadcastLive = (streamId,event,except=null) => {
     const message=JSON.stringify(event);
@@ -1260,13 +1336,22 @@ if (require.main === module) {
     return count.rows[0]?.count||0;
   };
   wss.on('connection',(socket,request)=>{
+    socket.isAlive = true;
+    socket.on('pong', () => { socket.isAlive = true; });
     let identity=null;
     let joinedStream=null;
     socket.on('message',async(raw)=>{
       let message; try { message=JSON.parse(raw.toString()); } catch { return; }
       if(!identity) {
         if(message.type!=='AUTH') return socket.close(1008,'Authentification requise');
-        try { identity=jwt.verify(String(message.token||''),process.env.JWT_SECRET,{issuer:'mbote-api',audience:'mbote-mobile'}); socket.mboteUserId=identity.userId; socket.send(JSON.stringify({type:'AUTH_OK',userId:identity.userId})); }
+        try {
+          identity=jwt.verify(String(message.token||''),process.env.JWT_SECRET,{issuer:'mbote-api',audience:'mbote-mobile'});
+          const user = await db.query('SELECT full_name FROM users WHERE id=$1',[identity.userId]);
+          if(!user.rowCount) return socket.close(1008,'Compte introuvable');
+          socket.mboteUserId=identity.userId;
+          socket.mboteUserName=String(user.rows[0].full_name||'Utilisateur MBoté').slice(0,120);
+          socket.send(JSON.stringify({type:'AUTH_OK',userId:identity.userId}));
+        }
         catch { socket.close(1008,'Session invalide'); }
         return;
       }
@@ -1289,9 +1374,15 @@ if (require.main === module) {
         return;
       }
       if(!streamId || joinedStream!==streamId)return;
-      const base={streamId,senderName:String(message.senderName||'Utilisateur MBoté'),timestamp:Date.now()};
-      if(message.type==='LIVE_COMMENT') broadcastLive(streamId,{...base,type:'LIVE_COMMENT',payloadText:String(message.text||''),badgeType:message.badgeType||null});
-      if(message.type==='LIVE_REACTION') broadcastLive(streamId,{...base,type:'LIVE_REACTION',emoji:String(message.emoji||'')});
+      const base={streamId,senderName:socket.mboteUserName||'Utilisateur MBoté',timestamp:Date.now()};
+      if(message.type==='LIVE_COMMENT') {
+        const liveText=String(message.text||'').trim().slice(0,1000);
+        if(liveText) broadcastLive(streamId,{...base,type:'LIVE_COMMENT',payloadText:liveText,badgeType:message.badgeType||null});
+      }
+      if(message.type==='LIVE_REACTION') {
+        const emoji=String(message.emoji||'').slice(0,16);
+        if(emoji) broadcastLive(streamId,{...base,type:'LIVE_REACTION',emoji});
+      }
       if(message.type==='LIVE_GIFT') broadcastLive(streamId,{...base,type:'LIVE_GIFT',giftId:message.giftId||null,giftName:message.giftName||null,giftEmoji:message.emoji||null,giftValueFcfa:Number(message.valueFcfa)||0});
       if(message.type==='LIVE_SIGNAL') {
         const signalType=String(message.signalType||'');
@@ -1314,7 +1405,13 @@ if (require.main === module) {
       broadcastLive(joinedStream,{type:'LIVE_VIEWER_COUNT',streamId:joinedStream,viewerCount:await viewerCount(joinedStream),timestamp:Date.now()});
     });
   });
-  const close = async () => { wss.close(); server.close(); await db.end(); };
+  const close = async () => {
+    clearInterval(heartbeat);
+    for (const socket of wss.clients) socket.close(1001, 'Serveur en arrêt');
+    wss.close();
+    server.close();
+    await db.end();
+  };
   process.on('SIGINT', close); process.on('SIGTERM', close);
 }
 module.exports = { createApp, createPool };
