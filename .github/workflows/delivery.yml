@@ -126,9 +126,6 @@ jobs:
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-      MBOTE_TURN_URL: ${{ secrets.MBOTE_TURN_URL }}
-      MBOTE_TURN_USERNAME: ${{ secrets.MBOTE_TURN_USERNAME }}
-      MBOTE_TURN_CREDENTIAL: ${{ secrets.MBOTE_TURN_CREDENTIAL }}
       MBOTE_QA_KEYSTORE_PASSWORD: mbote-qa-test-only
       MBOTE_QA_KEY_ALIAS: mboteqa
       MBOTE_QA_KEY_PASSWORD: mbote-qa-test-only
@@ -160,17 +157,6 @@ jobs:
           test "$MBOTE_API_BASE_URL" = "https://mbote-backend.onrender.com/v1"
           test "$VITE_SOCKET_URL" = "https://mbote-backend.onrender.com"
           ! printf '%s\n%s\n' "$MBOTE_API_BASE_URL" "$VITE_SOCKET_URL" | grep -q 'example.invalid'
-      - name: Verify production TURN configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$MBOTE_TURN_URL"
-          test -n "$MBOTE_TURN_USERNAME"
-          test -n "$MBOTE_TURN_CREDENTIAL"
-          case "$MBOTE_TURN_URL" in
-            turn:*|turns:*) ;;
-            *) echo "MBOTE_TURN_URL doit commencer par turn: ou turns:" >&2; exit 1 ;;
-          esac
       - name: Build installable QA APK
         run: gradle --no-daemon --max-workers=2 --stacktrace clean assembleQa
       - name: Run Android unit tests
@@ -198,7 +184,7 @@ jobs:
           echo "$SIGNATURE_INFO" | tr '[:upper:]' '[:lower:]' | grep -q 'a1ec5aac2b61ef68640eea7095997a0c6cafbb75366f85e15ec05d9f6158cb69'
           BADGING="$($TOOLS/aapt dump badging "$APK")"
           echo "$BADGING"
-          echo "$BADGING" | grep -q "package: name='com.aistudio.mbote.krtwvx.qa'"
+          echo "$BADGING" | grep -q "package: name='com.loukatech.mbote.qa'"
           echo "$BADGING" | grep -q "sdkVersion:'26'"
           echo "$BADGING" > app/build/outputs/apk/qa/mbote-apk-info.txt
           printf '%s\n' "$SIGNATURE_INFO" > app/build/outputs/apk/qa/mbote-apk-signature.txt
