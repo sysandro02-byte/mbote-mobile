@@ -156,6 +156,27 @@ data class RegistrationPublicConfig(
 )
 
 @Serializable
+data class ProductionCapabilities(
+    val database: Boolean = false,
+    val emailOtp: Boolean = false,
+    val liveTurn: Boolean = false,
+    val ai: Boolean = false,
+    val payments: Boolean = false,
+    val paymentWebhook: Boolean = false,
+    val push: Boolean = false,
+    val googleOAuthBackend: Boolean = false,
+    val githubOAuthBackend: Boolean = false
+)
+
+@Serializable
+data class ProductionReadiness(
+    val status: String = "degraded",
+    val databaseLatencyMs: Long = -1,
+    val capabilities: ProductionCapabilities = ProductionCapabilities(),
+    val timestamp: String = ""
+)
+
+@Serializable
 data class GoogleAuthRequest(
     val idToken: String? = null,
     val email: String,
@@ -893,6 +914,12 @@ class MboteApiService {
         executeHttpRequest<Unit, RegistrationPublicConfig>(endpoint = "/public-settings") { json ->
             MboteBackendConfig.jsonParser.decodeFromJsonElement<RegistrationPublicConfig>(responseObject(json))
         }
+
+    suspend fun getProductionReadiness(): Result<ProductionReadiness> =
+        executeHttpRequest<Unit, ProductionReadiness>(endpoint = "/readiness") { json ->
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<ProductionReadiness>(responseObject(json))
+        }
+
 
     suspend fun verifyLoginOtp(pendingUserId: String, otp: String): Result<VerifiedAuthResponse> {
         val response = executeHttpRequest(
