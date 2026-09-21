@@ -178,6 +178,28 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     });
   }));
 
+  app.get('/v1/readiness', route(async (_req, res) => {
+    const started = Date.now();
+    await db.query('SELECT 1');
+    const capabilities = {
+      database: true,
+      emailOtp: Boolean(process.env.BREVO_API_KEY),
+      liveTurn: Boolean(process.env.MBOTE_TURN_URL && process.env.MBOTE_TURN_USERNAME && process.env.MBOTE_TURN_CREDENTIAL),
+      ai: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_MODEL),
+      payments: Boolean(process.env.PAYMENTS_API_URL && process.env.PAYMENTS_API_KEY),
+      paymentWebhook: Boolean(process.env.PAYMENTS_WEBHOOK_SECRET),
+      push: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_B64),
+      googleOAuthBackend: Boolean(process.env.GOOGLE_CLIENT_ID),
+      githubOAuthBackend: Boolean(process.env.GITHUB_CLIENT_ID),
+    };
+    success(res, {
+      status: capabilities.database && capabilities.emailOtp && capabilities.liveTurn ? 'ready' : 'degraded',
+      databaseLatencyMs: Date.now() - started,
+      capabilities,
+      timestamp: new Date().toISOString(),
+    });
+  }));
+
   const legalPage = (title, body) => `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} — MBoté</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:860px;margin:40px auto;padding:0 20px;line-height:1.6;color:#18181b}h1,h2{color:#5b21b6}small{color:#71717a}</style></head><body><h1>${title}</h1>${body}<hr><small>MBoté — LoukaTech · Mise à jour: 21 septembre 2026 · Contact: contacts@loukatech.com</small></body></html>`;
 
   app.get('/privacy', (_req,res) => res.type('html').send(legalPage('Politique de confidentialité', `
