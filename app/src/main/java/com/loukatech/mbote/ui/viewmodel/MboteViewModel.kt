@@ -59,6 +59,7 @@ class MboteViewModel(
     val channels = repository.channels
     val isOffline = repository.isOffline
     val isAuthenticated = repository.isAuthenticated
+    val productionReadiness = repository.productionReadiness
 
     // 5) Parent-Child Connection State & Verification Flow Helper
     private val _parentChildLinkState = MutableStateFlow<ParentChildLinkState>(ParentChildLinkState.Idle)
@@ -86,6 +87,10 @@ class MboteViewModel(
     val socketUrl = com.loukatech.mbote.service.MboteSocketManager.socketUrl
 
     init {
+        viewModelScope.launch {
+            repository.refreshProductionReadiness()
+                .onFailure { _publicationError.value = "Certaines intégrations externes ne sont pas disponibles pour le moment." }
+        }
         viewModelScope.launch {
             com.loukatech.mbote.service.MboteSocketManager.incomingMessages.collect { msg ->
                 if (msg.chatId.isNotBlank()) {
@@ -1078,6 +1083,12 @@ class MboteViewModel(
     }
 
     fun setShowPaymentSheet(show: Boolean) {
+        if (show && !productionReadiness.value.capabilities.payments) {
+            _showPaymentSheet.value = false
+            _publicationError.value = "Le paiement Mobile Money n’est pas configuré en production."
+            viewModelScope.launch { repository.refreshProductionReadiness() }
+            return
+        }
         _showPaymentSheet.value = show
     }
 
