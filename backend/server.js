@@ -252,6 +252,68 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     return { sent, configured: true };
   };
 
+  const integrationProbeCache = new Map();
+  const cachedIntegrationProbe = async (name, probe, ttlMs = 60_000) => {
+    const now = Date.now();
+    const cached = integrationProbeCache.get(name);
+    if (cached?.expiresAt > now) return cached.value;
+    if (cached?.promise) return cached.promise;
+    const promise = Promise.resolve()
+      .then(probe)
+      .then((value) => Boolean(value))
+      .catch((error) => {
+        console.warn(JSON.stringify({ level: 'warn', event: 'integration_probe_failed', integration: name, error: error?.message || 'unknown' }));
+        return false;
+      })
+      .then((value) => {
+        integrationProbeCache.set(name, { value, expiresAt: Date.now() + ttlMs });
+        return value;
+      });
+    integrationProbeCache.set(name, { promise, expiresAt: now + ttlMs });
+    return promise;
+  };
+  const probeLunaProvider = () => cachedIntegrationProbe('luna', async () => {
+    if (String(process.env.GROQ_API_KEY || '').trim()) return true;
+    const bridgeUrl = String(process.env.LUNA_AI_URL || '').trim().replace(/\/$/, '');
+    const secret = String(process.env.LUNA_AI_SHARED_SECRET || '').trim();
+    if (!bridgeUrl || !secret) return false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch(`${bridgeUrl}/health`, {
+        headers: { 'x-loukatech-internal-key': secret, accept: 'application/json' },
+        signal: controller.signal,
+      });
+      if (!response.ok) return false;
+      const payload = await response.json().catch(() => ({}));
+      return payload?.ok === true && payload?.provider === 'groq';
+    } finally {
+      clearTimeout(timer);
+    }
+  }, 120_000);
+  const probeLoukaPayProvider = () => cachedIntegrationProbe('loukapay', async () => {
+    const apiKey = String(process.env.PAYMENTS_API_KEY || '').trim();
+    const endpoint = String(process.env.PAYMENTS_API_URL || '').trim();
+    if (!apiKey || !endpoint) return false;
+    const base = String(process.env.LOUKAPAY_BASE_URL || endpoint.replace(/\/v1\/payment-intents\/?$/, '')).replace(/\/$/, '');
+    if (!base) return false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch(`${base}/v1/payment-intents?limit=1`, {
+        headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
+        signal: controller.signal,
+      });
+      return response.ok;
+    } finally {
+      clearTimeout(timer);
+    }
+  }, 120_000);
+  const probeFirebaseProvider = () => cachedIntegrationProbe('firebase', async () => {
+    if (!firebaseServiceAccount()) return false;
+    return Boolean(await firebaseAccessToken());
+  }, 10 * 60_000);
+
   const sendOtpEmail = async (email, code, flow) => {
     if (!process.env.BREVO_API_KEY) throw Object.assign(new Error('Le service e-mail est temporairement indisponible'), { status: 503 });
     const response = await fetch(process.env.BREVO_API_URL || 'https://api.brevo.com/v3/smtp/email', {
@@ -346,14 +408,19 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   app.get('/v1/readiness', route(async (_req, res) => {
     const started = Date.now();
     await db.query('SELECT 1');
+    const [aiReady, paymentsReady, pushReady] = await Promise.all([
+      probeLunaProvider(),
+      probeLoukaPayProvider(),
+      probeFirebaseProvider(),
+    ]);
     const capabilities = {
       database: true,
       emailOtp: Boolean(process.env.BREVO_API_KEY),
       liveTurn: Boolean(process.env.MBOTE_TURN_URL && process.env.MBOTE_TURN_USERNAME && process.env.MBOTE_TURN_CREDENTIAL),
-      ai: lunaProviderConfigured(),
-      payments: Boolean(process.env.PAYMENTS_API_URL && process.env.PAYMENTS_API_KEY),
+      ai: aiReady,
+      payments: paymentsReady,
       paymentWebhook: Boolean(process.env.PAYMENTS_WEBHOOK_SECRET),
-      push: Boolean(firebaseServiceAccount()),
+      push: pushReady,
       googleOAuthBackend: Boolean(process.env.GOOGLE_CLIENT_ID),
       githubOAuthBackend: Boolean(process.env.GITHUB_CLIENT_ID),
     };
