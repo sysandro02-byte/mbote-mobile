@@ -182,14 +182,14 @@ fun CallViewScreen(
             .navigationBarsPadding()
             .testTag("call_view_screen")
     ) {
-        if (call.isVideo && connected && remoteTrack != null && rtc != null && !isVideoOff) {
+        if (call.isVideo && connected && remoteTrack != null && rtc != null) {
             RtcVideoSurface(
                 track = remoteTrack!!,
                 eglContext = rtc!!.eglContext(),
                 mirror = false,
                 modifier = Modifier.fillMaxSize()
             )
-            localTrack?.let { track ->
+            if (!isVideoOff) localTrack?.let { track ->
                 Surface(
                     shape = RoundedCornerShape(18.dp),
                     tonalElevation = 6.dp,
