@@ -996,8 +996,8 @@ class MainActivity : ComponentActivity() {
                         PaymentSheet(
                             recipientName = activeChat!!.name,
                             onDismiss = { viewModel.setShowPaymentSheet(false) },
-                            onSendPayment = { amount, provider, note, isRequest ->
-                                viewModel.sendPaymentTransfer(activeChat!!.id, amount, provider, note, isRequest)
+                            onSendPayment = { amount, provider, phone, note, isRequest ->
+                                viewModel.sendPaymentTransfer(activeChat!!.id, amount, provider, phone, note, isRequest)
                             }
                         )
                     }
