@@ -6,6 +6,7 @@ import com.loukatech.mbote.data.AronQuestionsData
 import com.loukatech.mbote.data.MboteRepository
 import com.loukatech.mbote.model.*
 import com.loukatech.mbote.service.ContactsSyncService
+import com.loukatech.mbote.service.CallSocketEvent
 import com.loukatech.mbote.service.api.FriendRequestDto
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -95,6 +96,41 @@ class MboteViewModel(
             com.loukatech.mbote.service.MboteSocketManager.incomingMessages.collect { msg ->
                 if (msg.chatId.isNotBlank()) {
                     repository.refreshMessagesForChat(msg.chatId)
+                }
+            }
+        }
+        viewModelScope.launch {
+            com.loukatech.mbote.service.MboteSocketManager.callEvents.collect { event ->
+                when (event.type) {
+                    "CALL_INVITE" -> {
+                        if (_activeCall.value == null && _incomingCallInvite.value == null) {
+                            _incomingCallInvite.value = event
+                        } else {
+                            com.loukatech.mbote.service.MboteSocketManager.sendCallResponse(event.roomCode, accepted = false)
+                        }
+                    }
+                    "CALL_RESPONSE" -> {
+                        val active = _activeCall.value
+                        if (active?.roomCode == event.roomCode) {
+                            if (event.status == "ACCEPTED") {
+                                _activeCall.value = active.copy(callState = "CONNECTED", timestamp = "Connecté")
+                            } else if (event.status == "REJECTED") {
+                                repository.leaveRtcCall(active.roomCode)
+                                _activeCall.value = null
+                                _publicationError.value = "${event.userName.ifBlank { active.name }} a refusé l’appel."
+                            }
+                        }
+                    }
+                    "CALL_END" -> {
+                        val active = _activeCall.value
+                        if (active?.roomCode == event.roomCode) {
+                            repository.leaveRtcCall(active.roomCode)
+                            _activeCall.value = null
+                        }
+                        if (_incomingCallInvite.value?.roomCode == event.roomCode) {
+                            _incomingCallInvite.value = null
+                        }
+                    }
                 }
             }
         }
@@ -271,6 +307,9 @@ class MboteViewModel(
 
     private val _activeCall = MutableStateFlow<CallItem?>(null)
     val activeCall: StateFlow<CallItem?> = _activeCall.asStateFlow()
+
+    private val _incomingCallInvite = MutableStateFlow<CallSocketEvent?>(null)
+    val incomingCallInvite: StateFlow<CallSocketEvent?> = _incomingCallInvite.asStateFlow()
 
     private val _activeMeetingRoom = MutableStateFlow<MeetingItem?>(null)
     val activeMeetingRoom: StateFlow<MeetingItem?> = _activeMeetingRoom.asStateFlow()
@@ -516,28 +555,67 @@ class MboteViewModel(
         typingJob?.cancel()
     }
 
+    fun startCall(peerUserId: String, name: String, avatar: String, isVideo: Boolean) {
+        if (peerUserId.isBlank()) {
+            _publicationError.value = "Ce contact n’est pas relié à un compte MBoté."
+            return
+        }
+        viewModelScope.launch {
+            repository.createDirectRtcCall(peerUserId, name, avatar, isVideo)
+                .onSuccess { call -> _activeCall.value = call }
+                .onFailure { _publicationError.value = it.message ?: "Impossible de démarrer l’appel." }
+        }
+    }
+
     fun startCall(name: String, avatar: String, isVideo: Boolean) {
-        _activeCall.value = CallItem(
-            name = name,
-            avatar = avatar,
-            type = CallType.OUTGOING,
-            isVideo = isVideo,
-            timestamp = "En cours"
-        )
+        val user = mastaUsers.value.firstOrNull { it.name.equals(name, ignoreCase = true) }
+        if (user == null) {
+            _publicationError.value = "Ouvrez le profil MBoté réel de ce contact avant de l’appeler."
+            return
+        }
+        startCall(user.id, name, avatar, isVideo)
+    }
+
+    fun acceptIncomingCall() {
+        val invite = _incomingCallInvite.value ?: return
+        viewModelScope.launch {
+            repository.joinDirectRtcCall(
+                roomCode = invite.roomCode,
+                callerUserId = invite.callerUserId,
+                callerName = invite.callerName,
+                callerAvatar = invite.callerAvatar,
+                isVideo = invite.isVideo
+            ).onSuccess { call ->
+                _incomingCallInvite.value = null
+                _activeCall.value = call
+                com.loukatech.mbote.service.MboteSocketManager.sendCallResponse(invite.roomCode, accepted = true)
+            }.onFailure {
+                _publicationError.value = it.message ?: "Impossible de rejoindre l’appel."
+                _incomingCallInvite.value = null
+                com.loukatech.mbote.service.MboteSocketManager.sendCallResponse(invite.roomCode, accepted = false)
+            }
+        }
+    }
+
+    fun rejectIncomingCall() {
+        val invite = _incomingCallInvite.value ?: return
+        com.loukatech.mbote.service.MboteSocketManager.sendCallResponse(invite.roomCode, accepted = false)
+        _incomingCallInvite.value = null
     }
 
     fun endCall(durationText: String? = null) {
-        val active = _activeCall.value
-        if (active != null) {
-            val finalCall = active.copy(
-                timestamp = "À l'instant",
-                durationText = durationText ?: "0 s"
-            )
-            viewModelScope.launch {
-                repository.addCallLog(finalCall)
-            }
-        }
+        val active = _activeCall.value ?: return
+        val finalCall = active.copy(
+            timestamp = "À l'instant",
+            durationText = durationText ?: "0 s",
+            callState = "ENDED"
+        )
         _activeCall.value = null
+        com.loukatech.mbote.service.MboteSocketManager.sendCallEnd(active.roomCode)
+        viewModelScope.launch {
+            if (active.roomCode.isNotBlank()) repository.leaveRtcCall(active.roomCode)
+            repository.addCallLog(finalCall)
+        }
     }
 
     fun refreshCalls() {
@@ -584,7 +662,11 @@ class MboteViewModel(
     }
 
     fun leaveMeeting() {
+        val meeting = _activeMeetingRoom.value
         _activeMeetingRoom.value = null
+        if (meeting != null && meeting.code.isNotBlank()) {
+            viewModelScope.launch { repository.leaveRtcCall(meeting.code) }
+        }
     }
 
     fun toggleMeetingMute() {
