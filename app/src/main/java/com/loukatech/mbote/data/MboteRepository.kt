@@ -906,13 +906,14 @@ class MboteRepository(
         phone: String,
         note: String,
         isRequest: Boolean
-    ): Result<Unit> {
+    ): Result<String?> {
         val currentTime = timeFormat.format(Date())
         val amountFcfa = amount.filter(Char::isDigit).toLongOrNull()
             ?: return Result.failure(IllegalArgumentException("Montant invalide."))
 
         val paymentStatus: String
         val reference: String?
+        var checkoutUrl: String? = null
         if (isRequest) {
             paymentStatus = "REQUESTED"
             reference = null
@@ -920,11 +921,12 @@ class MboteRepository(
             if (phone.count(Char::isDigit) < 8) {
                 return Result.failure(IllegalArgumentException("Numéro Mobile Money invalide."))
             }
-            val intent = apiService.createPaymentIntent(provider, amountFcfa, phone).getOrElse {
+            val intent = apiService.createPaymentIntent(provider, amountFcfa, phone, note).getOrElse {
                 return Result.failure(it)
             }
             paymentStatus = intent.status
             reference = intent.id
+            checkoutUrl = intent.checkoutUrl?.takeIf { intent.checkoutRequired || intent.status.equals("PENDING", ignoreCase = true) }
         }
 
         val paymentData = PaymentTransferData(
@@ -958,7 +960,7 @@ class MboteRepository(
             apiMediaType = "PAYMENT",
             metadata = buildJsonObject { put("paymentData", json.parseToJsonElement(json.encodeToString(paymentData))) }
         )
-        return Result.success(Unit)
+        return Result.success(checkoutUrl)
     }
 
     fun translateMessage(chatId: String, messageId: String, targetLanguage: String = "Lingala") {
