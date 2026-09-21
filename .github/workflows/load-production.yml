@@ -1,6 +1,12 @@
 name: MBote production load smoke
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/load-production.yml"
   schedule:
     - cron: "15 2 * * *"
   workflow_dispatch:
