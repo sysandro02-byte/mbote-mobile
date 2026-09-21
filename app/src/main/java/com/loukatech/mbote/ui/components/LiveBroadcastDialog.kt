@@ -93,6 +93,7 @@ fun LiveBroadcastDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val mboteApi = remember { MboteApiService() }
     val lifecycleOwner = LocalLifecycleOwner.current
     var isLiveStarted by remember { mutableStateOf(false) }
     var activeStreamId by remember { mutableStateOf<String?>(null) }
@@ -440,7 +441,7 @@ fun LiveBroadcastDialog(
                                 liveRtc = null
                                 localRtcTrack = null
                                 com.loukatech.mbote.service.MboteSocketManager.leaveLive(streamId)
-                                MboteApiService.endLive(streamId)
+                                mboteApi.endLive(streamId)
                                 onDismiss()
                             }
                         } else onDismiss()
@@ -579,7 +580,7 @@ fun LiveBroadcastDialog(
                             } else if (!isStartingLive) {
                                 isStartingLive = true
                                 coroutineScope.launch {
-                                    MboteApiService.createLive(liveTitle.trim())
+                                    mboteApi.createLive(liveTitle.trim())
                                         .onSuccess { live ->
                                             activeStreamId = live.id
                                             liveRtc?.close()
