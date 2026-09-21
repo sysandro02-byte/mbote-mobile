@@ -737,25 +737,46 @@ class MboteViewModel(
     }
 
     fun addNewMasta(name: String, phone: String, isMboteUser: Boolean = true): SyncedContact {
-        val contact = contactsSyncService.addContact(name.trim(), phone.trim(), isMboteUser)
-        return contact
+        // A manually entered phone contact is never marked as an MBoté account
+        // until the server has resolved it to a real user id.
+        return contactsSyncService.addContact(name.trim(), phone.trim(), false)
     }
 
     fun startChatWithContact(contact: SyncedContact) {
-        val chatId = repository.getOrCreateChatForContact(contact)
-        _showContactsSyncSheet.value = false
-        _showNewChatDialog.value = false
-        openChat(chatId)
+        if (!contact.isMboteUser || !contact.id.matches(Regex("^[0-9a-fA-F-]{36}$"))) {
+            _messagingError.value = "Synchronisez ce contact avec MBoté avant de démarrer une discussion."
+            return
+        }
+        viewModelScope.launch {
+            repository.createDirectChatByUserId(contact.id, contact.name, contact.avatarUrl.orEmpty())
+                .onSuccess { chat ->
+                    _showContactsSyncSheet.value = false
+                    _showNewChatDialog.value = false
+                    openChat(chat.id)
+                }
+                .onFailure { _messagingError.value = it.message ?: "Discussion impossible." }
+        }
     }
 
     fun startChatWithProfile(profile: DiscoverProfile) {
-        val chatId = repository.getOrCreateChatForProfile(profile)
-        _selectedDiscoverProfile.value = null
-        openChat(chatId)
+        viewModelScope.launch {
+            repository.createDirectChatByUserId(profile.id, profile.name, profile.avatar)
+                .onSuccess { chat ->
+                    _selectedDiscoverProfile.value = null
+                    openChat(chat.id)
+                }
+                .onFailure { _messagingError.value = it.message ?: "Discussion impossible." }
+        }
     }
 
     fun sendMboteGreeting(profile: DiscoverProfile) {
-        repository.sendMboteGreeting(profile)
+        viewModelScope.launch {
+            repository.createDirectChatByUserId(profile.id, profile.name, profile.avatar)
+                .onSuccess { chat ->
+                    repository.sendMessage(chat.id, "Mbote ${profile.name} ! 👋 Ravi(e) de faire ta connaissance sur MBoté.")
+                }
+                .onFailure { _messagingError.value = it.message ?: "Message impossible." }
+        }
     }
 
     fun syncPhoneContacts() {
@@ -1118,15 +1139,25 @@ class MboteViewModel(
     }
 
     fun startChatWithCreator(video: ShortVideo) {
-        val chatId = repository.getOrCreateChatForCreator(video)
-        _selectedCreatorProfile.value = null
-        _showShortVideosScreen.value = false
-        openChat(chatId)
+        viewModelScope.launch {
+            repository.createDirectChatByUserId(video.creatorId, video.creatorName, video.creatorAvatar)
+                .onSuccess { chat ->
+                    _selectedCreatorProfile.value = null
+                    _showShortVideosScreen.value = false
+                    openChat(chat.id)
+                }
+                .onFailure { _messagingError.value = it.message ?: "Discussion impossible." }
+        }
     }
 
     fun sendGreetingToCreator(video: ShortVideo) {
-        val chatId = repository.getOrCreateChatForCreator(video)
-        sendMessage(chatId, "Mbote ${video.creatorName} ! 👋 J'ai adoré ton Short « ${video.caption} » sur MBoté ✨ Bravo pour ton travail !")
+        viewModelScope.launch {
+            repository.createDirectChatByUserId(video.creatorId, video.creatorName, video.creatorAvatar)
+                .onSuccess { chat ->
+                    repository.sendMessage(chat.id, "Mbote ${video.creatorName} ! 👋 J'ai adoré ton Short « ${video.caption} » sur MBoté ✨ Bravo pour ton travail !")
+                }
+                .onFailure { _messagingError.value = it.message ?: "Message impossible." }
+        }
     }
 
     fun toggleBookmarkShortVideo(videoId: String) {
