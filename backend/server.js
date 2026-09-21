@@ -179,6 +179,11 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       version: API_VERSION,
       databaseLatencyMs: Date.now() - started,
       memoryRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      turnConfigured: Boolean(
+        (process.env.MBOTE_TURN_URLS || process.env.MBOTE_TURN_URL) &&
+        process.env.MBOTE_TURN_USERNAME &&
+        process.env.MBOTE_TURN_CREDENTIAL
+      ),
       uptimeSec: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
     });
