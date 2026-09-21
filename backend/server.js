@@ -139,7 +139,12 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   // Publication videos are streamed directly to PostgreSQL-backed storage metadata.
   // Keep this raw-body middleware before express.json so Android can upload real video bytes.
   app.use('/v1/uploads/:surface', express.raw({ type: ['video/*', 'application/octet-stream'], limit: '50mb' }));
-  app.use(express.json({ limit: '5mb' }));
+  app.use(express.json({
+    limit: '5mb',
+    verify(req, _res, buf) {
+      req.rawBody = Buffer.from(buf);
+    },
+  }));
   app.use('/v1', rateLimit({ windowMs: 60_000, max: 600, keyPrefix: 'api' }));
   app.use('/v1/auth', rateLimit({ windowMs: 15 * 60_000, max: 60, keyPrefix: 'auth' }));
 
@@ -917,6 +922,35 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       height: Number(item.images?.original?.height) || 0,
     })).filter((item) => item.originalUrl);
     success(res, { items });
+  }));
+
+  app.post('/v1/payments/callback', route(async (req, res) => {
+    const secret = String(process.env.PAYMENTS_WEBHOOK_SECRET || '');
+    if (!secret) return failure(res, 503, 'Webhook paiement non configuré');
+    const supplied = String(req.get('x-mbote-signature') || req.get('x-signature') || '').replace(/^sha256=/i, '').trim();
+    const expected = crypto.createHmac('sha256', secret).update(req.rawBody || Buffer.from(JSON.stringify(req.body || {}))).digest('hex');
+    if (!supplied || supplied.length !== expected.length ||
+        !crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) {
+      return failure(res, 401, 'Signature webhook invalide');
+    }
+    const intentId = text(req.body.intentId, 'Référence paiement', 100);
+    const status = String(req.body.status || '').toUpperCase();
+    if (!['PENDING','COMPLETED','FAILED','CANCELLED'].includes(status)) return failure(res, 400, 'Statut paiement invalide');
+    const result = await db.query(
+      'UPDATE payment_intents SET status=$2, provider_reference=COALESCE($3,provider_reference), updated_at=NOW() WHERE id=$1 RETURNING id,status,provider_reference',
+      [intentId, status, req.body.reference || null],
+    );
+    if (!result.rowCount) return failure(res, 404, 'Paiement introuvable');
+    success(res, result.rows[0]);
+  }));
+
+  app.get('/v1/payments/intents/:intentId', auth, route(async (req, res) => {
+    const result = await db.query(
+      'SELECT id,provider,provider_reference AS "providerReference",amount_fcfa AS "amountFcfa",status,created_at AS "createdAt",updated_at AS "updatedAt" FROM payment_intents WHERE id=$1 AND user_id=$2',
+      [req.params.intentId, req.user.userId],
+    );
+    if (!result.rowCount) return failure(res, 404, 'Paiement introuvable');
+    success(res, result.rows[0]);
   }));
 
   app.post('/v1/payments/intents', auth, route(async (req, res) => {
