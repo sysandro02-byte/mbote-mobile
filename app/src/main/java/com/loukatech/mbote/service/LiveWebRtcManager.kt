@@ -85,7 +85,7 @@ class LiveWebRtcManager(
                             .setPassword(turnCredential)
                             .createIceServer()
                     )
-                }}
+                }
             }
             factory.createPeerConnection(ice, object : PeerConnection.Observer {
                 override fun onIceCandidate(c: IceCandidate) {
