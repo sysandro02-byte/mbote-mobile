@@ -36,6 +36,7 @@ fun LiveViewerDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val mboteApi = remember { MboteApiService() }
     var rtc by remember { mutableStateOf<LiveWebRtcManager?>(null) }
     var remoteTrack by remember { mutableStateOf<VideoTrack?>(null) }
     var viewerCount by remember { mutableStateOf(live.viewerCount) }
@@ -46,12 +47,12 @@ fun LiveViewerDialog(
     fun closeViewer() {
         rtc?.close()
         rtc = null
-        scope.launch { MboteApiService.leaveLive(live.id) }
+        scope.launch { mboteApi.leaveLive(live.id) }
         onDismiss()
     }
 
     LaunchedEffect(live.id) {
-        MboteApiService.joinLive(live.id)
+        mboteApi.joinLive(live.id)
             .onSuccess {
                 rtc = LiveWebRtcManager(
                     context = context,
