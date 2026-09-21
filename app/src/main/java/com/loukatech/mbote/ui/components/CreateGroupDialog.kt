@@ -44,43 +44,7 @@ fun CreateGroupDialog(
     modifier: Modifier = Modifier
 ) {
     val avatarPresets = remember {
-        listOf(
-            GroupAvatarPreset(
-                "team",
-                "Équipe",
-                "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=200&auto=format&fit=crop&q=80"
-            ),
-            GroupAvatarPreset(
-                "tech",
-                "Tech Brazza",
-                "https://images.unsplash.com/photo-1531482615713-2afd69097998?w=200&auto=format&fit=crop&q=80"
-            ),
-            GroupAvatarPreset(
-                "music",
-                "Musique & Rumba",
-                "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=200&auto=format&fit=crop&q=80"
-            ),
-            GroupAvatarPreset(
-                "friends",
-                "Masta & Potes",
-                "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=200&auto=format&fit=crop&q=80"
-            ),
-            GroupAvatarPreset(
-                "business",
-                "Business 242",
-                "https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=200&auto=format&fit=crop&q=80"
-            ),
-            GroupAvatarPreset(
-                "family",
-                "Famille",
-                "https://images.unsplash.com/photo-1609234656388-0ff363383899?w=200&auto=format&fit=crop&q=80"
-            ),
-            GroupAvatarPreset(
-                "creative",
-                "Créatifs & Art",
-                "https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=200&auto=format&fit=crop&q=80"
-            )
-        )
+        listOf(GroupAvatarPreset("none", "Sans image", ""))
     }
 
     var selectedAvatarUrl by remember { mutableStateOf(avatarPresets[0].imageUrl) }
