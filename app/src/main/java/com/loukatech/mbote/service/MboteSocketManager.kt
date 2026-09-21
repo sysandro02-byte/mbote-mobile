@@ -52,7 +52,7 @@ data class SocketChatMessage(
 @Serializable
 data class LiveStreamSocketEvent(
     val type: String,
-    val streamId: String = "default_live",
+    val streamId: String = "",
     val senderName: String = "Spectateur",
     val payloadText: String? = null,
     val emoji: String? = null,
