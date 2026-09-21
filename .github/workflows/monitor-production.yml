@@ -34,6 +34,10 @@ jobs:
             console.error('Backend health payload is incomplete');
             process.exit(1);
           }
+          if (data.turnConfigured !== true) {
+            console.error('TURN is not configured on the production backend');
+            process.exit(1);
+          }
           NODE
           rm -f "$body"
 
