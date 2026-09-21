@@ -41,12 +41,12 @@ data class LocationData(
 
 @Serializable
 data class PaymentTransferData(
-    val transactionId: String = "MBT-" + UUID.randomUUID().toString().take(8).uppercase(),
-    val amount: String = "5 000 FCFA",
-    val provider: String = "MTN MoMo",
-    val note: String = "Contribution projet",
+    val transactionId: String = "",
+    val amount: String = "",
+    val provider: String = "",
+    val note: String = "",
     val isRequest: Boolean = false,
-    val status: String = "Effectué avec succès"
+    val status: String = "PENDING"
 )
 
 @Serializable
@@ -131,8 +131,11 @@ data class CallItem(
     val type: CallType,
     val isVideo: Boolean,
     val timestamp: String,
-    val durationText: String = "2 min 45 s",
-    val phoneNumber: String = "+242 06 123 4567"
+    val durationText: String = "",
+    val phoneNumber: String = "",
+    val peerUserId: String = "",
+    val roomCode: String = "",
+    val callState: String = "CONNECTING"
 )
 
 @Serializable
