@@ -1004,66 +1004,6 @@ class MboteRepository(
         }
     }
 
-    fun getOrCreateChatForContact(contact: SyncedContact): String {
-        val existing = _chats.value.find { it.name.equals(contact.name, ignoreCase = true) }
-        if (existing != null) {
-            return existing.id
-        }
-
-        val newChat = Chat(
-            name = contact.name,
-            avatar = contact.avatarUrl.orEmpty(),
-            lastMessage = "Discussion chiffrée démarrée",
-            lastMessageTime = "À l'instant",
-            isOnline = contact.isMboteUser,
-            messages = listOf(
-                Message(
-                    text = "Discussion chiffrée de bout en bout avec ${contact.name}.",
-                    senderId = "system",
-                    senderName = "Système MBoté",
-                    timestamp = timeFormat.format(Date()),
-                    status = MessageStatus.READ,
-                    isMine = false
-                )
-            )
-        )
-        _chats.update { listOf(newChat) + it }
-        return newChat.id
-    }
-
-    fun getOrCreateChatForProfile(profile: DiscoverProfile): String {
-        val existing = _chats.value.find { it.name.equals(profile.name, ignoreCase = true) }
-        if (existing != null) {
-            return existing.id
-        }
-
-        val newChat = Chat(
-            name = profile.name,
-            avatar = profile.avatar,
-            lastMessage = "Connexion humaine MBoté établie 👋",
-            lastMessageTime = "À l'instant",
-            isOnline = true,
-            isVerified = true,
-            messages = listOf(
-                Message(
-                    text = "Mbote ${profile.name} ! Ravi(e) de te découvrir sur le réseau MBoté. Vos échanges sont protégés par le chiffrement de bout en bout.",
-                    senderId = "system",
-                    senderName = "Connexion MBoté",
-                    timestamp = timeFormat.format(Date()),
-                    status = MessageStatus.READ,
-                    isMine = false
-                )
-            )
-        )
-        _chats.update { listOf(newChat) + it }
-        return newChat.id
-    }
-
-    fun sendMboteGreeting(profile: DiscoverProfile) {
-        val chatId = getOrCreateChatForProfile(profile)
-        sendMessage(chatId, "Mbote ${profile.name} ! 👋 J'ai adoré ton profil et tes centres d'intérêt (${profile.interests.take(2).joinToString(", ")}). Ravi(e) de faire ta connaissance !")
-    }
-
     suspend fun toggleLikeShortVideo(videoId: String): Result<Unit> = reactToShortVideo(videoId, "❤️")
 
     suspend fun reactToShortVideo(videoId: String, emoji: String): Result<Unit> {
@@ -1076,39 +1016,6 @@ class MboteRepository(
         }
         return Result.success(Unit)
     }
-
-    fun getOrCreateChatForCreator(shortVideo: ShortVideo): String {
-        val existingChat = _chats.value.find { it.name.equals(shortVideo.creatorName, ignoreCase = true) }
-        if (existingChat != null) {
-            return existingChat.id
-        }
-
-        val newChat = Chat(
-            id = "chat_${shortVideo.creatorId}_${System.currentTimeMillis()}",
-            name = shortVideo.creatorName,
-            avatar = shortVideo.creatorAvatar,
-            lastMessage = "Discussion démarrée via ShortMBoté ✨",
-            lastMessageTime = timeFormat.format(Date()),
-            unreadCount = 0,
-            isOnline = true,
-            isVerified = shortVideo.isCreatorVerified,
-            messages = listOf(
-                Message(
-                    id = "msg_${System.currentTimeMillis()}",
-                    text = "Mbote ! Merci d'avoir regardé mon Short sur MBoté ✨ Comment puis-je t'aider ?",
-                    senderId = shortVideo.creatorId,
-                    senderName = shortVideo.creatorName,
-                    timestamp = timeFormat.format(Date()),
-                    status = MessageStatus.READ,
-                    isMine = false
-                )
-            )
-        )
-
-        _chats.update { list -> listOf(newChat) + list }
-        return newChat.id
-    }
-
 
     suspend fun toggleBookmarkShortVideo(videoId: String): Result<Unit> {
         val response = apiService.toggleShortBookmark(videoId)
