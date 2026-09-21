@@ -1203,22 +1203,13 @@ private fun AiPatternMetricPill(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DevicePhoneContactsDialog(
+    contacts: List<SyncedContact>,
     onDismiss: () -> Unit,
     onStartCall: (name: String, avatar: String, isVideo: Boolean, isCellular: Boolean) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
-    val allDeviceContacts = remember {
-        listOf(
-            SyncedContact("dc_1", "Papa (Moussia)", "+242 06 600 1122", "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150", true),
-            SyncedContact("dc_2", "Maman Célestine", "+242 06 600 3344", "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150", true),
-            SyncedContact("dc_3", "Bureau Orange Congo", "+242 05 500 0000", "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150", false),
-            SyncedContact("dc_4", "Service Client MTN", "+242 06 123 0000", "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", false),
-            SyncedContact("dc_5", "Docteur Grace", "+242 05 555 1234", "https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=150", true),
-            SyncedContact("dc_6", "Taxi Express Brazza", "+242 06 777 8899", "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150", false),
-            SyncedContact("dc_7", "Oncle Bienvenu", "+242 06 999 1122", "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150", true)
-        )
-    }
+    val allDeviceContacts = remember(contacts) { contacts }
 
     val filtered = remember(searchQuery) {
         if (searchQuery.isBlank()) allDeviceContacts
@@ -1316,7 +1307,7 @@ fun DevicePhoneContactsDialog(
                                     IconButton(
                                         onClick = {
                                             onDismiss()
-                                            onStartCall(contact.name, contact.avatarUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", false, false)
+                                            onStartCall(contact.name, contact.avatarUrl.orEmpty(), false, false)
                                         },
                                         modifier = Modifier.size(34.dp)
                                     ) {
@@ -1326,7 +1317,7 @@ fun DevicePhoneContactsDialog(
                                     IconButton(
                                         onClick = {
                                             onDismiss()
-                                            onStartCall(contact.name, contact.avatarUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", false, true)
+                                            onStartCall(contact.phoneNumber, contact.avatarUrl.orEmpty(), false, true)
                                         },
                                         modifier = Modifier.size(34.dp)
                                     ) {
