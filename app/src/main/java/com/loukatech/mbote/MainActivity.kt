@@ -89,6 +89,7 @@ class MainActivity : ComponentActivity() {
             val jobs by viewModel.jobs.collectAsStateWithLifecycle()
             val discoverProfiles by viewModel.discoverProfiles.collectAsStateWithLifecycle()
             val aronQuestions by viewModel.aronQuestions.collectAsStateWithLifecycle()
+            val friendRequests by viewModel.friendRequests.collectAsStateWithLifecycle()
 
             val unreadCount by viewModel.totalUnreadMessages.collectAsStateWithLifecycle()
             val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -911,7 +912,10 @@ class MainActivity : ComponentActivity() {
                             },
                             onAddNewMasta = { name, phone, isMboteUser ->
                                 viewModel.addNewMasta(name, phone, isMboteUser)
-                            }
+                            },
+                            friendRequests = friendRequests,
+                            onAcceptFriendRequest = { requestId -> viewModel.acceptFriendRequest(requestId) },
+                            onDeclineOrCancelFriendRequest = { requestId -> viewModel.declineOrCancelFriendRequest(requestId) }
                         )
                     }
 
