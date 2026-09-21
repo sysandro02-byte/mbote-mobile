@@ -591,6 +591,8 @@ CREATE TABLE IF NOT EXISTS publication_uploads (
 );
 CREATE INDEX IF NOT EXISTS idx_publication_uploads_owner_created
   ON publication_uploads(owner_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_publication_uploads_created
+  ON publication_uploads(created_at);
 
 
 CREATE TABLE IF NOT EXISTS live_streams (
