@@ -586,23 +586,31 @@ fun LiveBroadcastDialog(
                             } else if (!isStartingLive) {
                                 isStartingLive = true
                                 coroutineScope.launch {
-                                    mboteApi.createLive(liveTitle.trim())
-                                        .onSuccess { live ->
-                                            activeStreamId = live.id
-                                            runCatching { ProcessCameraProvider.getInstance(context).get().unbindAll() }
-                                            liveRtc?.close()
-                                            liveRtc = LiveWebRtcManager(
-                                                context = context,
-                                                streamId = live.id,
-                                                broadcaster = true,
-                                                onLocalVideoTrack = { track -> localRtcTrack = track }
-                                            )
-                                            com.loukatech.mbote.service.MboteSocketManager.sendLiveBroadcastStatus(live.id, "LIVE")
-                                            isLiveStarted = true
-                                            Toast.makeText(context, "Direct MBoté démarré.", Toast.LENGTH_SHORT).show()
-                                        }
-                                        .onFailure { Toast.makeText(context, it.message ?: "Impossible de démarrer le Live.", Toast.LENGTH_LONG).show() }
+                                    val live = mboteApi.createLive(liveTitle.trim()).getOrElse { error ->
+                                        Toast.makeText(context, error.message ?: "Impossible de démarrer le Live.", Toast.LENGTH_LONG).show()
+                                        isStartingLive = false
+                                        return@launch
+                                    }
+                                    val iceServers = mboteApi.fetchLiveIceServers().getOrElse { error ->
+                                        mboteApi.endLive(live.id)
+                                        Toast.makeText(context, error.message ?: "Relais TURN indisponible.", Toast.LENGTH_LONG).show()
+                                        isStartingLive = false
+                                        return@launch
+                                    }
+                                    activeStreamId = live.id
+                                    runCatching { ProcessCameraProvider.getInstance(context).get().unbindAll() }
+                                    liveRtc?.close()
+                                    liveRtc = LiveWebRtcManager(
+                                        context = context,
+                                        streamId = live.id,
+                                        broadcaster = true,
+                                        iceServerConfig = iceServers,
+                                        onLocalVideoTrack = { track -> localRtcTrack = track }
+                                    )
+                                    com.loukatech.mbote.service.MboteSocketManager.sendLiveBroadcastStatus(live.id, "LIVE")
+                                    isLiveStarted = true
                                     isStartingLive = false
+                                    Toast.makeText(context, "Direct MBoté démarré.", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         },
