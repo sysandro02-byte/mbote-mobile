@@ -66,6 +66,19 @@ data class LiveStreamDto(
 @Serializable
 private data class CreateLiveRequest(val title: String)
 
+@Serializable
+data class IceServerDto(
+    val urls: List<String> = emptyList(),
+    val username: String = "",
+    val credential: String = ""
+)
+
+@Serializable
+private data class IceServersPayload(
+    val iceServers: List<IceServerDto> = emptyList(),
+    val turnConfigured: Boolean = false
+)
+
 // ---------------------------------------------------------------------------------
 // AUTH & USER DTOs
 // ---------------------------------------------------------------------------------
@@ -763,6 +776,14 @@ class MboteApiService {
             connection?.disconnect()
         }
     }
+
+    suspend fun fetchLiveIceServers(): Result<List<IceServerDto>> =
+        executeHttpRequest<Unit, List<IceServerDto>>("/live/ice-servers", deserialize = { body ->
+            val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<IceServersPayload>>(body)
+            val payload = response.data ?: error(response.error ?: "Configuration réseau Live indisponible")
+            if (!payload.turnConfigured) error("Le relais TURN de production n’est pas configuré")
+            payload.iceServers
+        })
 
     suspend fun fetchActiveLives(): Result<List<LiveStreamDto>> =
         executeHttpRequest<Unit, List<LiveStreamDto>>("/live", deserialize = { body ->
