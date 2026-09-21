@@ -888,23 +888,46 @@ class MboteRepository(
         )
     }
 
-    fun sendPaymentTransfer(
+    suspend fun sendPaymentTransfer(
         chatId: String,
         amount: String,
-        provider: String = "MTN MoMo",
-        note: String = "Paiement MBoté",
-        isRequest: Boolean = false
-    ) {
+        provider: String,
+        phone: String,
+        note: String,
+        isRequest: Boolean
+    ): Result<Unit> {
         val currentTime = timeFormat.format(Date())
-        val paymentData = PaymentTransferData(
-            amount = amount,
-            provider = provider,
-            note = note,
-            isRequest = isRequest,
-            status = if (isRequest) "Demande en attente" else "Transfert réussi"
-        )
+        val amountFcfa = amount.filter(Char::isDigit).toLongOrNull()
+            ?: return Result.failure(IllegalArgumentException("Montant invalide."))
 
-        val msgText = if (isRequest) "💳 Demande de paiement : $amount ($provider)" else "💸 Transfert envoyé : $amount via $provider"
+        val paymentStatus: String
+        val reference: String?
+        if (isRequest) {
+            paymentStatus = "REQUESTED"
+            reference = null
+        } else {
+            if (phone.count(Char::isDigit) < 8) {
+                return Result.failure(IllegalArgumentException("Numéro Mobile Money invalide."))
+            }
+            val intent = apiService.createPaymentIntent(provider, amountFcfa, phone).getOrElse {
+                return Result.failure(it)
+            }
+            paymentStatus = intent.status
+            reference = intent.id
+        }
+
+        val paymentData = PaymentTransferData(
+            amount = "$amountFcfa FCFA",
+            provider = provider,
+            note = listOfNotNull(note.takeIf { it.isNotBlank() }, reference?.let { "Réf. $it" }).joinToString(" • "),
+            isRequest = isRequest,
+            status = paymentStatus
+        )
+        val msgText = if (isRequest) {
+            "💳 Demande de paiement : $amountFcfa FCFA ($provider)"
+        } else {
+            "💸 Paiement initié : $amountFcfa FCFA via $provider"
+        }
         val payMessage = Message(
             id = "local_${UUID.randomUUID()}",
             text = msgText,
@@ -917,7 +940,6 @@ class MboteRepository(
             mediaType = MediaType.PAYMENT,
             paymentData = paymentData
         )
-
         sendStructuredChatMessage(
             chatId = chatId,
             message = payMessage,
@@ -925,6 +947,7 @@ class MboteRepository(
             apiMediaType = "PAYMENT",
             metadata = buildJsonObject { put("paymentData", json.parseToJsonElement(json.encodeToString(paymentData))) }
         )
+        return Result.success(Unit)
     }
 
     fun translateMessage(chatId: String, messageId: String, targetLanguage: String = "Lingala") {
