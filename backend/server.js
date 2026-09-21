@@ -92,6 +92,45 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   const member = async (chatId, userId) => (await db.query('SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2', [chatId, userId])).rowCount > 0;
   const messageDto = (row, userId) => ({ id: row.id, chatId: row.chat_id, senderId: row.sender_id, senderName: row.sender_name, senderAvatar: row.sender_avatar || '', text: row.text || '', timestamp: row.created_at, mediaType: row.media_type || 'NONE', mediaUrl: row.media_url, isStarred: Boolean(row.is_starred), isMine: row.sender_id === userId });
 
+  const groqModel = () => String(process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
+  const groqCompletion = async ({ messages, temperature = 0.3, maxTokens = 1000 }) => {
+    const apiKey = String(process.env.GROQ_API_KEY || '').trim();
+    if (!apiKey) throw Object.assign(new Error('Luna est temporairement indisponible'), { status: 503 });
+    const baseUrl = String(process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Number(process.env.GROQ_TIMEOUT_MS || 25000));
+    try {
+      const upstream = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify({
+          model: groqModel(),
+          messages,
+          temperature,
+          max_completion_tokens: maxTokens,
+        }),
+        signal: controller.signal,
+      });
+      const payload = await upstream.json().catch(() => ({}));
+      if (!upstream.ok) {
+        console.warn(JSON.stringify({ level: 'warn', event: 'groq_upstream_error', status: upstream.status, code: payload?.error?.code || null }));
+        throw Object.assign(new Error('Le fournisseur Luna n’a pas répondu'), { status: 502 });
+      }
+      const answer = String(payload?.choices?.[0]?.message?.content || '').trim();
+      if (!answer) throw Object.assign(new Error('Réponse Luna vide'), { status: 502 });
+      return answer;
+    } catch (error) {
+      if (error?.name === 'AbortError') throw Object.assign(new Error('Luna a dépassé le délai de réponse'), { status: 504 });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   const sendOtpEmail = async (email, code, flow) => {
     if (!process.env.BREVO_API_KEY) throw Object.assign(new Error('Le service e-mail est temporairement indisponible'), { status: 503 });
     const response = await fetch(process.env.BREVO_API_URL || 'https://api.brevo.com/v3/smtp/email', {
@@ -190,7 +229,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       database: true,
       emailOtp: Boolean(process.env.BREVO_API_KEY),
       liveTurn: Boolean(process.env.MBOTE_TURN_URL && process.env.MBOTE_TURN_USERNAME && process.env.MBOTE_TURN_CREDENTIAL),
-      ai: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_MODEL),
+      ai: Boolean(process.env.GROQ_API_KEY),
       payments: Boolean(process.env.PAYMENTS_API_URL && process.env.PAYMENTS_API_KEY),
       paymentWebhook: Boolean(process.env.PAYMENTS_WEBHOOK_SECRET),
       push: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_B64),
@@ -1438,34 +1477,20 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   }));
 
   app.post('/v1/ai/translate', auth, route(async (req, res) => {
-    if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_MODEL) {
-      return failure(res, 503, 'La traduction IA est temporairement indisponible');
-    }
     const source = text(req.body.text, 'Texte', 5000);
     const targetLanguage = text(req.body.targetLanguage, 'Langue cible', 80);
-    const upstream = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(process.env.GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: source }] }],
-          systemInstruction: { parts: [{ text: `Traduis fidèlement le texte fourni vers ${targetLanguage}. Réponds uniquement avec la traduction, sans explication ni guillemets ajoutés.` }] },
-          generationConfig: { temperature: 0.1 },
-        }),
-      },
-    );
-    if (!upstream.ok) throw Object.assign(new Error('Le fournisseur de traduction n’a pas répondu'), { status: 502 });
-    const payload = await upstream.json();
-    const translatedText = String(payload?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-    if (!translatedText) throw Object.assign(new Error('Traduction vide reçue du fournisseur'), { status: 502 });
-    success(res, { translatedText, targetLanguage });
+    const translatedText = await groqCompletion({
+      messages: [
+        { role: 'system', content: `Tu es Luna, l’assistante IA de MBoté. Traduis fidèlement vers ${targetLanguage}. Réponds uniquement avec la traduction, sans explication ni guillemets ajoutés.` },
+        { role: 'user', content: source },
+      ],
+      temperature: 0.1,
+      maxTokens: 1800,
+    });
+    success(res, { translatedText, targetLanguage, provider: 'groq', model: groqModel() });
   }));
 
   app.post('/v1/ai/smart-replies', auth, route(async (req, res) => {
-    if (!process.env.GEMINI_API_KEY || !process.env.GEMINI_MODEL) {
-      return failure(res, 503, 'L’assistant IA est temporairement indisponible');
-    }
     const messages = Array.isArray(req.body.messages) ? req.body.messages.slice(-6) : [];
     if (!messages.length) return failure(res, 400, 'Historique de conversation requis');
     const history = messages.map((item) => {
@@ -1474,30 +1499,48 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       return body ? `${sender}: ${body}` : '';
     }).filter(Boolean).join('\n');
     if (!history) return failure(res, 400, 'Historique de conversation invalide');
-
-    const style = ['Brief', 'Balanced', 'Elaborate'].includes(req.body.conciseness)
-      ? req.body.conciseness : 'Balanced';
-    const upstream = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(process.env.GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: `Conversation récente :\n${history}\n\nPropose exactement trois réponses adaptées.` }] }],
-          systemInstruction: { parts: [{ text: `Tu aides un utilisateur de MBoté. Style: ${style}. Réponds uniquement avec un tableau JSON de trois chaînes courtes.` }] },
-          generationConfig: { temperature: 0.5, responseMimeType: 'application/json' },
-        }),
-      },
-    );
-    if (!upstream.ok) throw Object.assign(new Error('Le fournisseur IA n’a pas répondu'), { status: 502 });
-    const payload = await upstream.json();
-    const raw = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
-    let suggestions;
-    try { suggestions = JSON.parse(raw); } catch { suggestions = []; }
-    if (!Array.isArray(suggestions) || !suggestions.length) {
-      throw Object.assign(new Error('Réponse IA invalide'), { status: 502 });
+    const style = ['Brief', 'Balanced', 'Elaborate'].includes(req.body.conciseness) ? req.body.conciseness : 'Balanced';
+    const raw = await groqCompletion({
+      messages: [
+        { role: 'system', content: `Tu es Luna, l’assistante de MBoté. Style: ${style}. Réponds uniquement avec un tableau JSON contenant exactement trois chaînes de réponse naturelles et adaptées à la conversation.` },
+        { role: 'user', content: `Conversation récente :\n${history}\n\nGénère les trois réponses.` },
+      ],
+      temperature: 0.45,
+      maxTokens: 500,
+    });
+    let suggestions = [];
+    try {
+      const cleaned = raw.replace(/^\`\`\`(?:json)?\s*/i, '').replace(/\s*\`\`\`$/i, '').trim();
+      const parsed = JSON.parse(cleaned);
+      suggestions = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.suggestions) ? parsed.suggestions : [];
+    } catch {
+      suggestions = raw.split('\n').map((line) => line.replace(/^[-*\d.\s]+/, '').trim()).filter(Boolean);
     }
-    success(res, { suggestions: suggestions.filter((item) => typeof item === 'string' && item.trim()).slice(0, 3) });
+    suggestions = suggestions.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim()).slice(0, 3);
+    if (suggestions.length !== 3) throw Object.assign(new Error('Réponse Luna invalide'), { status: 502 });
+    success(res, { suggestions, provider: 'groq', model: groqModel() });
+  }));
+
+  app.post('/v1/ai/luna', auth, route(async (req, res) => {
+    const message = text(req.body.message, 'Message', 6000);
+    const history = Array.isArray(req.body.history) ? req.body.history.slice(-10) : [];
+    const safeHistory = history.map((item) => ({
+      role: item?.role === 'assistant' ? 'assistant' : 'user',
+      content: String(item?.content || '').trim().slice(0, 3000),
+    })).filter((item) => item.content);
+    const answer = await groqCompletion({
+      messages: [
+        {
+          role: 'system',
+          content: 'Tu es Luna, l’assistante IA de MBoté. Aide de façon claire, utile et concise. Respecte la langue de l’utilisateur. N’invente pas de données personnelles, de résultats d’action, de paiements ou de faits non vérifiés. Pour les fonctions MBoté, explique uniquement ce qui est réellement disponible.',
+        },
+        ...safeHistory,
+        { role: 'user', content: message },
+      ],
+      temperature: 0.35,
+      maxTokens: 1600,
+    });
+    success(res, { answer, provider: 'groq', model: groqModel() });
   }));
 
   app.use((error, req, res, _next) => {
