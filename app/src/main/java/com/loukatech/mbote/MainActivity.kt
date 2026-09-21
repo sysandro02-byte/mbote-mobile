@@ -198,6 +198,7 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(isAuthenticated) {
                 if (isAuthenticated && !usageTrackingStarted) {
                     com.loukatech.mbote.service.AppUsageTrackingService.start(applicationContext)
+                    com.loukatech.mbote.MbotePushTokenSync.syncIfAuthenticated()
                     usageTrackingStarted = true
                 } else if (!isAuthenticated && usageTrackingStarted) {
                     com.loukatech.mbote.service.AppUsageTrackingService.stop(applicationContext)
