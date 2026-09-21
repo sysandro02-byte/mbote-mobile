@@ -171,6 +171,9 @@ data class ProductionCapabilities(
 @Serializable
 data class ProductionReadiness(
     val status: String = "degraded",
+    val coreReady: Boolean = false,
+    val releaseReady: Boolean = false,
+    val missingCapabilities: List<String> = emptyList(),
     val databaseLatencyMs: Long = -1,
     val capabilities: ProductionCapabilities = ProductionCapabilities(),
     val timestamp: String = ""
