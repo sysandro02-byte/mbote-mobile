@@ -48,6 +48,21 @@ data class SocketChatMessage(
 )
 
 @Serializable
+data class CallSocketEvent(
+    val type: String,
+    val roomCode: String = "",
+    val callerUserId: String = "",
+    val callerName: String = "",
+    val callerAvatar: String = "",
+    val isVideo: Boolean = false,
+    val title: String = "",
+    val status: String = "",
+    val userId: String = "",
+    val userName: String = "",
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+@Serializable
 data class LiveStreamSocketEvent(
     val type: String,
     val streamId: String = "",
@@ -91,6 +106,14 @@ object MboteSocketManager {
     val typingStateMap: StateFlow<Map<String, PartnerTypingState>> = _typingStateMap.asStateFlow()
     private val _incomingMessages = MutableSharedFlow<SocketChatMessage>(extraBufferCapacity = 128)
     val incomingMessages: SharedFlow<SocketChatMessage> = _incomingMessages.asSharedFlow()
+
+    private val _callEvents = MutableSharedFlow<CallSocketEvent>(extraBufferCapacity = 64)
+    val callEvents: SharedFlow<CallSocketEvent> = _callEvents.asSharedFlow()
+    private val _rtcEvents = MutableSharedFlow<JSONObject>(extraBufferCapacity = 128)
+    val rtcEvents: SharedFlow<JSONObject> = _rtcEvents.asSharedFlow()
+    private val _rtcSignals = MutableSharedFlow<JSONObject>(extraBufferCapacity = 256)
+    val rtcSignals: SharedFlow<JSONObject> = _rtcSignals.asSharedFlow()
+    private val activeRtcRooms = mutableSetOf<String>()
 
     private val _liveSignals = MutableSharedFlow<JSONObject>(extraBufferCapacity = 128)
     val liveSignals: SharedFlow<JSONObject> = _liveSignals.asSharedFlow()
@@ -142,9 +165,17 @@ object MboteSocketManager {
                         reconnectAttempt = 0
                         _connectionState.value = SocketConnectionState.CONNECTED
                         _isConnected.value = true
+                        synchronized(activeRtcRooms) {
+                            activeRtcRooms.forEach { roomCode ->
+                                webSocket.send(JSONObject().put("type", "RTC_JOIN").put("roomCode", roomCode).toString())
+                            }
+                        }
                     }
                     "CHAT_MESSAGE" -> handleMessage(data)
                     "CHAT_TYPING" -> handleTyping(data)
+                    "CALL_INVITE", "CALL_RESPONSE", "CALL_END" -> handleCallEvent(data)
+                    "RTC_SIGNAL" -> _rtcSignals.tryEmit(data)
+                    "RTC_PEERS", "RTC_PEER_JOINED", "RTC_PEER_LEFT" -> _rtcEvents.tryEmit(data)
                 }
             }
 
@@ -184,6 +215,7 @@ object MboteSocketManager {
         chatWebSocket = null
         currentToken = null
         reconnectAttempt = 0
+        synchronized(activeRtcRooms) { activeRtcRooms.clear() }
         _connectionState.value = SocketConnectionState.DISCONNECTED
         _isConnected.value = false
     }
@@ -251,6 +283,72 @@ object MboteSocketManager {
     }
 
     fun clearTyping(chatId: String) = onRemotePartnerTypingReceived(chatId, "", false)
+
+    private fun handleCallEvent(data: JSONObject) {
+        _callEvents.tryEmit(
+            CallSocketEvent(
+                type = data.optString("type"),
+                roomCode = data.optString("roomCode"),
+                callerUserId = data.optString("callerUserId"),
+                callerName = data.optString("callerName"),
+                callerAvatar = data.optString("callerAvatar"),
+                isVideo = data.optBoolean("isVideo", false),
+                title = data.optString("title"),
+                status = data.optString("status"),
+                userId = data.optString("userId"),
+                userName = data.optString("userName"),
+                timestamp = data.optLong("timestamp", System.currentTimeMillis())
+            )
+        )
+    }
+
+    fun joinRtcRoom(roomCode: String) {
+        val room = roomCode.trim().uppercase()
+        if (room.isBlank()) return
+        synchronized(activeRtcRooms) { activeRtcRooms.add(room) }
+        chatWebSocket?.send(JSONObject().put("type", "RTC_JOIN").put("roomCode", room).toString())
+    }
+
+    fun leaveRtcRoom(roomCode: String) {
+        val room = roomCode.trim().uppercase()
+        if (room.isBlank()) return
+        synchronized(activeRtcRooms) { activeRtcRooms.remove(room) }
+        chatWebSocket?.send(JSONObject().put("type", "RTC_LEAVE").put("roomCode", room).toString())
+    }
+
+    fun sendRtcSignal(
+        roomCode: String,
+        targetUserId: String,
+        signalType: String,
+        sdp: String? = null,
+        candidate: String? = null,
+        sdpMid: String? = null,
+        sdpMLineIndex: Int? = null
+    ) {
+        val payload = JSONObject()
+            .put("type", "RTC_SIGNAL")
+            .put("roomCode", roomCode.trim().uppercase())
+            .put("targetUserId", targetUserId)
+            .put("signalType", signalType.uppercase())
+        sdp?.let { payload.put("sdp", it) }
+        candidate?.let { payload.put("candidate", it) }
+        sdpMid?.let { payload.put("sdpMid", it) }
+        sdpMLineIndex?.let { payload.put("sdpMLineIndex", it) }
+        chatWebSocket?.send(payload.toString())
+    }
+
+    fun sendCallResponse(roomCode: String, accepted: Boolean) {
+        chatWebSocket?.send(
+            JSONObject().put("type", "CALL_RESPONSE").put("roomCode", roomCode.trim().uppercase())
+                .put("status", if (accepted) "ACCEPTED" else "REJECTED").toString()
+        )
+    }
+
+    fun sendCallEnd(roomCode: String) {
+        chatWebSocket?.send(
+            JSONObject().put("type", "CALL_END").put("roomCode", roomCode.trim().uppercase()).toString()
+        )
+    }
 
     private fun handleLiveEvent(data: JSONObject) {
         val event = LiveStreamSocketEvent(
