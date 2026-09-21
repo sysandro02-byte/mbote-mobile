@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
             val activeChatId by viewModel.activeChatId.collectAsStateWithLifecycle()
             val activeChat by viewModel.activeChat.collectAsStateWithLifecycle()
             val activeCall by viewModel.activeCall.collectAsStateWithLifecycle()
+            val incomingCallInvite by viewModel.incomingCallInvite.collectAsStateWithLifecycle()
             val activeMeetingRoom by viewModel.activeMeetingRoom.collectAsStateWithLifecycle()
             val showJobsScreen by viewModel.showJobsScreen.collectAsStateWithLifecycle()
             val showShortVideosScreen by viewModel.showShortVideosScreen.collectAsStateWithLifecycle()
@@ -296,10 +297,10 @@ class MainActivity : ComponentActivity() {
                                 isFriend = isFriend,
                                 onBackClick = { viewModel.closeChat() },
                                 onAudioCallClick = {
-                                    viewModel.startCall(activeChat!!.name, activeChat!!.avatar, false)
+                                    viewModel.startCall(partnerContactId, activeChat!!.name, activeChat!!.avatar, false)
                                 },
                                 onVideoCallClick = {
-                                    viewModel.startCall(activeChat!!.name, activeChat!!.avatar, true)
+                                    viewModel.startCall(partnerContactId, activeChat!!.name, activeChat!!.avatar, true)
                                 },
                                 onSendMessage = { text, replyTo ->
                                     viewModel.sendMessage(activeChat!!.id, text, replyTo)
@@ -542,8 +543,8 @@ class MainActivity : ComponentActivity() {
                                                                 isBlocked = isChatBlocked,
                                                                 isFriend = isFriend,
                                                                 onBackClick = { viewModel.closeChat() },
-                                                                onAudioCallClick = { viewModel.startCall(activeChat!!.name, activeChat!!.avatar, false) },
-                                                                onVideoCallClick = { viewModel.startCall(activeChat!!.name, activeChat!!.avatar, true) },
+                                                                onAudioCallClick = { viewModel.startCall(partnerContactId, activeChat!!.name, activeChat!!.avatar, false) },
+                                                                onVideoCallClick = { viewModel.startCall(partnerContactId, activeChat!!.name, activeChat!!.avatar, true) },
                                                                 onSendMessage = { text, replyTo -> viewModel.sendMessage(activeChat!!.id, text, replyTo) },
                                                                 onSendVoiceMessage = { audioPath, durationSec, replyTo -> viewModel.sendVoiceMessage(context, activeChat!!.id, audioPath, durationSec, replyTo) },
                                                                 onSendMediaMessage = { mediaUrl, isVideo, caption -> viewModel.sendMediaAttachment(context, activeChat!!.id, mediaUrl, isVideo, caption) },
@@ -989,6 +990,14 @@ class MainActivity : ComponentActivity() {
                             onSendLocation = { placeName, lat, lng, isLive, durationMin ->
                                 viewModel.sendLocation(activeChat!!.id, placeName, lat, lng, isLive, durationMin)
                             }
+                        )
+                    }
+
+                    if (incomingCallInvite != null) {
+                        IncomingCallDialog(
+                            invite = incomingCallInvite!!,
+                            onAccept = { viewModel.acceptIncomingCall() },
+                            onReject = { viewModel.rejectIncomingCall() }
                         )
                     }
 
