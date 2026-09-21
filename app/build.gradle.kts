@@ -45,16 +45,6 @@ val googleClientId = envProps.getProperty("GOOGLE_CLIENT_ID")
 val githubClientId = envProps.getProperty("GITHUB_CLIENT_ID")
     ?: System.getenv("GITHUB_CLIENT_ID")
     ?: ""
-val mboteTurnUrl = envProps.getProperty("MBOTE_TURN_URL")
-    ?: System.getenv("MBOTE_TURN_URL")
-    ?: ""
-val mboteTurnUsername = envProps.getProperty("MBOTE_TURN_USERNAME")
-    ?: System.getenv("MBOTE_TURN_USERNAME")
-    ?: ""
-val mboteTurnCredential = envProps.getProperty("MBOTE_TURN_CREDENTIAL")
-    ?: System.getenv("MBOTE_TURN_CREDENTIAL")
-    ?: ""
-
 val qaKeystorePath = System.getenv("MBOTE_QA_KEYSTORE_PATH")
 val qaKeystorePassword = System.getenv("MBOTE_QA_KEYSTORE_PASSWORD")
 val qaKeyAlias = System.getenv("MBOTE_QA_KEY_ALIAS")
@@ -85,7 +75,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.aistudio.mbote.krtwvx"
+        applicationId = "com.loukatech.mbote"
         minSdk = 26
         targetSdk = 36
         versionCode = configuredVersionCode
@@ -98,9 +88,6 @@ android {
         buildConfigField("String", "VITE_SUPABASE_ANON_KEY", "\"$viteSupabaseAnonKey\"")
         buildConfigField("String", "GOOGLE_CLIENT_ID", "\"$googleClientId\"")
         buildConfigField("String", "GITHUB_CLIENT_ID", "\"$githubClientId\"")
-        buildConfigField("String", "MBOTE_TURN_URL", "\"$mboteTurnUrl\"")
-        buildConfigField("String", "MBOTE_TURN_USERNAME", "\"$mboteTurnUsername\"")
-        buildConfigField("String", "MBOTE_TURN_CREDENTIAL", "\"$mboteTurnCredential\"")
     }
 
     signingConfigs {
