@@ -30,12 +30,13 @@ import com.loukatech.mbote.ui.theme.MbotePurpleSoft
 fun PaymentSheet(
     recipientName: String,
     onDismiss: () -> Unit,
-    onSendPayment: (amount: String, provider: String, note: String, isRequest: Boolean) -> Unit,
+    onSendPayment: (amount: String, provider: String, phone: String, note: String, isRequest: Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var amount by remember { mutableStateOf("5000") }
     var selectedProvider by remember { mutableStateOf("MTN MoMo") }
-    var note by remember { mutableStateOf("Participation") }
+    var note by remember { mutableStateOf("") }
+    var mobileMoneyPhone by remember { mutableStateOf("") }
     var isRequest by remember { mutableStateOf(false) }
 
     val providers = listOf(
@@ -86,7 +87,7 @@ fun PaymentSheet(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Paiements sécurisés et chiffrés",
+                            text = "Paiement via votre opérateur Mobile Money",
                             style = MaterialTheme.typography.bodySmall,
                             color = MbotePurplePrimary
                         )
@@ -244,6 +245,19 @@ fun PaymentSheet(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            if (!isRequest) {
+                OutlinedTextField(
+                    value = mobileMoneyPhone,
+                    onValueChange = { mobileMoneyPhone = it.filter { ch -> ch.isDigit() || ch == '+' || ch == ' ' } },
+                    label = { Text("Numéro Mobile Money destinataire") },
+                    placeholder = { Text("+242 …") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             OutlinedTextField(
                 value = note,
                 onValueChange = { note = it },
@@ -258,9 +272,9 @@ fun PaymentSheet(
             Button(
                 onClick = {
                     val formatted = "$amount FCFA"
-                    onSendPayment(formatted, selectedProvider, note, isRequest)
+                    onSendPayment(formatted, selectedProvider, mobileMoneyPhone.trim(), note, isRequest)
                 },
-                enabled = amount.isNotBlank() && (amount.toLongOrNull() ?: 0) > 0,
+                enabled = amount.isNotBlank() && (amount.toLongOrNull() ?: 0) > 0 && (isRequest || mobileMoneyPhone.count(Char::isDigit) >= 8),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary),
                 modifier = Modifier
