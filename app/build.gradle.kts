@@ -9,16 +9,6 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-fun sanitizedEnvValue(name: String, fallback: String = ""): String =
-    (envProps.getProperty(name) ?: System.getenv(name) ?: fallback).trim()
-
-fun javaStringLiteral(value: String): String =
-    """ + value
-        .replace("\\", "\\\\")
-        .replace(""", "\\"")
-        .replace("\r", "\\r")
-        .replace("\n", "\\n") + """
-
 val envProps = Properties()
 val envFile = rootProject.file(".env")
 if (envFile.exists()) {
@@ -26,6 +16,17 @@ if (envFile.exists()) {
         envProps.load(stream)
     }
 }
+
+fun sanitizedEnvValue(name: String, fallback: String = ""): String =
+    (envProps.getProperty(name) ?: System.getenv(name) ?: fallback).trim()
+
+fun javaStringLiteral(value: String): String =
+    "\"" + value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\r", "\\r")
+        .replace("\n", "\\n") + "\""
+
 val configuredMboteApiBaseUrl = envProps.getProperty("MBOTE_API_BASE_URL")
     ?: System.getenv("MBOTE_API_BASE_URL")
     ?: "https://mbote-backend.onrender.com/v1"
