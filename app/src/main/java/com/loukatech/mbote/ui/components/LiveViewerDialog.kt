@@ -52,16 +52,22 @@ fun LiveViewerDialog(
     }
 
     LaunchedEffect(live.id) {
-        mboteApi.joinLive(live.id)
-            .onSuccess {
-                rtc = LiveWebRtcManager(
-                    context = context,
-                    streamId = live.id,
-                    broadcaster = false,
-                    onRemoteVideoTrack = { track -> remoteTrack = track }
-                )
-            }
-            .onFailure { error = it.message ?: "Impossible de rejoindre ce Live." }
+        val joined = mboteApi.joinLive(live.id).getOrElse {
+            error = it.message ?: "Impossible de rejoindre ce Live."
+            return@LaunchedEffect
+        }
+        val iceServers = mboteApi.fetchLiveIceServers().getOrElse {
+            mboteApi.leaveLive(joined.id)
+            error = it.message ?: "Relais TURN indisponible."
+            return@LaunchedEffect
+        }
+        rtc = LiveWebRtcManager(
+            context = context,
+            streamId = joined.id,
+            broadcaster = false,
+            iceServerConfig = iceServers,
+            onRemoteVideoTrack = { track -> remoteTrack = track }
+        )
     }
 
     LaunchedEffect(live.id) {
