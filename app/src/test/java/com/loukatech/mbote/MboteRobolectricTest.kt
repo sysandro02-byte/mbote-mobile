@@ -19,7 +19,7 @@ class MboteRobolectricTest {
     @Test fun applicationContextUsesMbotePackage() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         assertNotNull(context)
-        assertTrue(context.packageName.startsWith("com.aistudio.mbote.krtwvx"))
+        assertTrue(context.packageName.startsWith("com.loukatech.mbote"))
         assertTrue(context.getString(R.string.app_name).isNotBlank())
     }
 
