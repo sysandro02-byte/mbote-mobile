@@ -81,40 +81,7 @@ fun ChatSettingsDialog(
         )
     }
 
-    val imagePresets = remember {
-        listOf(
-            WallpaperPreset(
-                id = "african_art",
-                name = "Motifs Géométriques",
-                imageUrl = "https://images.unsplash.com/photo-1579783902614-a3fb3927b675?w=600&auto=format&fit=crop&q=80",
-                previewColor = Color(0xFF6B21A8)
-            ),
-            WallpaperPreset(
-                id = "congo_sunset",
-                name = "Coucher de Soleil",
-                imageUrl = "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&auto=format&fit=crop&q=80",
-                previewColor = Color(0xFFD97706)
-            ),
-            WallpaperPreset(
-                id = "nature_green",
-                name = "Forêt Tropicale",
-                imageUrl = "https://images.unsplash.com/photo-1511497584788-87676104235f?w=600&auto=format&fit=crop&q=80",
-                previewColor = Color(0xFF059669)
-            ),
-            WallpaperPreset(
-                id = "starry_sky",
-                name = "Nébuleuse Étoilée",
-                imageUrl = "https://images.unsplash.com/photo-1506703719100-a0f3a48c0f86?w=600&auto=format&fit=crop&q=80",
-                previewColor = Color(0xFF312E81)
-            ),
-            WallpaperPreset(
-                id = "abstract_mesh",
-                name = "Gradient Moderne",
-                imageUrl = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80",
-                previewColor = Color(0xFF4338CA)
-            )
-        )
-    }
+    val imagePresets = remember { emptyList<WallpaperPreset>() }
 
     val timerOptions = remember {
         listOf(
