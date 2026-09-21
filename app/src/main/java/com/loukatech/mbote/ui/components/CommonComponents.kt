@@ -852,19 +852,8 @@ fun EditProfileDialog(
     var channelAvatar by remember { mutableStateOf(currentProfile.channelAvatar) }
     var channelBanner by remember { mutableStateOf(currentProfile.channelBanner) }
 
-    val stockAvatars = listOf(
-        "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-        "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-        "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80",
-        "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80"
-    )
-
-    val stockBanners = listOf(
-        "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80",
-        "https://images.unsplash.com/photo-1557683316-973673baf926?w=600&auto=format&fit=crop&q=80",
-        "https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80",
-        "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&auto=format&fit=crop&q=80"
-    )
+    val stockAvatars = emptyList<String>()
+    val stockBanners = emptyList<String>()
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -974,7 +963,7 @@ fun EditProfileDialog(
                             contentScale = ContentScale.Crop
                         )
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Sélectionner un avatar premium :", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Ajoutez une URL d’image personnelle ci-dessous :", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 items(stockAvatars) { itemUrl ->
                                     val isSelected = itemUrl == avatar
@@ -1021,7 +1010,7 @@ fun EditProfileDialog(
                         contentScale = ContentScale.Crop
                     )
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Sélectionner une bannière premium :", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Ajoutez une URL de bannière personnelle ci-dessous :", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(stockBanners) { itemUrl ->
                                 val isSelected = itemUrl == coverUrl
