@@ -962,9 +962,23 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   app.post('/v1/chats', auth, route(async (req, res) => {
     const participantIds = Array.isArray(req.body.participantIds) ? [...new Set(req.body.participantIds.map(String))] : [];
     if (!participantIds.length) return failure(res, 400, 'Au moins un participant est requis');
-    const users = await db.query('SELECT id FROM users WHERE id = ANY($1::uuid[])', [participantIds]);
+    const users = await db.query('SELECT id,full_name,COALESCE(avatar_url,\'\') AS avatar FROM users WHERE id = ANY($1::uuid[])', [participantIds]);
     if (users.rowCount !== participantIds.length) return failure(res, 400, 'Un ou plusieurs participants sont invalides');
     const isGroup = Boolean(req.body.isGroup);
+    if (!isGroup && participantIds.length === 1) {
+      const targetId=participantIds[0];
+      const existing=await db.query(
+        `SELECT c.id FROM chats c
+          WHERE c.is_group=FALSE
+            AND EXISTS(SELECT 1 FROM chat_participants p WHERE p.chat_id=c.id AND p.user_id=$1)
+            AND EXISTS(SELECT 1 FROM chat_participants p WHERE p.chat_id=c.id AND p.user_id=$2)
+            AND (SELECT COUNT(*) FROM chat_participants p WHERE p.chat_id=c.id)=2
+          ORDER BY c.created_at DESC LIMIT 1`,
+        [req.user.userId,targetId],
+      );
+      const target=users.rows.find((u)=>String(u.id)===targetId);
+      if(existing.rowCount) return success(res,{id:existing.rows[0].id,name:target?.full_name||'Discussion',avatar:target?.avatar||'',isGroup:false,isChannel:false,participants:users.rows});
+    }
     const created = await db.query(
       'INSERT INTO chats (name, is_group, created_by) VALUES ($1, $2, $3) RETURNING *',
       [isGroup ? text(req.body.name, 'Nom du groupe', 255) : null, isGroup, req.user.userId],
@@ -972,7 +986,8 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     const chat = created.rows[0];
     const members = [...new Set([req.user.userId, ...participantIds])];
     await db.query('INSERT INTO chat_participants (chat_id, user_id, role) SELECT $1, unnest($2::uuid[]), CASE WHEN unnest($2::uuid[]) = $3 THEN \'ADMIN\' ELSE \'MEMBER\' END ON CONFLICT DO NOTHING', [chat.id, members, req.user.userId]);
-    success(res, { id: chat.id, name: chat.name || 'Discussion', avatar: '', isGroup, isChannel: false, participants: [] }, 201);
+    const target=!isGroup&&users.rows.length===1?users.rows[0]:null;
+    success(res, { id: chat.id, name: chat.name || target?.full_name || 'Discussion', avatar: target?.avatar || '', isGroup, isChannel: false, participants: users.rows }, 201);
   }));
   app.post('/v1/chats/:chatId/read', auth, route(async (req, res) => {
     if (!(await member(req.params.chatId, req.user.userId))) return failure(res, 403, 'Accès refusé');
