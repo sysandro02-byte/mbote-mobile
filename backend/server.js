@@ -1241,6 +1241,19 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   app.delete('/v1/status/:statusId', auth, route(async (req,res)=>{const result=await db.query('DELETE FROM statuses WHERE id=$1 AND author_id=$2 RETURNING id',[req.params.statusId,req.user.userId]);return result.rowCount?success(res,true):failure(res,404,'Statut introuvable');}));
 
   // LIVE: persisted sessions and viewer membership. Signaling events travel over Socket.IO below.
+  app.get('/v1/live/ice-servers', auth, route(async (_req,res)=>{
+    const servers = [
+      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }
+    ];
+    const turnUrl = String(process.env.MBOTE_TURN_URL || '').trim();
+    const username = String(process.env.MBOTE_TURN_USERNAME || '').trim();
+    const credential = String(process.env.MBOTE_TURN_CREDENTIAL || '').trim();
+    if (turnUrl && username && credential) {
+      servers.push({ urls: [turnUrl], username, credential });
+    }
+    success(res, { iceServers: servers, turnConfigured: Boolean(turnUrl && username && credential) });
+  }));
+
   app.get('/v1/live', auth, route(async (req,res)=>{
     const result=await db.query(
       `SELECT l.id,l.title,l.host_id,u.full_name AS host_name,COALESCE(u.avatar_url,'') AS host_avatar,
