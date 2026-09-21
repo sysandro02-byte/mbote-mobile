@@ -773,6 +773,7 @@ fun CallsScreen(
     // Device Phone Contacts Picker Dialog
     if (showDeviceContactsDialog) {
         DevicePhoneContactsDialog(
+            contacts = syncedContacts,
             onDismiss = { showDeviceContactsDialog = false },
             onStartCall = { name, avatar, isVideo, isCellular ->
                 handleInitiateCall(name, avatar, isVideo, isCellular)
