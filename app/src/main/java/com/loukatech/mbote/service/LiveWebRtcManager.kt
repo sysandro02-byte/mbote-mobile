@@ -1,6 +1,7 @@
 package com.loukatech.mbote.service
 
 import android.content.Context
+import com.loukatech.mbote.service.api.IceServerDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,6 +21,7 @@ class LiveWebRtcManager(
     context: Context,
     private val streamId: String,
     private val broadcaster: Boolean,
+    private val iceServerConfig: List<IceServerDto> = emptyList(),
     private val onLocalVideoTrack: (VideoTrack) -> Unit = {},
     private val onRemoteVideoTrack: (VideoTrack) -> Unit = {},
 ) {
@@ -72,20 +74,23 @@ class LiveWebRtcManager(
 
     private fun newPeer(peerId: String): PeerConnection {
         return peers.getOrPut(peerId) {
-            val ice = buildList {
-                add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
-                add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer())
-                val turnUrl = com.loukatech.mbote.BuildConfig.MBOTE_TURN_URL.trim()
-                val turnUser = com.loukatech.mbote.BuildConfig.MBOTE_TURN_USERNAME
-                val turnCredential = com.loukatech.mbote.BuildConfig.MBOTE_TURN_CREDENTIAL
-                if (turnUrl.isNotBlank() && turnUser.isNotBlank() && turnCredential.isNotBlank()) {
-                    add(
-                        PeerConnection.IceServer.builder(turnUrl)
-                            .setUsername(turnUser)
-                            .setPassword(turnCredential)
+            val ice = if (iceServerConfig.isNotEmpty()) {
+                iceServerConfig.flatMap { config ->
+                    config.urls.mapNotNull { url ->
+                        val normalized = url.trim()
+                        if (normalized.isBlank()) null else PeerConnection.IceServer.builder(normalized)
+                            .apply {
+                                if (config.username.isNotBlank()) setUsername(config.username)
+                                if (config.credential.isNotBlank()) setPassword(config.credential)
+                            }
                             .createIceServer()
-                    )
+                    }
                 }
+            } else {
+                listOf(
+                    PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+                    PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer()
+                )
             }
             factory.createPeerConnection(ice, object : PeerConnection.Observer {
                 override fun onIceCandidate(c: IceCandidate) {
