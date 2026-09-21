@@ -1,0 +1,49 @@
+name: MBote production monitor
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check API health
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' --connect-timeout 10 --max-time 30 https://mbote-backend.onrender.com/v1/health)"
+          cat "$body"
+          test "$code" = "200"
+          grep -q '"status":"online"' "$body"
+
+      - name: Check authenticated WebSocket gateway
+        shell: bash
+        run: |
+          node <<'NODE'
+          const timer = setTimeout(() => {
+            console.error('WebSocket timeout');
+            process.exit(1);
+          }, 15000);
+          const ws = new WebSocket('wss://mbote-backend.onrender.com/ws');
+          ws.onopen = () => ws.send(JSON.stringify({type:'AUTH', token:'monitor-invalid-token'}));
+          ws.onerror = (error) => {
+            clearTimeout(timer);
+            console.error('WebSocket unavailable', error);
+            process.exit(1);
+          };
+          ws.onclose = (event) => {
+            clearTimeout(timer);
+            if (event.code !== 1008) {
+              console.error('Unexpected WebSocket close code', event.code);
+              process.exit(1);
+            }
+            console.log('WebSocket gateway online and enforcing authentication');
+          };
+          NODE
