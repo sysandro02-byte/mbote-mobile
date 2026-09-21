@@ -351,12 +351,16 @@ data class MediaSearchItem(
 private data class MediaSearchResponse(val items: List<MediaSearchItem> = emptyList())
 
 @Serializable
-private data class PaymentIntentRequest(val provider: String, val amount: Long, val currency: String, val phone: String)
+private data class PaymentIntentRequest(
+    val provider: String,
+    @SerialName("amountFcfa") val amountFcfa: Long,
+    val currency: String,
+    val phone: String
+)
 
 @Serializable
 data class PaymentIntentResponse(
-    val id: String,
-    val provider: String,
+    @SerialName("intentId") val id: String,
     val status: String,
     val amount: Long,
     val currency: String,
