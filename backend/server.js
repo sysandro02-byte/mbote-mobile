@@ -26,6 +26,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   if (!jwtSecret || jwtSecret.length < 32) throw new Error('JWT_SECRET doit contenir au moins 32 caractères.');
 
   const app = express();
+  let sendRealtimeToUser = () => {};
   const rateBuckets = new Map();
   const rateLimit = ({ windowMs, max, keyPrefix }) => (req, res, next) => {
     const now = Date.now();
@@ -410,7 +411,10 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     if (!(await member(chatId, req.user.userId))) return failure(res, 403, 'Accès à cette conversation refusé');
     const inserted = await db.query('INSERT INTO messages (chat_id, sender_id, text, media_type, media_url, reply_to_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *', [chatId, req.user.userId, String(bodyText).trim() || null, mediaType, mediaUrl, replyToMessageId]);
     const user = await db.query('SELECT full_name, avatar_url FROM users WHERE id = $1', [req.user.userId]);
-    return success(res, messageDto({ ...inserted.rows[0], sender_name: user.rows[0].full_name, sender_avatar: user.rows[0].avatar_url }, req.user.userId), 201);
+    const dto = messageDto({ ...inserted.rows[0], sender_name: user.rows[0].full_name, sender_avatar: user.rows[0].avatar_url }, req.user.userId);
+    const recipients = await db.query('SELECT user_id FROM chat_participants WHERE chat_id=$1 AND user_id<>$2', [chatId, req.user.userId]);
+    for (const row of recipients.rows) sendRealtimeToUser(String(row.user_id), { type: 'CHAT_MESSAGE', ...dto, isMine: false });
+    return success(res, dto, 201);
   };
   app.post('/v1/messages/send', auth, route(sendMessage));
   app.post('/v1/chats/:chatId/messages', auth, route((req, res) => sendMessage({ ...req, body: { ...req.body, chatId: req.params.chatId } }, res)));
@@ -1438,6 +1442,13 @@ if (require.main === module) {
     }
   }, 30_000);
   const liveSockets = new Map();
+  const userSockets = new Map();
+  sendRealtimeToUser = (userId, event) => {
+    const encoded = JSON.stringify(event);
+    for (const client of (userSockets.get(String(userId)) || new Set())) {
+      if (client.readyState === 1) client.send(encoded);
+    }
+  };
   const broadcastLive = (streamId,event,except=null) => {
     const message=JSON.stringify(event);
     for(const client of (liveSockets.get(streamId)||new Set())) {
@@ -1463,9 +1474,20 @@ if (require.main === module) {
           if(!user.rowCount) return socket.close(1008,'Compte introuvable');
           socket.mboteUserId=identity.userId;
           socket.mboteUserName=String(user.rows[0].full_name||'Utilisateur MBoté').slice(0,120);
+          const userId=String(identity.userId);
+          if(!userSockets.has(userId)) userSockets.set(userId,new Set());
+          userSockets.get(userId).add(socket);
           socket.send(JSON.stringify({type:'AUTH_OK',userId:identity.userId}));
         }
         catch { socket.close(1008,'Session invalide'); }
+        return;
+      }
+      if(message.type==='CHAT_TYPING') {
+        const chatId=String(message.chatId||'');
+        if(!chatId || !(await member(chatId,identity.userId))) return;
+        const recipients=await db.query('SELECT user_id FROM chat_participants WHERE chat_id=$1 AND user_id<>$2',[chatId,identity.userId]);
+        const packet={type:'CHAT_TYPING',chatId,userName:socket.mboteUserName||'Utilisateur MBoté',isTyping:Boolean(message.isTyping),timestamp:Date.now()};
+        for(const row of recipients.rows) sendRealtimeToUser(String(row.user_id),packet);
         return;
       }
       const streamId=String(message.streamId||'');
@@ -1514,6 +1536,11 @@ if (require.main === module) {
       if(message.type==='LIVE_STATUS') broadcastLive(streamId,{...base,type:'LIVE_STATUS',status:String(message.status||'')});
     });
     socket.on('close',async()=>{
+      if(identity) {
+        const userId=String(identity.userId);
+        userSockets.get(userId)?.delete(socket);
+        if(userSockets.get(userId)?.size===0) userSockets.delete(userId);
+      }
       if(!identity||!joinedStream)return;
       liveSockets.get(joinedStream)?.delete(socket);
       await db.query('UPDATE live_stream_viewers SET left_at=NOW() WHERE stream_id=$1 AND user_id=$2',[joinedStream,identity.userId]).catch(()=>{});
