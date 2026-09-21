@@ -93,13 +93,38 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   const messageDto = (row, userId) => ({ id: row.id, chatId: row.chat_id, senderId: row.sender_id, senderName: row.sender_name, senderAvatar: row.sender_avatar || '', text: row.text || '', timestamp: row.created_at, mediaType: row.media_type || 'NONE', mediaUrl: row.media_url, isStarred: Boolean(row.is_starred), isMine: row.sender_id === userId });
 
   const groqModel = () => String(process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
+  const lunaProviderConfigured = () => Boolean(
+    String(process.env.GROQ_API_KEY || '').trim() ||
+    (String(process.env.LUNA_AI_URL || '').trim() && String(process.env.LUNA_AI_SHARED_SECRET || '').trim())
+  );
   const groqCompletion = async ({ messages, temperature = 0.3, maxTokens = 1000 }) => {
     const apiKey = String(process.env.GROQ_API_KEY || '').trim();
-    if (!apiKey) throw Object.assign(new Error('Luna est temporairement indisponible'), { status: 503 });
-    const baseUrl = String(process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Number(process.env.GROQ_TIMEOUT_MS || 25000));
     try {
+      if (!apiKey) {
+        const bridgeUrl = String(process.env.LUNA_AI_URL || '').trim();
+        const bridgeSecret = String(process.env.LUNA_AI_SHARED_SECRET || '').trim();
+        if (!bridgeUrl || !bridgeSecret) throw Object.assign(new Error('Luna est temporairement indisponible'), { status: 503 });
+        const upstream = await fetch(bridgeUrl, {
+          method: 'POST',
+          headers: {
+            'x-loukatech-internal-key': bridgeSecret,
+            'content-type': 'application/json',
+            accept: 'application/json',
+          },
+          body: JSON.stringify({ messages, temperature, maxTokens }),
+          signal: controller.signal,
+        });
+        const payload = await upstream.json().catch(() => ({}));
+        if (!upstream.ok || !payload?.content) {
+          console.warn(JSON.stringify({ level: 'warn', event: 'luna_bridge_error', status: upstream.status, code: payload?.error || null }));
+          throw Object.assign(new Error('Le service Luna n’a pas répondu'), { status: upstream.status === 503 ? 503 : 502 });
+        }
+        return String(payload.content).trim();
+      }
+
+      const baseUrl = String(process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
       const upstream = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -325,7 +350,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       database: true,
       emailOtp: Boolean(process.env.BREVO_API_KEY),
       liveTurn: Boolean(process.env.MBOTE_TURN_URL && process.env.MBOTE_TURN_USERNAME && process.env.MBOTE_TURN_CREDENTIAL),
-      ai: Boolean(process.env.GROQ_API_KEY),
+      ai: lunaProviderConfigured(),
       payments: Boolean(process.env.PAYMENTS_API_URL && process.env.PAYMENTS_API_KEY),
       paymentWebhook: Boolean(process.env.PAYMENTS_WEBHOOK_SECRET),
       push: Boolean(firebaseServiceAccount()),
