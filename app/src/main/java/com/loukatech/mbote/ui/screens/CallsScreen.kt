@@ -98,55 +98,25 @@ fun CallsScreen(
     // Helper function to handle calling via MBoté HD vs Cellular SIM
     val handleInitiateCall = { name: String, avatar: String, isVideo: Boolean, isCellular: Boolean ->
         if (isCellular || selectedCallMethod == CallMethodType.CELLULAR_SIM) {
-            val phoneNum = if (name.startsWith("+") || name.any { it.isDigit() }) name else "+242 06 612 3456"
-            try {
-                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${phoneNum.replace(" ", "")}"))
-                context.startActivity(intent)
-                Toast.makeText(context, "Composition sur le réseau cellulaire SIM pour $name...", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(context, "Lancement de l'appel SIM pour $name ($phoneNum)", Toast.LENGTH_SHORT).show()
+            val phoneNum = name.trim().takeIf { value ->
+                value.startsWith("+") || value.count(Char::isDigit) >= 6
+            }
+            if (phoneNum == null) {
+                Toast.makeText(context, "Aucun numéro réel n’est disponible pour cet appel SIM.", Toast.LENGTH_SHORT).show()
+            } else {
+                try {
+                    val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${phoneNum.replace(" ", "")}"))
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Impossible d’ouvrir le composeur téléphonique.", Toast.LENGTH_SHORT).show()
+                }
             }
         } else {
             onStartCall(name, avatar, isVideo)
         }
     }
 
-    var sampleRecordings by remember {
-        mutableStateOf(
-            listOf(
-                CallRecordingItem(
-                    id = "rec_1",
-                    callerName = "Grace Makiese",
-                    callerNumber = "+242 06 555 4321",
-                    callerAvatar = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                    timestamp = "Aujourd'hui, 14:10",
-                    durationText = "12:30",
-                    fileSizeText = "14.2 MB",
-                    isIncoming = true
-                ),
-                CallRecordingItem(
-                    id = "rec_2",
-                    callerName = "Tech Hub Brazzaville",
-                    callerNumber = "+242 05 777 8899",
-                    callerAvatar = "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150&auto=format&fit=crop&q=80",
-                    timestamp = "Hier, 18:45",
-                    durationText = "34:12",
-                    fileSizeText = "38.5 MB",
-                    isIncoming = false
-                ),
-                CallRecordingItem(
-                    id = "rec_3",
-                    callerName = "Audrey Matondo",
-                    callerNumber = "+242 06 888 9900",
-                    callerAvatar = "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80",
-                    timestamp = "21 Août, 20:05",
-                    durationText = "19:02",
-                    fileSizeText = "21.6 MB",
-                    isIncoming = false
-                )
-            )
-        )
-    }
+    var sampleRecordings by remember { mutableStateOf(emptyList<CallRecordingItem>()) }
 
     LaunchedEffect(calls) {
         callList = calls
@@ -318,7 +288,7 @@ fun CallsScreen(
                                 leadingIcon = { Icon(Icons.Default.VideoCall, contentDescription = null, tint = Color(0xFF10B981)) },
                                 onClick = {
                                     showHeaderMenu = false
-                                    onStartCall("Réunion MBoté HD", "https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150", true)
+                                    onStartCall("Réunion MBoté HD", "", true)
                                 }
                             )
                             DropdownMenuItem(
@@ -457,7 +427,7 @@ fun CallsScreen(
                                         onClick = {
                                             handleInitiateCall(
                                                 searchQuery.trim(),
-                                                "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+                                                "",
                                                 false,
                                                 selectedCallMethod == CallMethodType.CELLULAR_SIM
                                             )
@@ -510,7 +480,7 @@ fun CallsScreen(
                                                     onClick = {
                                                         handleInitiateCall(
                                                             searchQuery.trim(),
-                                                            "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+                                                            "",
                                                             false,
                                                             false
                                                         )
@@ -528,7 +498,7 @@ fun CallsScreen(
                                                     onClick = {
                                                         handleInitiateCall(
                                                             searchQuery.trim(),
-                                                            "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+                                                            "",
                                                             false,
                                                             true
                                                         )
@@ -564,10 +534,10 @@ fun CallsScreen(
                                     SearchContactRow(
                                         contact = contact,
                                         onStartAudioCall = {
-                                            handleInitiateCall(contact.name, contact.avatarUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", false, selectedCallMethod == CallMethodType.CELLULAR_SIM)
+                                            handleInitiateCall(contact.name, contact.avatarUrl ?: "", false, selectedCallMethod == CallMethodType.CELLULAR_SIM)
                                         },
                                         onStartVideoCall = {
-                                            handleInitiateCall(contact.name, contact.avatarUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", true, false)
+                                            handleInitiateCall(contact.name, contact.avatarUrl ?: "", true, false)
                                         },
                                         onOpenChat = { onOpenChat(contact.name) }
                                     )
@@ -676,14 +646,14 @@ fun CallsScreen(
                         onStartCall = { number, isVideo ->
                             handleInitiateCall(
                                 number,
-                                "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+                                "",
                                 isVideo,
                                 selectedCallMethod == CallMethodType.CELLULAR_SIM
                             )
                         },
                         contacts = syncedContacts,
                         onSelectContact = { contact ->
-                            handleInitiateCall(contact.name, contact.avatarUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", false, selectedCallMethod == CallMethodType.CELLULAR_SIM)
+                            handleInitiateCall(contact.name, contact.avatarUrl ?: "", false, selectedCallMethod == CallMethodType.CELLULAR_SIM)
                         },
                         modifier = Modifier.fillMaxSize()
                     )
@@ -795,7 +765,7 @@ fun CallsScreen(
         AiCallerIdPremiumDialog(
             onDismiss = { showAiCallerIdDialog = false },
             onStartCall = { name, number, isCellular ->
-                handleInitiateCall(name, "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150", false, isCellular)
+                handleInitiateCall(name, "", false, isCellular)
             }
         )
     }
