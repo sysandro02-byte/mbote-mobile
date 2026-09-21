@@ -6,6 +6,7 @@ import com.loukatech.mbote.data.AronQuestionsData
 import com.loukatech.mbote.data.MboteRepository
 import com.loukatech.mbote.model.*
 import com.loukatech.mbote.service.ContactsSyncService
+import com.loukatech.mbote.service.api.FriendRequestDto
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -549,21 +550,21 @@ class MboteViewModel(
     fun sendFriendRequest(targetUserId: String) {
         viewModelScope.launch {
             repository.sendFriendRequest(targetUserId)
-                .onFailure { _messagingError.value = it.message ?: "La demande Masta n’a pas pu être envoyée." }
+                .onFailure { _publicationError.value = it.message ?: "La demande Masta n’a pas pu être envoyée." }
         }
     }
 
     fun acceptFriendRequest(requestId: String) {
         viewModelScope.launch {
             repository.acceptFriendRequest(requestId)
-                .onFailure { _messagingError.value = it.message ?: "La demande Masta n’a pas pu être acceptée." }
+                .onFailure { _publicationError.value = it.message ?: "La demande Masta n’a pas pu être acceptée." }
         }
     }
 
     fun declineOrCancelFriendRequest(requestId: String) {
         viewModelScope.launch {
             repository.declineOrCancelFriendRequest(requestId)
-                .onFailure { _messagingError.value = it.message ?: "La demande Masta n’a pas pu être mise à jour." }
+                .onFailure { _publicationError.value = it.message ?: "La demande Masta n’a pas pu être mise à jour." }
         }
     }
 
@@ -749,7 +750,7 @@ class MboteViewModel(
 
     fun startChatWithContact(contact: SyncedContact) {
         if (!contact.isMboteUser || !contact.id.matches(Regex("^[0-9a-fA-F-]{36}$"))) {
-            _messagingError.value = "Synchronisez ce contact avec MBoté avant de démarrer une discussion."
+            _publicationError.value = "Synchronisez ce contact avec MBoté avant de démarrer une discussion."
             return
         }
         viewModelScope.launch {
@@ -759,7 +760,7 @@ class MboteViewModel(
                     _showNewChatDialog.value = false
                     openChat(chat.id)
                 }
-                .onFailure { _messagingError.value = it.message ?: "Discussion impossible." }
+                .onFailure { _publicationError.value = it.message ?: "Discussion impossible." }
         }
     }
 
@@ -770,7 +771,7 @@ class MboteViewModel(
                     _selectedDiscoverProfile.value = null
                     openChat(chat.id)
                 }
-                .onFailure { _messagingError.value = it.message ?: "Discussion impossible." }
+                .onFailure { _publicationError.value = it.message ?: "Discussion impossible." }
         }
     }
 
@@ -780,7 +781,7 @@ class MboteViewModel(
                 .onSuccess { chat ->
                     repository.sendMessage(chat.id, "Mbote ${profile.name} ! 👋 Ravi(e) de faire ta connaissance sur MBoté.")
                 }
-                .onFailure { _messagingError.value = it.message ?: "Message impossible." }
+                .onFailure { _publicationError.value = it.message ?: "Message impossible." }
         }
     }
 
@@ -1151,7 +1152,7 @@ class MboteViewModel(
                     _showShortVideosScreen.value = false
                     openChat(chat.id)
                 }
-                .onFailure { _messagingError.value = it.message ?: "Discussion impossible." }
+                .onFailure { _publicationError.value = it.message ?: "Discussion impossible." }
         }
     }
 
@@ -1161,7 +1162,7 @@ class MboteViewModel(
                 .onSuccess { chat ->
                     repository.sendMessage(chat.id, "Mbote ${video.creatorName} ! 👋 J'ai adoré ton Short « ${video.caption} » sur MBoté ✨ Bravo pour ton travail !")
                 }
-                .onFailure { _messagingError.value = it.message ?: "Message impossible." }
+                .onFailure { _publicationError.value = it.message ?: "Message impossible." }
         }
     }
 
