@@ -25,8 +25,12 @@ if grep -RInE 'AIza[0-9A-Za-z_-]{20,}|xkeysib-[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z_-
 fi
 
 grep -q 'https://mbote-backend.onrender.com/v1' app/build.gradle.kts
-grep -q 'MBOTE_TURN_URL' app/build.gradle.kts
-grep -q 'MBOTE_TURN_CREDENTIAL' app/build.gradle.kts
+grep -q 'MBOTE_TURN_URL' backend/server.js
+grep -q 'MBOTE_TURN_CREDENTIAL' backend/server.js
+if grep -q 'MBOTE_TURN_CREDENTIAL' app/build.gradle.kts; then
+  echo "ERROR: les identifiants TURN ne doivent pas être intégrés dans BuildConfig Android" >&2
+  fail=1
+fi
 
 if [ "$fail" -ne 0 ]; then exit 1; fi
 echo "Production source audit: OK"
