@@ -637,12 +637,17 @@ class MboteViewModel(
         chatId: String,
         amount: String,
         provider: String,
+        phone: String,
         note: String,
         isRequest: Boolean
     ) {
-        if (amount.isNotBlank()) {
-            repository.sendPaymentTransfer(chatId, amount, provider, note, isRequest)
-            _showPaymentSheet.value = false
+        if (amount.isBlank()) return
+        viewModelScope.launch {
+            _isPublishing.value = true
+            repository.sendPaymentTransfer(chatId, amount, provider, phone, note, isRequest)
+                .onSuccess { _showPaymentSheet.value = false }
+                .onFailure { _publicationError.value = it.message ?: "Paiement impossible." }
+            _isPublishing.value = false
         }
     }
 
