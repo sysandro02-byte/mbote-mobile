@@ -45,9 +45,6 @@ val viteSupabaseUrl = sanitizedEnvValue("VITE_SUPABASE_URL")
 val viteSupabaseAnonKey = sanitizedEnvValue("VITE_SUPABASE_ANON_KEY")
 val googleClientId = sanitizedEnvValue("GOOGLE_CLIENT_ID")
 val githubClientId = sanitizedEnvValue("GITHUB_CLIENT_ID")
-val mboteTurnUrl = sanitizedEnvValue("MBOTE_TURN_URL")
-val mboteTurnUsername = sanitizedEnvValue("MBOTE_TURN_USERNAME")
-val mboteTurnCredential = sanitizedEnvValue("MBOTE_TURN_CREDENTIAL")
 
 val qaKeystorePath = System.getenv("MBOTE_QA_KEYSTORE_PATH")
 val qaKeystorePassword = System.getenv("MBOTE_QA_KEYSTORE_PASSWORD")
@@ -92,9 +89,6 @@ android {
         buildConfigField("String", "VITE_SUPABASE_ANON_KEY", javaStringLiteral(viteSupabaseAnonKey))
         buildConfigField("String", "GOOGLE_CLIENT_ID", javaStringLiteral(googleClientId))
         buildConfigField("String", "GITHUB_CLIENT_ID", javaStringLiteral(githubClientId))
-        buildConfigField("String", "MBOTE_TURN_URL", javaStringLiteral(mboteTurnUrl))
-        buildConfigField("String", "MBOTE_TURN_USERNAME", javaStringLiteral(mboteTurnUsername))
-        buildConfigField("String", "MBOTE_TURN_CREDENTIAL", javaStringLiteral(mboteTurnCredential))
     }
 
     signingConfigs {
