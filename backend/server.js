@@ -24,6 +24,33 @@ function createPool() {
   });
 }
 
+async function cleanupOrphanedPublicationUploads(db, {
+  retentionDays = Number(process.env.ORPHAN_UPLOAD_RETENTION_DAYS || 7),
+  batchSize = Number(process.env.MEDIA_CLEANUP_BATCH_SIZE || 100),
+} = {}) {
+  const safeRetentionDays = Math.max(1, Math.min(Number(retentionDays) || 7, 365));
+  const safeBatchSize = Math.max(1, Math.min(Number(batchSize) || 100, 1000));
+  const result = await db.query(
+    `WITH candidates AS (
+       SELECT p.id
+       FROM publication_uploads p
+       WHERE p.created_at < NOW() - ($1::int * INTERVAL '1 day')
+         AND NOT EXISTS (SELECT 1 FROM news_posts n WHERE POSITION(p.id::text IN COALESCE(n.image_url, '')) > 0)
+         AND NOT EXISTS (SELECT 1 FROM short_videos v WHERE POSITION(p.id::text IN COALESCE(v.video_url, '')) > 0 OR POSITION(p.id::text IN COALESCE(v.thumbnail_url, '')) > 0)
+         AND NOT EXISTS (SELECT 1 FROM messages m WHERE POSITION(p.id::text IN COALESCE(m.media_url, '')) > 0)
+         AND NOT EXISTS (SELECT 1 FROM statuses st WHERE POSITION(p.id::text IN COALESCE(st.media_url, '')) > 0)
+       ORDER BY p.created_at ASC
+       LIMIT $2
+     )
+     DELETE FROM publication_uploads p
+     USING candidates c
+     WHERE p.id = c.id
+     RETURNING p.id`,
+    [safeRetentionDays, safeBatchSize],
+  );
+  return result.rowCount || 0;
+}
+
 function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = process.env.FRONTEND_URL } = {}) {
   if (!db) throw new Error('Une connexion PostgreSQL est requise.');
   if (!jwtSecret || jwtSecret.length < 32) throw new Error('JWT_SECRET doit contenir au moins 32 caractères.');
@@ -1473,6 +1500,26 @@ if (require.main === module) {
   server.keepAliveTimeout = Number(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 5_000);
   server.maxRequestsPerSocket = Number(process.env.HTTP_MAX_REQUESTS_PER_SOCKET || 1_000);
   const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
+
+  const cleanupMedia = async () => {
+    if (String(process.env.MEDIA_CLEANUP_ENABLED || 'true').toLowerCase() === 'false') return;
+    try {
+      const removed = await cleanupOrphanedPublicationUploads(db);
+      if (removed > 0) {
+        console.log(JSON.stringify({ level: 'info', event: 'media_cleanup', removed }));
+      }
+    } catch (error) {
+      console.error(JSON.stringify({ level: 'error', event: 'media_cleanup_failed', error: error?.message || 'Unknown error' }));
+    }
+  };
+  const cleanupStartupTimer = setTimeout(cleanupMedia, 60_000);
+  cleanupStartupTimer.unref?.();
+  const cleanupInterval = setInterval(
+    cleanupMedia,
+    Math.max(60_000, Number(process.env.MEDIA_CLEANUP_INTERVAL_MS || 21_600_000)),
+  );
+  cleanupInterval.unref?.();
+
   const heartbeat = setInterval(() => {
     for (const socket of wss.clients) {
       if (socket.isAlive === false) {
@@ -1590,6 +1637,8 @@ if (require.main === module) {
     });
   });
   const close = async () => {
+    clearTimeout(cleanupStartupTimer);
+    clearInterval(cleanupInterval);
     clearInterval(heartbeat);
     for (const socket of wss.clients) socket.close(1001, 'Serveur en arrêt');
     wss.close();
@@ -1598,4 +1647,4 @@ if (require.main === module) {
   };
   process.on('SIGINT', close); process.on('SIGTERM', close);
 }
-module.exports = { createApp, createPool };
+module.exports = { createApp, createPool, cleanupOrphanedPublicationUploads };
