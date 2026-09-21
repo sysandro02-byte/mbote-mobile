@@ -4,7 +4,11 @@ import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import com.loukatech.mbote.service.api.RtcIceConfigService
+import com.loukatech.mbote.service.api.RtcIceServerConfig
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
@@ -33,6 +37,7 @@ class LiveWebRtcManager(
     private var audioSource: AudioSource? = null
     private var localVideo: VideoTrack? = null
     private var localAudio: AudioTrack? = null
+    @Volatile private var iceServers: List<PeerConnection.IceServer> = defaultIceServers()
 
     init {
         PeerConnectionFactory.initialize(
@@ -43,10 +48,11 @@ class LiveWebRtcManager(
             .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
             .createPeerConnectionFactory()
         if (broadcaster) startCapture()
-        MboteSocketManager.connectLiveWebSocket(streamId)
-        scope.launch { MboteSocketManager.liveSignals.collectLatest(::handleSignal) }
-        if (!broadcaster) {
-            scope.launch {
+        scope.launch {
+            iceServers = loadIceServers()
+            MboteSocketManager.connectLiveWebSocket(streamId)
+            launch { MboteSocketManager.liveSignals.collectLatest(::handleSignal) }
+            if (!broadcaster) {
                 MboteSocketManager.liveSocketIdentity.filterNotNull().take(1).collect {
                     requestStream()
                 }
@@ -70,24 +76,36 @@ class LiveWebRtcManager(
         localAudio = factory.createAudioTrack("MBOTE_LIVE_AUDIO", audioSource)
     }
 
+    private fun defaultIceServers(): List<PeerConnection.IceServer> = listOf(
+        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+        PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
+    )
+
+    private fun RtcIceServerConfig.toWebRtcIceServers(): List<PeerConnection.IceServer> =
+        urls.map { url ->
+            PeerConnection.IceServer.builder(url).apply {
+                if (username.isNotBlank()) setUsername(username)
+                if (credential.isNotBlank()) setPassword(credential)
+            }.createIceServer()
+        }
+
+    private suspend fun loadIceServers(): List<PeerConnection.IceServer> {
+        repeat(3) { attempt ->
+            val result = runCatching { RtcIceConfigService().fetchIceServers() }.getOrNull()
+            if (!result.isNullOrEmpty()) {
+                val mapped = result.flatMap { it.toWebRtcIceServers() }
+                if (mapped.isNotEmpty()) return mapped
+            }
+            if (attempt < 2) delay((attempt + 1) * 750L)
+        }
+        // STUN-only fallback preserves direct WebRTC when the backend is temporarily unavailable.
+        // Networks requiring TURN will recover on the next Live session once server config is reachable.
+        return defaultIceServers()
+    }
+
     private fun newPeer(peerId: String): PeerConnection {
         return peers.getOrPut(peerId) {
-            val ice = buildList {
-                add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
-                add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer())
-                val turnUrl = com.loukatech.mbote.BuildConfig.MBOTE_TURN_URL.trim()
-                val turnUser = com.loukatech.mbote.BuildConfig.MBOTE_TURN_USERNAME
-                val turnCredential = com.loukatech.mbote.BuildConfig.MBOTE_TURN_CREDENTIAL
-                if (turnUrl.isNotBlank() && turnUser.isNotBlank() && turnCredential.isNotBlank()) {
-                    add(
-                        PeerConnection.IceServer.builder(turnUrl)
-                            .setUsername(turnUser)
-                            .setPassword(turnCredential)
-                            .createIceServer()
-                    )
-                }
-            }
-            factory.createPeerConnection(ice, object : PeerConnection.Observer {
+            factory.createPeerConnection(iceServers, object : PeerConnection.Observer {
                 override fun onIceCandidate(c: IceCandidate) {
                     MboteSocketManager.sendLiveSignal(streamId, "ICE", peerId, candidate=c.sdp, sdpMid=c.sdpMid, sdpMLineIndex=c.sdpMLineIndex)
                 }
@@ -162,6 +180,7 @@ class LiveWebRtcManager(
     fun switchCamera() { capturer?.switchCamera(null) }
 
     fun close() {
+        scope.cancel()
         runCatching { capturer?.stopCapture() }
         capturer?.dispose()
         peers.values.forEach { it.close(); it.dispose() }
