@@ -1589,6 +1589,70 @@ class MboteRepository(
         }
     }
 
+    suspend fun createDirectRtcCall(
+        peerUserId: String,
+        peerName: String,
+        peerAvatar: String,
+        isVideo: Boolean
+    ): Result<CallItem> {
+        if (peerUserId.isBlank()) return Result.failure(IllegalArgumentException("Destinataire d’appel invalide."))
+        val request = CreateGroupCallRequest(
+            roomTitle = if (isVideo) "Appel vidéo avec $peerName" else "Appel audio avec $peerName",
+            isVideoCall = isVideo,
+            participantIds = listOf(peerUserId)
+        )
+        return groupCallApiService.createGroupCall(request).map { session ->
+            CallItem(
+                name = peerName,
+                avatar = peerAvatar,
+                type = CallType.OUTGOING,
+                isVideo = isVideo,
+                timestamp = "Connexion…",
+                durationText = "",
+                peerUserId = peerUserId,
+                roomCode = session.roomCode,
+                callState = "RINGING"
+            )
+        }
+    }
+
+    suspend fun joinDirectRtcCall(
+        roomCode: String,
+        callerUserId: String,
+        callerName: String,
+        callerAvatar: String,
+        isVideo: Boolean
+    ): Result<CallItem> =
+        groupCallApiService.joinGroupCall(roomCode).map { session ->
+            CallItem(
+                name = callerName,
+                avatar = callerAvatar,
+                type = CallType.INCOMING,
+                isVideo = isVideo,
+                timestamp = "Connecté",
+                durationText = "",
+                peerUserId = callerUserId,
+                roomCode = session.roomCode,
+                callState = "CONNECTED"
+            )
+        }
+
+    suspend fun leaveRtcCall(roomCode: String): Result<Boolean> =
+        groupCallApiService.leaveGroupCall(roomCode)
+
+    suspend fun updateRtcParticipantState(
+        roomCode: String,
+        isMuted: Boolean,
+        isVideoOff: Boolean
+    ): Result<Boolean> = groupCallApiService.updateParticipantState(
+        ParticipantStateUpdateRequest(
+            roomCode = roomCode,
+            userId = _userProfile.value.id,
+            isMuted = isMuted,
+            isVideoOff = isVideoOff
+        )
+    )
+
     suspend fun createGroupCallRoomApi(roomTitle: String, isVideo: Boolean = true): Result<MeetingItem> {
         val req = CreateGroupCallRequest(roomTitle = roomTitle, isVideoCall = isVideo)
         val res = groupCallApiService.createGroupCall(req)
@@ -1616,7 +1680,7 @@ class MboteRepository(
             val session = res.getOrNull()!!
             val meeting = MeetingItem(
                 title = session.roomTitle,
-                hostName = "Organisateur",
+                hostName = session.participants.firstOrNull { it.id == session.hostUserId }?.name ?: "Organisateur",
                 code = session.roomCode,
                 scheduledTime = "En cours",
                 durationMinutes = 60,
@@ -1638,21 +1702,6 @@ class MboteRepository(
             _newsPosts.update { posts -> posts.map { if (it.id == postId) it.copy(comments = loaded, commentsCount = loaded.size) else it } }
         }
         return Result.success(Unit)
-    }
-
-    fun createMeeting(title: String, durationMin: Int = 45): MeetingItem {
-        val code = "MB-" + (100..999).random() + "-" + (100..999).random()
-        val newMeeting = MeetingItem(
-            title = title,
-            hostName = _userProfile.value.name,
-            code = code,
-            scheduledTime = "En cours",
-            durationMinutes = durationMin,
-            isLive = true,
-            participantsCount = 1
-        )
-        _meetings.update { listOf(newMeeting) + it }
-        return newMeeting
     }
 
     suspend fun toggleJobLike(jobId: String): Result<Unit> {
