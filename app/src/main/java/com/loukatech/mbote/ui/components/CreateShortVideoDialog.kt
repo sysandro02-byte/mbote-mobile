@@ -445,9 +445,9 @@ private fun Step1TrimScreen(
                 .background(Color(0xFF0F172A)),
             contentAlignment = Alignment.Center
         ) {
-            // Background Image Simulation
+            // Preview background uses only the selected user video; no demo media is injected.
             AsyncImage(
-                model = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&auto=format&fit=crop&q=80",
+                model = null,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -1177,7 +1177,7 @@ private fun Step3PreviewScreen(
             }
         }
 
-        // Video Mockup Card
+        // Final Short preview card
         Surface(
             shape = RoundedCornerShape(22.dp),
             color = Color(0xFF0F172A),
@@ -1187,7 +1187,7 @@ private fun Step3PreviewScreen(
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AsyncImage(
-                    model = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800&auto=format&fit=crop&q=80",
+                    model = null,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -1230,14 +1230,14 @@ private fun Step3PreviewScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             AsyncImage(
-                                model = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80",
+                                model = null,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
                                     .size(28.dp)
                                     .clip(CircleShape)
                             )
-                            Text("Loukatech 💜", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("Votre profil", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
 
                         Text(
