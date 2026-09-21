@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const jwt = require('jsonwebtoken');
-const { createApp } = require('../server');
+const { createApp, cleanupOrphanedPublicationUploads } = require('../server');
 
 const secret = 'test-only-secret-that-is-long-enough-to-sign-jwts';
 
@@ -143,4 +143,26 @@ test('RTC ICE configuration is authenticated and reads TURN secrets only on the 
     if (previous.username === undefined) delete process.env.MBOTE_TURN_USERNAME; else process.env.MBOTE_TURN_USERNAME = previous.username;
     if (previous.credential === undefined) delete process.env.MBOTE_TURN_CREDENTIAL; else process.env.MBOTE_TURN_CREDENTIAL = previous.credential;
   }
+});
+
+
+test('orphaned media cleanup deletes only old unreferenced upload candidates in bounded batches', async () => {
+  const calls = [];
+  const db = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      return { rowCount: 3, rows: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] };
+    },
+  };
+
+  const removed = await cleanupOrphanedPublicationUploads(db, { retentionDays: 14, batchSize: 25 });
+  assert.equal(removed, 3);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].params, [14, 25]);
+  assert.match(calls[0].sql, /publication_uploads/);
+  assert.match(calls[0].sql, /news_posts/);
+  assert.match(calls[0].sql, /short_videos/);
+  assert.match(calls[0].sql, /messages/);
+  assert.match(calls[0].sql, /statuses/);
+  assert.match(calls[0].sql, /LIMIT \$2/);
 });
