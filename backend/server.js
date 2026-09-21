@@ -197,8 +197,16 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       googleOAuthBackend: Boolean(process.env.GOOGLE_CLIENT_ID),
       githubOAuthBackend: Boolean(process.env.GITHUB_CLIENT_ID),
     };
+    const coreRequired = ['database', 'emailOtp', 'liveTurn'];
+    const fullRequired = ['database', 'emailOtp', 'liveTurn', 'ai', 'payments', 'paymentWebhook', 'push'];
+    const coreReady = coreRequired.every((name) => capabilities[name] === true);
+    const releaseReady = fullRequired.every((name) => capabilities[name] === true);
+    const missingCapabilities = fullRequired.filter((name) => capabilities[name] !== true);
     success(res, {
-      status: capabilities.database && capabilities.emailOtp && capabilities.liveTurn ? 'ready' : 'degraded',
+      status: releaseReady ? 'ready' : coreReady ? 'partial' : 'degraded',
+      coreReady,
+      releaseReady,
+      missingCapabilities,
       databaseLatencyMs: Date.now() - started,
       capabilities,
       timestamp: new Date().toISOString(),
