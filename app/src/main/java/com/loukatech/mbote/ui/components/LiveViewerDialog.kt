@@ -17,7 +17,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.loukatech.mbote.service.LiveWebRtcManager
@@ -25,7 +24,6 @@ import com.loukatech.mbote.service.MboteSocketManager
 import com.loukatech.mbote.service.api.LiveStreamDto
 import com.loukatech.mbote.service.api.MboteApiService
 import kotlinx.coroutines.launch
-import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoTrack
 
 @Composable
@@ -66,7 +64,7 @@ fun LiveViewerDialog(
             streamId = joined.id,
             broadcaster = false,
             iceServerConfig = iceServers,
-            onRemoteVideoTrack = { track -> remoteTrack = track }
+            onRemoteVideoTrack = { track -> scope.launch { remoteTrack = track } }
         )
     }
 
@@ -116,14 +114,10 @@ fun LiveViewerDialog(
                 }
                 remoteTrack != null && rtc != null -> {
                     key(remoteTrack) {
-                        AndroidView(
-                            factory = { ctx ->
-                                SurfaceViewRenderer(ctx).also { renderer ->
-                                    renderer.init(rtc!!.eglContext(), null)
-                                    renderer.setMirror(false)
-                                    remoteTrack!!.addSink(renderer)
-                                }
-                            },
+                        RtcVideoSurface(
+                            track = remoteTrack!!,
+                            eglContext = rtc!!.eglContext(),
+                            mirror = false,
                             modifier = Modifier.fillMaxSize()
                         )
                     }
