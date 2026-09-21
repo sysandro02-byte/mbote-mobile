@@ -21,6 +21,7 @@
         android:required="false" />
 
     <application
+        android:name=".MboteApplication"
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:icon="@mipmap/ic_launcher"
