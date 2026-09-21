@@ -250,6 +250,9 @@ class MboteRepository(
     private val _mastaUsers = MutableStateFlow<List<MastaUser>>(emptyList())
     val mastaUsers: StateFlow<List<MastaUser>> = _mastaUsers.asStateFlow()
 
+    private val _friendRequests = MutableStateFlow<List<FriendRequestDto>>(emptyList())
+    val friendRequests: StateFlow<List<FriendRequestDto>> = _friendRequests.asStateFlow()
+
     fun updateMastaUsers(users: List<MastaUser>) {
         _mastaUsers.value = users
     }
@@ -718,13 +721,29 @@ class MboteRepository(
     suspend fun refreshMastaFromBackend() {
         apiService.fetchAronQuestions().onSuccess { _aronQuestions.value = it }
         apiService.fetchDiscoverProfiles().onSuccess { _discoverProfiles.value = it }
-        val result = apiService.fetchMastaUsers()
-        if (result.isSuccess) {
-            val remoteMasta = result.getOrNull()
-            if (remoteMasta != null) {
-                _mastaUsers.value = remoteMasta
-            }
-        }
+        apiService.fetchMastaUsers().onSuccess { _mastaUsers.value = it }
+        apiService.fetchFriendRequests().onSuccess { _friendRequests.value = it }
+    }
+
+    suspend fun sendFriendRequest(targetUserId: String): Result<Unit> {
+        val result = apiService.sendFriendRequest(targetUserId)
+        if (result.isFailure) return Result.failure(result.exceptionOrNull()!!)
+        refreshMastaFromBackend()
+        return Result.success(Unit)
+    }
+
+    suspend fun acceptFriendRequest(requestId: String): Result<Unit> {
+        val result = apiService.acceptFriendRequest(requestId)
+        if (result.isFailure) return Result.failure(result.exceptionOrNull()!!)
+        refreshMastaFromBackend()
+        return Result.success(Unit)
+    }
+
+    suspend fun declineOrCancelFriendRequest(requestId: String): Result<Unit> {
+        val result = apiService.declineOrCancelFriendRequest(requestId)
+        if (result.isFailure) return Result.failure(result.exceptionOrNull()!!)
+        refreshMastaFromBackend()
+        return Result.success(Unit)
     }
 
     suspend fun refreshShortsFromBackend() {
