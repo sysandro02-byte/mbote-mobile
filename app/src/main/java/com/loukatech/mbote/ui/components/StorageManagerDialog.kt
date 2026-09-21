@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -31,6 +32,7 @@ import com.loukatech.mbote.model.Chat
 import com.loukatech.mbote.model.MediaType
 import com.loukatech.mbote.ui.theme.MbotePurplePrimary
 import com.loukatech.mbote.ui.theme.MbotePurpleSoft
+import java.io.File
 
 data class StorageMediaItem(
     val id: String,
@@ -76,134 +78,40 @@ fun StorageManagerDialog(
     chats: List<Chat> = emptyList(),
     modifier: Modifier = Modifier
 ) {
-    var mediaItems by remember {
+    val context = LocalContext.current
+    var mediaItems by remember(chats) {
         mutableStateOf(
-            listOf(
-                StorageMediaItem(
-                    id = "m1",
-                    title = "Vidéo HD - Concert Rumba Kintele 2026.mp4",
-                    type = MediaType.VIDEO,
-                    sizeBytes = 44_878_950L,
-                    chatName = "Team MBoté Congo",
-                    chatId = "c1",
-                    dateFormatted = "22 Août 2026",
-                    thumbnailUrl = "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=500"
-                ),
-                StorageMediaItem(
-                    id = "m2",
-                    title = "Film Docu - Pont Brazzaville Kinshasa.mp4",
-                    type = MediaType.VIDEO,
-                    sizeBytes = 40_055_600L,
-                    chatName = "MBoté Officiel",
-                    chatId = "c2",
-                    dateFormatted = "19 Août 2026",
-                    thumbnailUrl = "https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=500"
-                ),
-                StorageMediaItem(
-                    id = "m3",
-                    title = "Album Photos HD - Soirée Anniversaire.zip",
-                    type = MediaType.FILE,
-                    sizeBytes = 29_884_400L,
-                    chatName = "Grace Ondongo",
-                    chatId = "c3",
-                    dateFormatted = "15 Août 2026",
-                    thumbnailUrl = null
-                ),
-                StorageMediaItem(
-                    id = "m4",
-                    title = "Reportage - Marché Poto-Poto Brazza.mp4",
-                    type = MediaType.VIDEO,
-                    sizeBytes = 25_270_000L,
-                    chatName = "Arsène Kouka",
-                    chatId = "c4",
-                    dateFormatted = "12 Août 2026",
-                    thumbnailUrl = "https://images.unsplash.com/photo-1533105079780-92b9be482077?w=500"
-                ),
-                StorageMediaItem(
-                    id = "m5",
-                    title = "Studio Session - Instrumental Afrobeat.wav",
-                    type = MediaType.AUDIO,
-                    sizeBytes = 19_504_000L,
-                    chatName = "Régis Loufoua",
-                    chatId = "c5",
-                    dateFormatted = "10 Août 2026",
-                    thumbnailUrl = null
-                ),
-                StorageMediaItem(
-                    id = "m6",
-                    title = "Photos 4K - Plage de Pointe-Noire.png",
-                    type = MediaType.IMAGE,
-                    sizeBytes = 17_196_000L,
-                    chatName = "Grace Ondongo",
-                    chatId = "c3",
-                    dateFormatted = "08 Août 2026",
-                    thumbnailUrl = "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=500"
-                ),
-                StorageMediaItem(
-                    id = "m7",
-                    title = "Rapport Projet MBoté V2 Finale.pdf",
-                    type = MediaType.FILE,
-                    sizeBytes = 12_897_000L,
-                    chatName = "Team MBoté Congo",
-                    chatId = "c1",
-                    dateFormatted = "05 Août 2026",
-                    thumbnailUrl = null
-                ),
-                StorageMediaItem(
-                    id = "m8",
-                    title = "Message Vocal - Explication Stratégie (12 min).opus",
-                    type = MediaType.AUDIO,
-                    sizeBytes = 10_276_000L,
-                    chatName = "Divin Mabiala",
-                    chatId = "c6",
-                    dateFormatted = "02 Août 2026",
-                    thumbnailUrl = null
-                ),
-                StorageMediaItem(
-                    id = "m9",
-                    title = "Danse Traditionnelle Sapeurs Brazza.mp4",
-                    type = MediaType.VIDEO,
-                    sizeBytes = 8_808_000L,
-                    chatName = "MBoté Officiel",
-                    chatId = "c2",
-                    dateFormatted = "28 Juil 2026",
-                    thumbnailUrl = "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=500"
-                ),
-                StorageMediaItem(
-                    id = "m10",
-                    title = "Coucher de Soleil - Fleuve Congo.jpg",
-                    type = MediaType.IMAGE,
-                    sizeBytes = 7_025_000L,
-                    chatName = "Grace Ondongo",
-                    chatId = "c3",
-                    dateFormatted = "25 Juil 2026",
-                    thumbnailUrl = "https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=500"
-                ),
-                StorageMediaItem(
-                    id = "m11",
-                    title = "Maquette UI MBoté Mobile.png",
-                    type = MediaType.IMAGE,
-                    sizeBytes = 4_404_000L,
-                    chatName = "Arsène Kouka",
-                    chatId = "c4",
-                    dateFormatted = "20 Juil 2026",
-                    thumbnailUrl = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500"
-                ),
-                StorageMediaItem(
-                    id = "m12",
-                    title = "Note Vocale Réunion Client.opus",
-                    type = MediaType.AUDIO,
-                    sizeBytes = 3_250_000L,
-                    chatName = "Team MBoté Congo",
-                    chatId = "c1",
-                    dateFormatted = "18 Juil 2026",
-                    thumbnailUrl = null
-                )
-            )
+            chats.flatMap { chat ->
+                chat.messages.mapNotNull { message ->
+                    val mediaUrl = message.mediaUrl?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    val size = when {
+                        mediaUrl.startsWith("file://") -> File(mediaUrl.removePrefix("file://")).takeIf { it.exists() }?.length()
+                        mediaUrl.startsWith("/") -> File(mediaUrl).takeIf { it.exists() }?.length()
+                        mediaUrl.startsWith("content://") -> runCatching {
+                            context.contentResolver.openAssetFileDescriptor(android.net.Uri.parse(mediaUrl), "r")?.use { it.length }
+                        }.getOrNull()?.takeIf { it >= 0L }
+                        else -> null
+                    } ?: return@mapNotNull null
+                    StorageMediaItem(
+                        id = message.id,
+                        title = message.text.ifBlank { mediaUrl.substringAfterLast('/').ifBlank { "Média MBoté" } },
+                        type = message.mediaType,
+                        sizeBytes = size,
+                        chatName = chat.name,
+                        chatId = chat.id,
+                        dateFormatted = message.timestamp,
+                        thumbnailUrl = mediaUrl.takeIf { message.mediaType == MediaType.IMAGE || message.mediaType == MediaType.VIDEO }
+                    )
+                }
+            }
         )
     }
 
-    var cacheSizeBytes by remember { mutableStateOf(14_500_000L) }
+    var cacheSizeBytes by remember {
+        mutableStateOf(
+            runCatching { context.cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() } }.getOrDefault(0L)
+        )
+    }
     var selectedTab by remember { mutableStateOf(StorageTab.LARGE_FILES) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedMediaIds by remember { mutableStateOf(setOf<String>()) }
