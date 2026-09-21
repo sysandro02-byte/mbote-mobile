@@ -131,6 +131,102 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     }
   };
 
+  const firebaseServiceAccount = () => {
+    const rawJson = String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
+    const rawB64 = String(process.env.FIREBASE_SERVICE_ACCOUNT_B64 || '').trim();
+    if (!rawJson && !rawB64) return null;
+    try {
+      const source = rawJson || Buffer.from(rawB64, 'base64').toString('utf8');
+      const parsed = JSON.parse(source);
+      if (!parsed?.client_email || !parsed?.private_key || !parsed?.project_id) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  };
+  let fcmAccessTokenCache = { token: '', expiresAt: 0 };
+  const firebaseAccessToken = async (forceRefresh = false) => {
+    if (!forceRefresh && fcmAccessTokenCache.token && fcmAccessTokenCache.expiresAt > Date.now() + 60_000) {
+      return fcmAccessTokenCache.token;
+    }
+    const serviceAccount = firebaseServiceAccount();
+    if (!serviceAccount) throw Object.assign(new Error('Firebase FCM n’est pas configuré'), { status: 503 });
+    const now = Math.floor(Date.now() / 1000);
+    const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const unsigned = `${encode({ alg: 'RS256', typ: 'JWT' })}.${encode({
+      iss: serviceAccount.client_email,
+      scope: 'https://www.googleapis.com/auth/firebase.messaging',
+      aud: 'https://oauth2.googleapis.com/token',
+      iat: now,
+      exp: now + 3600,
+    })}`;
+    const signature = crypto.sign('RSA-SHA256', Buffer.from(unsigned), serviceAccount.private_key).toString('base64url');
+    const assertion = `${unsigned}.${signature}`;
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.access_token) throw Object.assign(new Error('Authentification Firebase FCM impossible'), { status: 502 });
+    fcmAccessTokenCache = {
+      token: String(payload.access_token),
+      expiresAt: Date.now() + Math.max(300, Number(payload.expires_in || 3600)) * 1000,
+    };
+    return fcmAccessTokenCache.token;
+  };
+  const sendFcmToken = async (token, notification, data = {}, retry = true) => {
+    const serviceAccount = firebaseServiceAccount();
+    if (!serviceAccount) return { ok: false, notConfigured: true };
+    const accessToken = await firebaseAccessToken();
+    const normalizedData = Object.fromEntries(
+      Object.entries(data).filter(([, value]) => value !== undefined && value !== null).map(([key, value]) => [key, String(value)])
+    );
+    const response = await fetch(
+      `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(serviceAccount.project_id)}/messages:send`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          message: {
+            token,
+            notification: notification?.title ? { title: String(notification.title), body: String(notification.body || '') } : undefined,
+            data: normalizedData,
+            android: { priority: 'high', notification: { channel_id: 'mbote_push_notifications_channel' } },
+          },
+        }),
+      },
+    );
+    const body = await response.text();
+    if (response.status === 401 && retry) {
+      fcmAccessTokenCache = { token: '', expiresAt: 0 };
+      return sendFcmToken(token, notification, data, false);
+    }
+    const unregistered = response.status === 404 || /UNREGISTERED/i.test(body);
+    if (!response.ok && !unregistered) {
+      console.warn(JSON.stringify({ level: 'warn', event: 'fcm_send_failed', status: response.status }));
+    }
+    return { ok: response.ok, unregistered };
+  };
+  const sendPushToUser = async (userId, notification, data = {}) => {
+    if (!firebaseServiceAccount()) return { sent: 0, configured: false };
+    const tokens = await db.query('SELECT token FROM device_push_tokens WHERE user_id=$1', [userId]);
+    let sent = 0;
+    for (const row of tokens.rows) {
+      try {
+        const result = await sendFcmToken(row.token, notification, data);
+        if (result.ok) sent += 1;
+        if (result.unregistered) await db.query('DELETE FROM device_push_tokens WHERE user_id=$1 AND token=$2', [userId, row.token]);
+      } catch (error) {
+        console.warn(JSON.stringify({ level: 'warn', event: 'fcm_delivery_error', userId: String(userId), error: error?.message || 'unknown' }));
+      }
+    }
+    return { sent, configured: true };
+  };
+
   const sendOtpEmail = async (email, code, flow) => {
     if (!process.env.BREVO_API_KEY) throw Object.assign(new Error('Le service e-mail est temporairement indisponible'), { status: 503 });
     const response = await fetch(process.env.BREVO_API_URL || 'https://api.brevo.com/v3/smtp/email', {
@@ -232,7 +328,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       ai: Boolean(process.env.GROQ_API_KEY),
       payments: Boolean(process.env.PAYMENTS_API_URL && process.env.PAYMENTS_API_KEY),
       paymentWebhook: Boolean(process.env.PAYMENTS_WEBHOOK_SECRET),
-      push: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_B64),
+      push: Boolean(firebaseServiceAccount()),
       googleOAuthBackend: Boolean(process.env.GOOGLE_CLIENT_ID),
       githubOAuthBackend: Boolean(process.env.GITHUB_CLIENT_ID),
     };
@@ -490,7 +586,17 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     const user = await db.query('SELECT full_name, avatar_url FROM users WHERE id = $1', [req.user.userId]);
     const dto = messageDto({ ...inserted.rows[0], sender_name: user.rows[0].full_name, sender_avatar: user.rows[0].avatar_url }, req.user.userId);
     const recipients = await db.query('SELECT user_id FROM chat_participants WHERE chat_id=$1 AND user_id<>$2', [chatId, req.user.userId]);
-    for (const row of recipients.rows) realtimeHub.sendToUser(String(row.user_id), { type: 'CHAT_MESSAGE', ...dto, isMine: false });
+    for (const row of recipients.rows) {
+      const recipientId = String(row.user_id);
+      realtimeHub.sendToUser(recipientId, { type: 'CHAT_MESSAGE', ...dto, isMine: false });
+      if (!realtimeHub.isUserConnected(recipientId)) {
+        void sendPushToUser(
+          recipientId,
+          { title: user.rows[0].full_name || 'Nouveau message MBoté', body: dto.text || (dto.mediaUrl ? 'Vous avez reçu un média.' : 'Nouveau message') },
+          { type: 'message', chatId: String(chatId), senderId: String(req.user.userId), messageId: String(dto.id) },
+        );
+      }
+    }
     return success(res, dto, 201);
   };
   app.post('/v1/messages/send', auth, route(sendMessage));
@@ -1515,7 +1621,16 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     if(invitees.length) await db.query('INSERT INTO group_call_participants(session_id,user_id,video_enabled) SELECT $1,unnest($2::uuid[]),$3 ON CONFLICT DO NOTHING',[created.rows[0].id,invitees,isVideo]);
     const host=await db.query("SELECT full_name,COALESCE(avatar_url,'') AS avatar FROM users WHERE id=$1",[req.user.userId]);
     const invite={type:'CALL_INVITE',roomCode:code,callerUserId:String(req.user.userId),callerName:host.rows[0]?.full_name||'Utilisateur MBoté',callerAvatar:host.rows[0]?.avatar||'',isVideo,title,timestamp:Date.now()};
-    for(const userId of invitees) realtimeHub.sendToUser(userId,invite);
+    for(const userId of invitees) {
+      realtimeHub.sendToUser(userId,invite);
+      if (!realtimeHub.isUserConnected(userId)) {
+        void sendPushToUser(
+          userId,
+          { title: isVideo ? 'Appel vidéo MBoté' : 'Appel audio MBoté', body: `${invite.callerName} vous appelle.` },
+          { type:'incoming_call',roomCode:code,callerUserId:String(req.user.userId),callerName:invite.callerName,isVideo:String(isVideo),title },
+        );
+      }
+    }
     success(res,await groupCallDto(code,req.user.userId),201);
   }));
   app.post('/v1/calls/group/join/:roomCode',auth,route(async(req,res)=>{
