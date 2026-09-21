@@ -24,7 +24,6 @@ protected=(
   /v1/live
   /v1/jobs
   /v1/channels
-  /v1/rtc/ice-servers
 )
 for path in "${protected[@]}"; do
   code="$(curl -sS -o "$tmp" -w '%{http_code}' --connect-timeout 15 --max-time 45 "$API_ORIGIN$path")"
