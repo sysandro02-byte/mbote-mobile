@@ -10,6 +10,10 @@ const { WebSocketServer } = require('ws');
 
 const PORT = Number(process.env.PORT || 8080);
 const API_VERSION = '1.6.0';
+const realtimeHub = {
+  sendToUser: () => false,
+  isUserConnected: () => false,
+};
 
 function createPool() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL est requis.');
@@ -26,7 +30,6 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   if (!jwtSecret || jwtSecret.length < 32) throw new Error('JWT_SECRET doit contenir au moins 32 caractères.');
 
   const app = express();
-  let sendRealtimeToUser = () => {};
   const rateBuckets = new Map();
   const rateLimit = ({ windowMs, max, keyPrefix }) => (req, res, next) => {
     const now = Date.now();
@@ -413,7 +416,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     const user = await db.query('SELECT full_name, avatar_url FROM users WHERE id = $1', [req.user.userId]);
     const dto = messageDto({ ...inserted.rows[0], sender_name: user.rows[0].full_name, sender_avatar: user.rows[0].avatar_url }, req.user.userId);
     const recipients = await db.query('SELECT user_id FROM chat_participants WHERE chat_id=$1 AND user_id<>$2', [chatId, req.user.userId]);
-    for (const row of recipients.rows) sendRealtimeToUser(String(row.user_id), { type: 'CHAT_MESSAGE', ...dto, isMine: false });
+    for (const row of recipients.rows) realtimeHub.sendToUser(String(row.user_id), { type: 'CHAT_MESSAGE', ...dto, isMine: false });
     return success(res, dto, 201);
   };
   app.post('/v1/messages/send', auth, route(sendMessage));
@@ -1443,12 +1446,19 @@ if (require.main === module) {
   }, 30_000);
   const liveSockets = new Map();
   const userSockets = new Map();
-  sendRealtimeToUser = (userId, event) => {
+  realtimeHub.sendToUser = (userId, event) => {
     const encoded = JSON.stringify(event);
+    let delivered = false;
     for (const client of (userSockets.get(String(userId)) || new Set())) {
-      if (client.readyState === 1) client.send(encoded);
+      if (client.readyState === 1) {
+        client.send(encoded);
+        delivered = true;
+      }
     }
+    return delivered;
   };
+  realtimeHub.isUserConnected = (userId) =>
+    [...(userSockets.get(String(userId)) || new Set())].some((client) => client.readyState === 1);
   const broadcastLive = (streamId,event,except=null) => {
     const message=JSON.stringify(event);
     for(const client of (liveSockets.get(streamId)||new Set())) {
@@ -1487,7 +1497,7 @@ if (require.main === module) {
         if(!chatId || !(await member(chatId,identity.userId))) return;
         const recipients=await db.query('SELECT user_id FROM chat_participants WHERE chat_id=$1 AND user_id<>$2',[chatId,identity.userId]);
         const packet={type:'CHAT_TYPING',chatId,userName:socket.mboteUserName||'Utilisateur MBoté',isTyping:Boolean(message.isTyping),timestamp:Date.now()};
-        for(const row of recipients.rows) sendRealtimeToUser(String(row.user_id),packet);
+        for(const row of recipients.rows) realtimeHub.sendToUser(String(row.user_id),packet);
         return;
       }
       const streamId=String(message.streamId||'');
