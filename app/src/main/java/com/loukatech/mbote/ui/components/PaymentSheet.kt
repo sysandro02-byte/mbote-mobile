@@ -42,8 +42,7 @@ fun PaymentSheet(
     val providers = listOf(
         "MTN MoMo" to Color(0xFFFFCC00),
         "Airtel Money" to Color(0xFFE60000),
-        "Orange Money" to Color(0xFFFF7900),
-        "M-Pesa" to Color(0xFF00AA4F)
+        "GIMACPAY" to Color(0xFF0057B8)
     )
 
     ModalBottomSheet(
