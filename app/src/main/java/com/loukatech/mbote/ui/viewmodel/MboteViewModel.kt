@@ -278,6 +278,7 @@ class MboteViewModel(
     val blockedContactIds: StateFlow<Set<String>> = repository.blockedContactIds
 
     val mastaUsers: StateFlow<List<MastaUser>> = repository.mastaUsers
+    val friendRequests: StateFlow<List<FriendRequestDto>> = repository.friendRequests
 
     fun updateMastaUsers(users: List<MastaUser>) {
         repository.updateMastaUsers(users)
@@ -542,6 +543,27 @@ class MboteViewModel(
     fun refreshMasta() {
         viewModelScope.launch {
             repository.refreshMastaFromBackend()
+        }
+    }
+
+    fun sendFriendRequest(targetUserId: String) {
+        viewModelScope.launch {
+            repository.sendFriendRequest(targetUserId)
+                .onFailure { _messagingError.value = it.message ?: "La demande Masta n’a pas pu être envoyée." }
+        }
+    }
+
+    fun acceptFriendRequest(requestId: String) {
+        viewModelScope.launch {
+            repository.acceptFriendRequest(requestId)
+                .onFailure { _messagingError.value = it.message ?: "La demande Masta n’a pas pu être acceptée." }
+        }
+    }
+
+    fun declineOrCancelFriendRequest(requestId: String) {
+        viewModelScope.launch {
+            repository.declineOrCancelFriendRequest(requestId)
+                .onFailure { _messagingError.value = it.message ?: "La demande Masta n’a pas pu être mise à jour." }
         }
     }
 
