@@ -1229,13 +1229,12 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       "INSERT INTO live_streams(host_id,title,status,started_at) VALUES($1,$2,'LIVE',NOW()) RETURNING id,title,status,started_at",
       [req.user.userId,title],
     );
-    await db.query('INSERT INTO live_stream_viewers(stream_id,user_id) VALUES($1,$2) ON CONFLICT(stream_id,user_id) DO UPDATE SET left_at=NULL,joined_at=NOW()',[created.rows[0].id,req.user.userId]);
     success(res,created.rows[0],201);
   }));
   app.post('/v1/live/:streamId/join',auth,route(async(req,res)=>{
     const live=await db.query("SELECT id,host_id,title,status FROM live_streams WHERE id=$1 AND status='LIVE'",[req.params.streamId]);
     if(!live.rowCount)return failure(res,404,'Live introuvable ou terminé');
-    await db.query('INSERT INTO live_stream_viewers(stream_id,user_id) VALUES($1,$2) ON CONFLICT(stream_id,user_id) DO UPDATE SET left_at=NULL,joined_at=NOW()',[req.params.streamId,req.user.userId]);
+    if(String(live.rows[0].host_id)!==String(req.user.userId)) await db.query('INSERT INTO live_stream_viewers(stream_id,user_id) VALUES($1,$2) ON CONFLICT(stream_id,user_id) DO UPDATE SET left_at=NULL,joined_at=NOW()',[req.params.streamId,req.user.userId]);
     success(res,live.rows[0]);
   }));
   app.post('/v1/live/:streamId/leave',auth,route(async(req,res)=>{
@@ -1446,7 +1445,7 @@ if (require.main === module) {
     }
   };
   const viewerCount=async(streamId)=>{
-    const count=await db.query('SELECT COUNT(*)::int AS count FROM live_stream_viewers WHERE stream_id=$1 AND left_at IS NULL',[streamId]);
+    const count=await db.query(`SELECT COUNT(*)::int AS count FROM live_stream_viewers v JOIN live_streams l ON l.id=v.stream_id WHERE v.stream_id=$1 AND v.left_at IS NULL AND v.user_id<>l.host_id`,[streamId]);
     return count.rows[0]?.count||0;
   };
   wss.on('connection',(socket,request)=>{
@@ -1471,12 +1470,14 @@ if (require.main === module) {
       }
       const streamId=String(message.streamId||'');
       if(message.type==='LIVE_JOIN' && streamId) {
-        const live=await db.query("SELECT 1 FROM live_streams WHERE id=$1 AND status='LIVE'",[streamId]);
+        const live=await db.query("SELECT host_id FROM live_streams WHERE id=$1 AND status='LIVE'",[streamId]);
         if(!live.rowCount)return;
         joinedStream=streamId;
         if(!liveSockets.has(streamId))liveSockets.set(streamId,new Set());
         liveSockets.get(streamId).add(socket);
-        await db.query('INSERT INTO live_stream_viewers(stream_id,user_id) VALUES($1,$2) ON CONFLICT(stream_id,user_id) DO UPDATE SET left_at=NULL,joined_at=NOW()',[streamId,identity.userId]);
+        if(String(live.rows[0].host_id)!==String(identity.userId)) {
+          await db.query('INSERT INTO live_stream_viewers(stream_id,user_id) VALUES($1,$2) ON CONFLICT(stream_id,user_id) DO UPDATE SET left_at=NULL,joined_at=NOW()',[streamId,identity.userId]);
+        }
         broadcastLive(streamId,{type:'LIVE_VIEWER_COUNT',streamId,viewerCount:await viewerCount(streamId),timestamp:Date.now()});
         return;
       }
