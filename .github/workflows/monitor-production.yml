@@ -23,6 +23,23 @@ jobs:
           test "$code" = "200"
           grep -q '"status":"online"' "$body"
 
+      - name: Check production readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' --connect-timeout 10 --max-time 30 https://mbote-backend.onrender.com/v1/readiness)"
+          cat "$body"
+          test "$code" = "200"
+          grep -q '"database":true' "$body"
+          grep -q '"emailOtp":true' "$body"
+          grep -q '"liveTurn":true' "$body"
+          if grep -q '"status":"degraded"' "$body"; then
+            echo "Production readiness is degraded" >&2
+            exit 1
+          fi
+
+
       - name: Check authenticated WebSocket gateway
         shell: bash
         run: |
