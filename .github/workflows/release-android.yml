@@ -31,9 +31,6 @@ jobs:
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-      MBOTE_TURN_URL: ${{ secrets.MBOTE_TURN_URL }}
-      MBOTE_TURN_USERNAME: ${{ secrets.MBOTE_TURN_USERNAME }}
-      MBOTE_TURN_CREDENTIAL: ${{ secrets.MBOTE_TURN_CREDENTIAL }}
       MBOTE_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.MBOTE_RELEASE_KEYSTORE_PASSWORD }}
       MBOTE_RELEASE_KEY_ALIAS: ${{ secrets.MBOTE_RELEASE_KEY_ALIAS }}
       MBOTE_RELEASE_KEY_PASSWORD: ${{ secrets.MBOTE_RELEASE_KEY_PASSWORD }}
@@ -53,15 +50,11 @@ jobs:
           RELEASE_KEYSTORE_B64: ${{ secrets.MBOTE_RELEASE_KEYSTORE_B64 }}
         run: |
           set -euo pipefail
-          test -n "$MBOTE_TURN_URL"
-          test -n "$MBOTE_TURN_USERNAME"
-          test -n "$MBOTE_TURN_CREDENTIAL"
           test -n "$RELEASE_KEYSTORE_B64"
           test -n "$MBOTE_RELEASE_KEYSTORE_PASSWORD"
           test -n "$MBOTE_RELEASE_KEY_ALIAS"
           test -n "$MBOTE_RELEASE_KEY_PASSWORD"
           [[ "$MBOTE_VERSION_CODE" =~ ^[0-9]+$ ]]
-          case "$MBOTE_TURN_URL" in turn:*|turns:*) ;; *) exit 1 ;; esac
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -93,6 +86,19 @@ jobs:
 
       - name: Production API smoke
         run: bash ci/smoke-production.sh
+
+      - name: Verify server-side integration readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(mktemp)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' --connect-timeout 15 --max-time 45 https://mbote-backend.onrender.com/v1/readiness)"
+          cat "$body"
+          test "$code" = "200"
+          grep -q '"database":true' "$body"
+          grep -q '"emailOtp":true' "$body"
+          grep -q '"liveTurn":true' "$body"
+
 
       - name: Build signed release APK and AAB
         run: gradle --no-daemon --max-workers=2 clean assembleRelease bundleRelease
