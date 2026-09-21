@@ -19,6 +19,7 @@ object MboteNotificationManager {
     const val CHANNEL_LIKES = "mbote_channel_likes"
     const val CHANNEL_LIVE_GIFTS = "mbote_channel_live_gifts"
     const val CHANNEL_LIVE_MESSAGES = "mbote_channel_live_messages"
+    const val CHANNEL_PUSH = "mbote_push_notifications_channel"
 
     private var fcmToken: String? = null
 
@@ -70,6 +71,16 @@ object MboteNotificationManager {
                 setShowBadge(true)
             }
 
+            val pushChannel = NotificationChannel(
+                CHANNEL_PUSH,
+                "Notifications MBoté",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Messages, appels et mises à jour importantes MBoté"
+                enableVibration(true)
+                setShowBadge(true)
+            }
+
             // 5. Channel for Live Messages & Broadcasts
             val liveMessagesChannel = NotificationChannel(
                 CHANNEL_LIVE_MESSAGES,
@@ -82,7 +93,7 @@ object MboteNotificationManager {
             }
 
             notificationManager.createNotificationChannels(
-                listOf(messagesChannel, jobsChannel, likesChannel, giftsChannel, liveMessagesChannel)
+                listOf(messagesChannel, jobsChannel, likesChannel, giftsChannel, liveMessagesChannel, pushChannel)
             )
         }
     }
