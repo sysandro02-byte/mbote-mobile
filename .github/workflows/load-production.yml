@@ -1,0 +1,41 @@
+name: MBote production load smoke
+
+on:
+  schedule:
+    - cron: "15 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mbote-production-load-smoke
+  cancel-in-progress: true
+
+jobs:
+  load-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      API_ORIGIN: https://mbote-backend.onrender.com
+      MBOTE_LOAD_TEST_TOKEN_A: ${{ secrets.MBOTE_LOAD_TEST_TOKEN_A }}
+      MBOTE_LOAD_TEST_TOKEN_B: ${{ secrets.MBOTE_LOAD_TEST_TOKEN_B }}
+      MBOTE_LOAD_TEST_CHAT_ID: ${{ secrets.MBOTE_LOAD_TEST_CHAT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run production load smoke
+        working-directory: backend
+        run: node scripts/load-smoke.js
