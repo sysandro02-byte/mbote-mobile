@@ -1885,19 +1885,32 @@ class MboteRepository(
         }
 
         try {
-            val sessionFile = File(dir, "mbote_cached_session.json")
-            if (sessionFile.exists()) {
-                val sessionText = sessionFile.readText()
+            val encryptedSessionFile = File(dir, "mbote_cached_session.enc")
+            val legacySessionFile = File(dir, "mbote_cached_session.json")
+            val sessionText = when {
+                encryptedSessionFile.exists() -> SecureSessionCrypto.decrypt(encryptedSessionFile.readText())
+                legacySessionFile.exists() -> legacySessionFile.readText()
+                else -> null
+            }
+            if (!sessionText.isNullOrBlank()) {
                 val cachedSession = json.decodeFromString(CachedAuthSession.serializer(), sessionText)
                 if (cachedSession.authToken.isNotBlank()) {
                     MboteBackendConfig.authToken = cachedSession.authToken
                     MboteBackendConfig.refreshToken = cachedSession.refreshToken
                     _userProfile.value = cachedSession.userProfile
                     _isAuthenticated.value = true
+                    if (legacySessionFile.exists()) {
+                        encryptedSessionFile.writeText(SecureSessionCrypto.encrypt(sessionText))
+                        legacySessionFile.delete()
+                    }
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            File(dir, "mbote_cached_session.enc").delete()
+            File(dir, "mbote_cached_session.json").delete()
+            MboteBackendConfig.authToken = null
+            MboteBackendConfig.refreshToken = null
+            _isAuthenticated.value = false
         }
 
         try {
@@ -1956,7 +1969,7 @@ class MboteRepository(
         val dir = cacheDir ?: return
         val token = MboteBackendConfig.authToken?.takeIf { it.isNotBlank() } ?: return
         try {
-            val sessionFile = File(dir, "mbote_cached_session.json")
+            val sessionFile = File(dir, "mbote_cached_session.enc")
             val text = json.encodeToString(
                 CachedAuthSession.serializer(),
                 CachedAuthSession(
@@ -1965,7 +1978,8 @@ class MboteRepository(
                     userProfile = _userProfile.value
                 )
             )
-            sessionFile.writeText(text)
+            sessionFile.writeText(SecureSessionCrypto.encrypt(text))
+            File(dir, "mbote_cached_session.json").delete()
             saveCachedUserProfile()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -1975,6 +1989,7 @@ class MboteRepository(
     private fun clearCachedSession() {
         val dir = cacheDir ?: return
         try {
+            File(dir, "mbote_cached_session.enc").delete()
             File(dir, "mbote_cached_session.json").delete()
         } catch (e: Exception) {
             e.printStackTrace()
