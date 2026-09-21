@@ -14,7 +14,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.loukatech.mbote.service.api.MboteApiService
 import com.loukatech.mbote.service.LiveWebRtcManager
-import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoTrack
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -330,14 +329,10 @@ fun LiveBroadcastDialog(
                 .background(Color.Black)
         ) {
             if (cameraAllowed && localRtcTrack != null && liveRtc != null) {
-                AndroidView(
-                    factory = { ctx ->
-                        SurfaceViewRenderer(ctx).also { renderer ->
-                            renderer.init(liveRtc!!.eglContext(), null)
-                            renderer.setMirror(true)
-                            localRtcTrack?.addSink(renderer)
-                        }
-                    },
+                RtcVideoSurface(
+                    track = localRtcTrack!!,
+                    eglContext = liveRtc!!.eglContext(),
+                    mirror = true,
                     modifier = Modifier.fillMaxSize()
                 )
             } else if (cameraAllowed) {
@@ -605,7 +600,7 @@ fun LiveBroadcastDialog(
                                         streamId = live.id,
                                         broadcaster = true,
                                         iceServerConfig = iceServers,
-                                        onLocalVideoTrack = { track -> localRtcTrack = track }
+                                        onLocalVideoTrack = { track -> coroutineScope.launch { localRtcTrack = track } }
                                     )
                                     com.loukatech.mbote.service.MboteSocketManager.sendLiveBroadcastStatus(live.id, "LIVE")
                                     isLiveStarted = true
