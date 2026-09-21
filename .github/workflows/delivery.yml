@@ -110,6 +110,9 @@ jobs:
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+      MBOTE_TURN_URL: ${{ secrets.MBOTE_TURN_URL }}
+      MBOTE_TURN_USERNAME: ${{ secrets.MBOTE_TURN_USERNAME }}
+      MBOTE_TURN_CREDENTIAL: ${{ secrets.MBOTE_TURN_CREDENTIAL }}
       MBOTE_QA_KEYSTORE_PASSWORD: mbote-qa-test-only
       MBOTE_QA_KEY_ALIAS: mboteqa
       MBOTE_QA_KEY_PASSWORD: mbote-qa-test-only
