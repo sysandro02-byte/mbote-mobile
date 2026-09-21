@@ -18,6 +18,9 @@ function createPool() {
     ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false },
     max: Number(process.env.DATABASE_POOL_MAX || 10),
     connectionTimeoutMillis: Number(process.env.DATABASE_CONNECT_TIMEOUT_MS || 5000),
+    idleTimeoutMillis: Number(process.env.DATABASE_IDLE_TIMEOUT_MS || 30000),
+    query_timeout: Number(process.env.DATABASE_QUERY_TIMEOUT_MS || 30000),
+    statement_timeout: Number(process.env.DATABASE_STATEMENT_TIMEOUT_MS || 30000),
   });
 }
 
@@ -133,9 +136,13 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
 
   app.disable('x-powered-by');
   app.use(cors({ origin(origin, callback) { return !origin || origins.includes(origin) ? callback(null, true) : callback(new Error('Origine CORS non autorisée')); } }));
+  const maxVideoUploadBytes = Math.max(
+    1_048_576,
+    Math.min(Number(process.env.VIDEO_UPLOAD_MAX_BYTES || 50 * 1024 * 1024), 100 * 1024 * 1024),
+  );
   // Publication videos are streamed directly to PostgreSQL-backed storage metadata.
   // Keep this raw-body middleware before express.json so Android can upload real video bytes.
-  app.use('/v1/uploads/:surface', express.raw({ type: ['video/*', 'application/octet-stream'], limit: '50mb' }));
+  app.use('/v1/uploads/:surface', express.raw({ type: ['video/*', 'application/octet-stream'], limit: maxVideoUploadBytes }));
   app.use(express.json({ limit: '5mb' }));
   app.use('/v1', rateLimit({ windowMs: 60_000, max: 600, keyPrefix: 'api' }));
   app.use('/v1/auth', rateLimit({ windowMs: 15 * 60_000, max: 60, keyPrefix: 'auth' }));
@@ -144,7 +151,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     const surface = req.params.surface;
     if (!['short-videos', 'actus-videos'].includes(surface)) return failure(res, 404, 'Surface de publication inconnue');
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) return failure(res, 400, 'Vidéo vide ou invalide');
-    if (req.body.length > 50 * 1024 * 1024) return failure(res, 413, 'Vidéo trop volumineuse');
+    if (req.body.length > maxVideoUploadBytes) return failure(res, 413, 'Vidéo trop volumineuse');
     const contentType = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
     if (!contentType.startsWith('video/')) return failure(res, 415, 'Le fichier sélectionné n’est pas une vidéo');
     const created = await db.query(
@@ -166,12 +173,38 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
   app.get(['/health', '/v1/health'], route(async (_req, res) => {
     const started = Date.now();
     await db.query('SELECT 1');
+    res.set('Cache-Control', 'no-store');
     success(res, {
       status: 'online',
       version: API_VERSION,
       databaseLatencyMs: Date.now() - started,
+      memoryRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
       uptimeSec: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
+    });
+  }));
+
+  // TURN credentials are delivered at runtime to authenticated clients instead of
+  // being embedded in the APK. This allows server-side rotation without rebuilding.
+  app.get('/v1/rtc/ice-servers', auth, rateLimit({ windowMs: 60_000, max: 120, keyPrefix: 'rtc' }), route(async (_req, res) => {
+    const rawUrls = String(process.env.MBOTE_TURN_URLS || process.env.MBOTE_TURN_URL || '');
+    const turnUrls = rawUrls
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => /^turns?:/i.test(item));
+    const username = String(process.env.MBOTE_TURN_USERNAME || '').trim();
+    const credential = String(process.env.MBOTE_TURN_CREDENTIAL || '');
+
+    if (!turnUrls.length || !username || !credential) {
+      return failure(res, 503, 'Le relais WebRTC TURN n’est pas configuré côté serveur');
+    }
+
+    res.set('Cache-Control', 'no-store, private');
+    success(res, {
+      iceServers: [
+        { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+        { urls: turnUrls, username, credential },
+      ],
     });
   }));
 
@@ -1430,6 +1463,10 @@ if (require.main === module) {
   const db = createPool();
   const app = createApp({ db });
   const server = app.listen(PORT, () => console.log(`MBoté API v${API_VERSION} écoute sur ${PORT}`));
+  server.requestTimeout = Number(process.env.HTTP_REQUEST_TIMEOUT_MS || 65_000);
+  server.headersTimeout = Number(process.env.HTTP_HEADERS_TIMEOUT_MS || 70_000);
+  server.keepAliveTimeout = Number(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 5_000);
+  server.maxRequestsPerSocket = Number(process.env.HTTP_MAX_REQUESTS_PER_SOCKET || 1_000);
   const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
   const heartbeat = setInterval(() => {
     for (const socket of wss.clients) {
