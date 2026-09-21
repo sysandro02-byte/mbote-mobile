@@ -670,11 +670,31 @@ class MboteViewModel(
     }
 
     fun toggleMeetingMute() {
-        _isMutedInMeeting.update { !it }
+        val nextMuted = !_isMutedInMeeting.value
+        _isMutedInMeeting.value = nextMuted
+        val meeting = _activeMeetingRoom.value ?: return
+        if (meeting.code.isBlank()) return
+        viewModelScope.launch {
+            repository.updateRtcParticipantState(
+                roomCode = meeting.code,
+                isMuted = nextMuted,
+                isVideoOff = _isVideoOffInMeeting.value
+            ).onFailure { _publicationError.value = it.message ?: "État du micro non synchronisé." }
+        }
     }
 
     fun toggleMeetingVideo() {
-        _isVideoOffInMeeting.update { !it }
+        val nextVideoOff = !_isVideoOffInMeeting.value
+        _isVideoOffInMeeting.value = nextVideoOff
+        val meeting = _activeMeetingRoom.value ?: return
+        if (meeting.code.isBlank()) return
+        viewModelScope.launch {
+            repository.updateRtcParticipantState(
+                roomCode = meeting.code,
+                isMuted = _isMutedInMeeting.value,
+                isVideoOff = nextVideoOff
+            ).onFailure { _publicationError.value = it.message ?: "État de la caméra non synchronisé." }
+        }
     }
 
     fun sendMessage(chatId: String, text: String, replyTo: Message? = null) {
