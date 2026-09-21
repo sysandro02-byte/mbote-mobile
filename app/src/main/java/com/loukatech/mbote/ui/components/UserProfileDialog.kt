@@ -153,7 +153,7 @@ fun UserProfileDialog(
                             .size(90.dp)
                     ) {
                         AsyncImage(
-                            model = profile.avatar.ifBlank { "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120" },
+                            model = profile.avatar.ifBlank { "" },
                             contentDescription = profile.name,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
