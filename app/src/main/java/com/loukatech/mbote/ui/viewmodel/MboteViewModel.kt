@@ -1370,7 +1370,7 @@ class MboteViewModel(
             repository.requestGiftPurchase(gift, count, provider)
                 .onSuccess { intent ->
                     _publicationError.value = intent.instructions
-                        ?: "Paiement \${intent.status.lowercase()}. Référence \${intent.id}."
+                        ?: "Paiement ${intent.status.lowercase()}. Référence ${intent.id}."
                     if (!intent.fulfilled && intent.status.equals("PENDING", ignoreCase = true)) {
                         repeat(3) {
                             kotlinx.coroutines.delay(5000)
@@ -1379,7 +1379,7 @@ class MboteViewModel(
                                 _publicationError.value = if (refreshed.fulfilled) {
                                     "Paiement confirmé. Votre achat a été crédité."
                                 } else {
-                                    "Paiement \${refreshed.status.lowercase()}."
+                                    "Paiement ${refreshed.status.lowercase()}."
                                 }
                                 return@launch
                             }
@@ -1403,7 +1403,7 @@ class MboteViewModel(
             repository.requestBadgePurchase(badgeType, provider)
                 .onSuccess { intent ->
                     _publicationError.value = intent.instructions
-                        ?: "Paiement \${intent.status.lowercase()}. Référence \${intent.id}."
+                        ?: "Paiement ${intent.status.lowercase()}. Référence ${intent.id}."
                     if (!intent.fulfilled && intent.status.equals("PENDING", ignoreCase = true)) {
                         repeat(3) {
                             kotlinx.coroutines.delay(5000)
@@ -1412,7 +1412,7 @@ class MboteViewModel(
                                 _publicationError.value = if (refreshed.fulfilled) {
                                     "Paiement confirmé. Votre badge est maintenant actif."
                                 } else {
-                                    "Paiement \${refreshed.status.lowercase()}."
+                                    "Paiement ${refreshed.status.lowercase()}."
                                 }
                                 return@launch
                             }
@@ -1432,7 +1432,7 @@ class MboteViewModel(
             repository.requestWalletTopUp(amountFcfa, provider)
                 .onSuccess { intent ->
                     _publicationError.value = intent.instructions
-                        ?: "Paiement \${intent.status.lowercase()}. Référence \${intent.id}."
+                        ?: "Paiement ${intent.status.lowercase()}. Référence ${intent.id}."
                     if (!intent.fulfilled && intent.status.equals("PENDING", ignoreCase = true)) {
                         repeat(3) {
                             kotlinx.coroutines.delay(5000)
@@ -1441,7 +1441,7 @@ class MboteViewModel(
                                 _publicationError.value = if (refreshed.fulfilled) {
                                     "Recharge confirmée et créditée sur votre portefeuille."
                                 } else {
-                                    "Paiement \${refreshed.status.lowercase()}."
+                                    "Paiement ${refreshed.status.lowercase()}."
                                 }
                                 return@launch
                             }
