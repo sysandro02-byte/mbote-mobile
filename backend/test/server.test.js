@@ -149,9 +149,9 @@ test('LoukaPay badge purchase uses server-priced merchant contract', async () =>
 
   try {
     await withServer(createApp({ db, jwtSecret: secret }), async (baseUrl) => {
-      const response = await previousFetch(\`\${baseUrl}/v1/payments/intents\`, {
+      const response = await previousFetch(\`${baseUrl}/v1/payments/intents\`, {
         method: 'POST',
-        headers: { authorization: \`Bearer \${token}\`, 'content-type': 'application/json' },
+        headers: { authorization: \`Bearer ${token}\`, 'content-type': 'application/json' },
         body: JSON.stringify({ provider: 'mtn', phone: '242060000000', purpose: 'BADGE_PURCHASE', badgeId: 'badge_vip' }),
       });
       assert.equal(response.status, 201);
@@ -161,7 +161,7 @@ test('LoukaPay badge purchase uses server-priced merchant contract', async () =>
       assert.equal(body.data.fulfilled, false);
     });
     assert.equal(upstreamRequest.url, 'https://loukapay.test/v1/payment-intents');
-    assert.equal(upstreamRequest.options.headers['idempotency-key'], \`mbote_\${intentId}\`);
+    assert.equal(upstreamRequest.options.headers['idempotency-key'], \`mbote_${intentId}\`);
     const upstreamBody = JSON.parse(upstreamRequest.options.body);
     assert.equal(upstreamBody.provider, 'mtn');
     assert.equal(upstreamBody.amount, 10000);
@@ -219,16 +219,16 @@ test('confirmed LoukaPay badge payment is fulfilled exactly once by MBote', asyn
 
   try {
     await withServer(createApp({ db, jwtSecret: secret }), async (baseUrl) => {
-      const first = await previousFetch(\`\${baseUrl}/v1/payments/intents/\${intentId}\`, {
-        headers: { authorization: \`Bearer \${token}\` },
+      const first = await previousFetch(\`${baseUrl}/v1/payments/intents/${intentId}\`, {
+        headers: { authorization: \`Bearer ${token}\` },
       });
       assert.equal(first.status, 200);
       const firstBody = await first.json();
       assert.equal(firstBody.data.status, 'COMPLETED');
       assert.equal(firstBody.data.fulfilled, true);
 
-      const second = await previousFetch(\`\${baseUrl}/v1/payments/intents/\${intentId}\`, {
-        headers: { authorization: \`Bearer \${token}\` },
+      const second = await previousFetch(\`${baseUrl}/v1/payments/intents/${intentId}\`, {
+        headers: { authorization: \`Bearer ${token}\` },
       });
       assert.equal(second.status, 200);
     });
