@@ -102,3 +102,140 @@ test('gift state and withdrawals use server-side gift earnings', async () => {
   assert.ok(executed.some((sql) => sql.includes('UPDATE users SET gift_earnings_balance_fcfa=gift_earnings_balance_fcfa-$2')));
   assert.ok(!executed.some((sql) => sql.includes('UPDATE users SET wallet_balance_fcfa=wallet_balance_fcfa-$2')));
 });
+
+
+test('LoukaPay badge purchase uses server-priced merchant contract', async () => {
+  const userId = '22222222-2222-4222-8222-222222222222';
+  const token = jwt.sign({ userId, email: 'pay@example.com', role: 'USER' }, secret, {
+    expiresIn: '30d', issuer: 'mbote-api', audience: 'mbote-mobile',
+  });
+  const intentId = '33333333-3333-4333-8333-333333333333';
+  const previousFetch = global.fetch;
+  const previousUrl = process.env.PAYMENTS_API_URL;
+  const previousKey = process.env.PAYMENTS_API_KEY;
+  let upstreamRequest;
+  process.env.PAYMENTS_API_URL = 'https://loukapay.test/v1/payment-intents';
+  process.env.PAYMENTS_API_KEY = 'lp_sk_test_secret';
+  global.fetch = async (url, options = {}) => {
+    upstreamRequest = { url: String(url), options };
+    return { ok: true, status: 201, json: async () => ({
+      id: '44444444-4444-4444-8444-444444444444',
+      status: 'pending',
+      checkout_url: 'https://checkout.test/x',
+      checkout_required: false,
+    }) };
+  };
+  const db = { query: async (sql) => {
+    if (sql.includes('SELECT id,title,price_fcfa FROM badge_catalog')) {
+      return { rowCount: 1, rows: [{ id: 'badge_vip', title: 'Badge VIP Prestige', price_fcfa: 10000 }] };
+    }
+    if (sql.includes('SELECT 1 FROM user_badges')) return { rowCount: 0, rows: [] };
+    if (sql.includes('INSERT INTO payment_intents')) {
+      return { rowCount: 1, rows: [{
+        id: intentId, user_id: userId, provider: 'mtn', amount_fcfa: 10000,
+        phone: '242060000000', purpose: 'BADGE_PURCHASE',
+        payload: { badgeId: 'badge_vip' }, status: 'PENDING', fulfilled_at: null,
+      }] };
+    }
+    if (sql.includes('UPDATE payment_intents SET provider_reference')) {
+      return { rowCount: 1, rows: [{
+        id: intentId, user_id: userId, provider: 'mtn', provider_reference: '44444444-4444-4444-8444-444444444444',
+        amount_fcfa: 10000, purpose: 'BADGE_PURCHASE', payload: { badgeId: 'badge_vip' },
+        status: 'PENDING', checkout_url: 'https://checkout.test/x', fulfilled_at: null,
+      }] };
+    }
+    return { rowCount: 1, rows: [] };
+  } };
+
+  try {
+    await withServer(createApp({ db, jwtSecret: secret }), async (baseUrl) => {
+      const response = await previousFetch(\`\${baseUrl}/v1/payments/intents\`, {
+        method: 'POST',
+        headers: { authorization: \`Bearer \${token}\`, 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: 'mtn', phone: '242060000000', purpose: 'BADGE_PURCHASE', badgeId: 'badge_vip' }),
+      });
+      assert.equal(response.status, 201);
+      const body = await response.json();
+      assert.equal(body.data.intentId, intentId);
+      assert.equal(body.data.amount, 10000);
+      assert.equal(body.data.fulfilled, false);
+    });
+    assert.equal(upstreamRequest.url, 'https://loukapay.test/v1/payment-intents');
+    assert.equal(upstreamRequest.options.headers['idempotency-key'], \`mbote_\${intentId}\`);
+    const upstreamBody = JSON.parse(upstreamRequest.options.body);
+    assert.equal(upstreamBody.provider, 'mtn');
+    assert.equal(upstreamBody.amount, 10000);
+    assert.equal(upstreamBody.external_reference, intentId);
+    assert.equal(upstreamBody.customer_msisdn, '242060000000');
+    assert.equal(upstreamBody.metadata.mbote_purpose, 'BADGE_PURCHASE');
+  } finally {
+    global.fetch = previousFetch;
+    if (previousUrl === undefined) delete process.env.PAYMENTS_API_URL; else process.env.PAYMENTS_API_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.PAYMENTS_API_KEY; else process.env.PAYMENTS_API_KEY = previousKey;
+  }
+});
+
+test('confirmed LoukaPay badge payment is fulfilled exactly once by MBote', async () => {
+  const userId = '55555555-5555-4555-8555-555555555555';
+  const intentId = '66666666-6666-4666-8666-666666666666';
+  const token = jwt.sign({ userId, email: 'badge@example.com', role: 'USER' }, secret, {
+    expiresIn: '30d', issuer: 'mbote-api', audience: 'mbote-mobile',
+  });
+  const previousFetch = global.fetch;
+  const previousKey = process.env.PAYMENTS_API_KEY;
+  const previousBase = process.env.LOUKAPAY_BASE_URL;
+  process.env.PAYMENTS_API_KEY = 'lp_sk_test_secret';
+  process.env.LOUKAPAY_BASE_URL = 'https://loukapay.test';
+  global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ id: 'lp-1', status: 'succeeded' }) });
+
+  let badgeInsertCount = 0;
+  let fulfilled = false;
+  const pending = {
+    id: intentId, user_id: userId, provider: 'mtn', provider_reference: 'lp-1',
+    amount_fcfa: 10000, status: 'PENDING', purpose: 'BADGE_PURCHASE',
+    payload: { badgeId: 'badge_vip' }, fulfilled_at: null,
+  };
+  const db = { query: async (sql) => {
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rowCount: 0, rows: [] };
+    if (sql.includes('SELECT * FROM payment_intents WHERE id=$1 AND user_id=$2')) {
+      return { rowCount: 1, rows: [pending] };
+    }
+    if (sql.includes('UPDATE payment_intents SET status=$2,checkout_url=')) {
+      return { rowCount: 1, rows: [{ ...pending, status: 'COMPLETED' }] };
+    }
+    if (sql.includes('SELECT * FROM payment_intents WHERE id=$1 FOR UPDATE')) {
+      return { rowCount: 1, rows: [{ ...pending, status: 'COMPLETED', fulfilled_at: fulfilled ? new Date().toISOString() : null }] };
+    }
+    if (sql.includes('INSERT INTO user_badges')) {
+      badgeInsertCount += 1;
+      return { rowCount: 1, rows: [] };
+    }
+    if (sql.includes('UPDATE payment_intents SET fulfilled_at')) {
+      fulfilled = true;
+      return { rowCount: 1, rows: [{ ...pending, status: 'COMPLETED', fulfilled_at: new Date().toISOString() }] };
+    }
+    return { rowCount: 1, rows: [] };
+  } };
+
+  try {
+    await withServer(createApp({ db, jwtSecret: secret }), async (baseUrl) => {
+      const first = await previousFetch(\`\${baseUrl}/v1/payments/intents/\${intentId}\`, {
+        headers: { authorization: \`Bearer \${token}\` },
+      });
+      assert.equal(first.status, 200);
+      const firstBody = await first.json();
+      assert.equal(firstBody.data.status, 'COMPLETED');
+      assert.equal(firstBody.data.fulfilled, true);
+
+      const second = await previousFetch(\`\${baseUrl}/v1/payments/intents/\${intentId}\`, {
+        headers: { authorization: \`Bearer \${token}\` },
+      });
+      assert.equal(second.status, 200);
+    });
+    assert.equal(badgeInsertCount, 1);
+  } finally {
+    global.fetch = previousFetch;
+    if (previousKey === undefined) delete process.env.PAYMENTS_API_KEY; else process.env.PAYMENTS_API_KEY = previousKey;
+    if (previousBase === undefined) delete process.env.LOUKAPAY_BASE_URL; else process.env.LOUKAPAY_BASE_URL = previousBase;
+  }
+});
