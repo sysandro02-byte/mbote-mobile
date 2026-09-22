@@ -608,6 +608,11 @@ class MboteRepository(
             return Result.success(Unit)
         }
 
+        apiService.fetchMyBadges().onSuccess { badgeIds ->
+            val badges = badgeIds.mapNotNull { id -> BadgeType.entries.firstOrNull { it.id == id } }
+            _userProfile.update { it.copy(badges = badges) }
+        }
+
         apiService.fetchGiftCatalog().onSuccess { catalog ->
             _userGiftState.update { current ->
                 current.copy(
@@ -1184,37 +1189,78 @@ class MboteRepository(
         return false
     }
 
-    suspend fun requestGiftPurchase(amountFcfa: Long, providerLabel: String): Result<PaymentIntentResponse> {
-        val provider = when {
-            providerLabel.contains("MTN", ignoreCase = true) -> "mtn_momo"
-            providerLabel.contains("Airtel", ignoreCase = true) -> "airtel_money"
-            else -> "mbote_pay"
-        }
+    private fun paymentProvider(providerLabel: String): Result<String> = when {
+        providerLabel.contains("MTN", ignoreCase = true) -> Result.success("mtn")
+        providerLabel.contains("Airtel", ignoreCase = true) -> Result.success("airtel")
+        else -> Result.failure(IllegalArgumentException("Ce moyen de paiement n’est pas encore pris en charge."))
+    }
+
+    private fun paymentPhone(): Result<String> {
         val phone = _userProfile.value.phone.filter(Char::isDigit)
-        if (phone.length !in 8..15) return Result.failure(IllegalStateException("Ajoutez un numéro Mobile Money valide à votre profil."))
-        return apiService.createPaymentIntent(provider, amountFcfa, phone)
+        return if (phone.length in 8..15) Result.success(phone)
+        else Result.failure(IllegalStateException("Ajoutez un numéro Mobile Money valide à votre profil."))
     }
 
-    fun buySingleGift(gift: GiftItem, count: Int = 1, provider: String = "MBoté Pay / MTN MoMo"): Boolean {
-        return false
+    suspend fun requestGiftPurchase(
+        gift: GiftItem,
+        count: Int,
+        providerLabel: String
+    ): Result<PaymentIntentResponse> {
+        if (count !in 1..100) return Result.failure(IllegalArgumentException("Quantité invalide."))
+        val provider = paymentProvider(providerLabel).getOrElse { return Result.failure(it) }
+        val phone = paymentPhone().getOrElse { return Result.failure(it) }
+        return apiService.createPaymentIntent(
+            provider = provider,
+            amountFcfa = 0L,
+            phone = phone,
+            purpose = "GIFT_PURCHASE",
+            giftId = gift.id,
+            quantity = count
+        )
     }
 
-    fun buyBadge(badgeType: BadgeType, provider: String = "MTN Mobile Money"): Boolean {
-        _userProfile.update { u ->
-            val newBadges = if (u.badges.contains(badgeType)) u.badges else u.badges + badgeType
-            val newWallet = if (provider.contains("MBoté", ignoreCase = true)) {
-                (u.walletBalanceFcfa - badgeType.priceFcfa).coerceAtLeast(0L)
-            } else {
-                u.walletBalanceFcfa
-            }
-            u.copy(badges = newBadges, walletBalanceFcfa = newWallet)
-        }
-        // Admin receives the revenue
-        _userGiftState.update { current ->
-            current.copy(adminPlatformBadgeRevenueFcfa = current.adminPlatformBadgeRevenueFcfa + badgeType.priceFcfa)
-        }
-        return true
+    suspend fun requestBadgePurchase(
+        badgeType: BadgeType,
+        providerLabel: String
+    ): Result<PaymentIntentResponse> {
+        val provider = paymentProvider(providerLabel).getOrElse { return Result.failure(it) }
+        val phone = paymentPhone().getOrElse { return Result.failure(it) }
+        return apiService.createPaymentIntent(
+            provider = provider,
+            amountFcfa = 0L,
+            phone = phone,
+            purpose = "BADGE_PURCHASE",
+            badgeId = badgeType.id
+        )
     }
+
+    suspend fun requestWalletTopUp(
+        amountFcfa: Long,
+        providerLabel: String
+    ): Result<PaymentIntentResponse> {
+        if (amountFcfa <= 0) return Result.failure(IllegalArgumentException("Montant invalide."))
+        val provider = paymentProvider(providerLabel).getOrElse { return Result.failure(it) }
+        val phone = paymentPhone().getOrElse { return Result.failure(it) }
+        return apiService.createPaymentIntent(
+            provider = provider,
+            amountFcfa = amountFcfa,
+            phone = phone,
+            purpose = "WALLET_TOPUP"
+        )
+    }
+
+    suspend fun refreshPaymentAndSync(intentId: String): Result<PaymentIntentResponse> {
+        val result = apiService.fetchPaymentIntent(intentId)
+        val intent = result.getOrNull()
+        if (intent != null && (intent.fulfilled || !intent.status.equals("PENDING", ignoreCase = true))) {
+            syncAllFromBackend()
+        }
+        return result
+    }
+
+    fun buySingleGift(gift: GiftItem, count: Int = 1, provider: String = "MTN Mobile Money"): Boolean = false
+
+    fun buyBadge(badgeType: BadgeType, provider: String = "MTN Mobile Money"): Boolean = false
 
     fun updateGiftPrice(giftId: String, newPriceFcfa: Long) {
         _userGiftState.update { current ->
