@@ -108,7 +108,7 @@ fun UserBadgesRow(
 @Composable
 fun BadgeStoreDialog(
     userProfile: UserProfile,
-    onBuyBadge: (BadgeType, String) -> Unit,
+    onBuyBadge: (BadgeType, String) -> Boolean,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -119,9 +119,7 @@ fun BadgeStoreDialog(
 
     val paymentMethods = listOf(
         "MTN Mobile Money",
-        "Airtel Money",
-        "MBoté Pay (Solde: ${userProfile.walletBalanceFcfa} F)",
-        "Carte Bancaire / Visa"
+        "Airtel Money"
     )
 
     AlertDialog(
@@ -176,14 +174,14 @@ fun BadgeStoreDialog(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Félicitations !",
+                        text = "Paiement initié",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF10B981)
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Votre $successBadgeName est maintenant actif et visible par toute la communauté !",
+                        text = "La demande pour $successBadgeName a été envoyée. Le badge sera activé uniquement après confirmation LoukaPay.",
                         fontSize = 13.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurface
@@ -381,11 +379,12 @@ fun BadgeStoreDialog(
             confirmButton = {
                 Button(
                     onClick = {
-                        onBuyBadge(badge, selectedPaymentMethod)
-                        successBadgeName = badge.title
-                        isSuccess = true
-                        selectedBadgeToBuy = null
-                        Toast.makeText(context, "✅ ${badge.title} activé avec succès !", Toast.LENGTH_SHORT).show()
+                        if (onBuyBadge(badge, selectedPaymentMethod)) {
+                            successBadgeName = badge.title
+                            isSuccess = true
+                            selectedBadgeToBuy = null
+                            Toast.makeText(context, "Paiement initié. Activation après confirmation LoukaPay.", Toast.LENGTH_LONG).show()
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary)
                 ) {

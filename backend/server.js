@@ -1117,6 +1117,14 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     success(res, result.rows);
   }));
 
+  app.get('/v1/badges/me', auth, route(async (req, res) => {
+    const result = await db.query(
+      'SELECT badge_id AS id FROM user_badges WHERE user_id=$1 AND active=TRUE ORDER BY acquired_at',
+      [req.user.userId],
+    );
+    success(res, result.rows.map((row) => row.id));
+  }));
+
   app.get('/v1/gifts/me', auth, route(async (req, res) => {
     const [inventory, transactions, withdrawals, wallet] = await Promise.all([
       db.query('SELECT gift_id AS "giftId",quantity FROM user_gift_inventory WHERE user_id=$1', [req.user.userId]),
@@ -1227,6 +1235,68 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     return a.length === b.length && crypto.timingSafeEqual(a, b);
   };
 
+  const paymentDto = (row, extra = {}) => ({
+    intentId: String(row.id),
+    status: String(row.status || 'PENDING'),
+    amount: Number(row.amount_fcfa || 0),
+    currency: 'XAF',
+    provider: String(row.provider || ''),
+    providerReference: row.provider_reference || null,
+    checkoutUrl: row.checkout_url || extra.checkoutUrl || null,
+    receiptUrl: extra.receiptUrl || null,
+    checkoutRequired: Boolean(extra.checkoutRequired),
+    fulfilled: Boolean(row.fulfilled_at),
+    purpose: row.purpose || 'GENERIC',
+    instructions: extra.instructions || null,
+  });
+
+  const fulfillPaymentIntent = async (intentId) => {
+    await db.query('BEGIN');
+    try {
+      const locked = await db.query('SELECT * FROM payment_intents WHERE id=$1 FOR UPDATE', [intentId]);
+      const intent = locked.rows[0];
+      if (!intent || intent.status !== 'COMPLETED' || intent.fulfilled_at) {
+        await db.query('COMMIT');
+        return intent || null;
+      }
+
+      const payload = intent.payload || {};
+      if (intent.purpose === 'GIFT_PURCHASE') {
+        const giftId = String(payload.giftId || '');
+        const quantity = Number(payload.quantity || 0);
+        if (!giftId || !Number.isInteger(quantity) || quantity <= 0) throw new Error('Payload achat cadeau invalide');
+        await db.query(
+          `INSERT INTO user_gift_inventory(user_id,gift_id,quantity) VALUES($1,$2,$3)
+           ON CONFLICT (user_id,gift_id) DO UPDATE
+           SET quantity=user_gift_inventory.quantity+EXCLUDED.quantity,updated_at=NOW()`,
+          [intent.user_id, giftId, quantity],
+        );
+      } else if (intent.purpose === 'BADGE_PURCHASE') {
+        const badgeId = String(payload.badgeId || '');
+        if (!badgeId) throw new Error('Payload achat badge invalide');
+        await db.query(
+          'INSERT INTO user_badges(user_id,badge_id) VALUES($1,$2) ON CONFLICT (user_id,badge_id) DO UPDATE SET active=TRUE',
+          [intent.user_id, badgeId],
+        );
+      } else if (intent.purpose === 'WALLET_TOPUP') {
+        await db.query(
+          'UPDATE users SET wallet_balance_fcfa=wallet_balance_fcfa+$2,updated_at=NOW() WHERE id=$1',
+          [intent.user_id, intent.amount_fcfa],
+        );
+      }
+
+      const updated = await db.query(
+        'UPDATE payment_intents SET fulfilled_at=NOW(),updated_at=NOW() WHERE id=$1 RETURNING *',
+        [intentId],
+      );
+      await db.query('COMMIT');
+      return updated.rows[0];
+    } catch (error) {
+      await db.query('ROLLBACK');
+      throw error;
+    }
+  };
+
   app.post('/v1/payments/callback', route(async (req, res) => {
     if (!process.env.PAYMENTS_WEBHOOK_SECRET) return failure(res, 503, 'Webhook paiement non configuré');
     const signature = req.get('x-loukapay-signature');
@@ -1243,17 +1313,19 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
               provider_reference=COALESCE($3,provider_reference),
               updated_at=NOW()
         WHERE id=$1
-        RETURNING id,user_id,status,provider_reference`,
+        RETURNING *`,
       [intentId, status, payment.id || null],
     );
     if (!result.rowCount) return failure(res, 404, 'Paiement MBoté introuvable');
-    const row = result.rows[0];
+    let row = result.rows[0];
+    if (status === 'COMPLETED') row = (await fulfillPaymentIntent(intentId)) || row;
     if (row.user_id) {
       realtimeHub.sendToUser(String(row.user_id), {
         type: 'PAYMENT_STATUS',
         intentId: String(row.id),
         status: row.status,
         providerReference: row.provider_reference || '',
+        fulfilled: Boolean(row.fulfilled_at),
         timestamp: Date.now(),
       });
       if (status !== 'PENDING') {
@@ -1263,35 +1335,43 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
         }, { type: 'payment_status', intentId: String(row.id), status }).catch(() => {});
       }
     }
-    success(res, { accepted: true, intentId: row.id, status: row.status });
+    success(res, { accepted: true, intentId: row.id, status: row.status, fulfilled: Boolean(row.fulfilled_at) });
   }));
 
   app.get('/v1/payments/intents/:intentId', auth, route(async (req, res) => {
     let result = await db.query(
-      'SELECT id,provider,provider_reference AS "providerReference",amount_fcfa AS "amountFcfa",status,created_at AS "createdAt",updated_at AS "updatedAt" FROM payment_intents WHERE id=$1 AND user_id=$2',
+      'SELECT * FROM payment_intents WHERE id=$1 AND user_id=$2',
       [req.params.intentId, req.user.userId],
     );
     if (!result.rowCount) return failure(res, 404, 'Paiement introuvable');
-    const current = result.rows[0];
-    if (current.status === 'PENDING' && current.providerReference && process.env.PAYMENTS_API_KEY && loukaPayBaseUrl()) {
+    let current = result.rows[0];
+
+    if (current.status === 'PENDING' && current.provider_reference && process.env.PAYMENTS_API_KEY && loukaPayBaseUrl()) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 10000);
+      const timer = setTimeout(() => controller.abort(), 15000);
       try {
-        const upstream = await fetch(`${loukaPayBaseUrl()}/v1/payment-intents/${encodeURIComponent(current.providerReference)}`, {
+        const upstream = await fetch(`${loukaPayBaseUrl()}/v1/payment-intents/${encodeURIComponent(current.provider_reference)}`, {
           headers: { authorization: `Bearer ${process.env.PAYMENTS_API_KEY}`, accept: 'application/json' },
           signal: controller.signal,
         });
         if (upstream.ok) {
           const payload = await upstream.json();
           const mapped = loukaPayStatus(payload.status);
-          await db.query('UPDATE payment_intents SET status=$2,updated_at=NOW() WHERE id=$1', [current.id, mapped]);
-          result.rows[0].status = mapped;
+          const updated = await db.query(
+            'UPDATE payment_intents SET status=$2,checkout_url=COALESCE($3,checkout_url),updated_at=NOW() WHERE id=$1 RETURNING *',
+            [current.id, mapped, payload.checkout_url || null],
+          );
+          current = updated.rows[0] || current;
         }
       } finally {
         clearTimeout(timer);
       }
     }
-    success(res, result.rows[0]);
+
+    if (current.status === 'COMPLETED' && !current.fulfilled_at) {
+      current = (await fulfillPaymentIntent(current.id)) || current;
+    }
+    success(res, paymentDto(current));
   }));
 
   app.post('/v1/payments/intents', auth, route(async (req, res) => {
@@ -1300,22 +1380,60 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     }
     const provider = normalizeLoukaPayProvider(req.body.provider);
     if (!provider) return failure(res, 400, 'Opérateur non pris en charge par LoukaPay');
-    const amount = Number(req.body.amountFcfa);
     const phone = text(req.body.phone, 'Téléphone', 50);
-    if (!Number.isSafeInteger(amount) || amount <= 0) return failure(res, 400, 'Montant invalide');
+    const purpose = String(req.body.purpose || 'GENERIC').trim().toUpperCase();
+    if (!['GENERIC', 'GIFT_PURCHASE', 'BADGE_PURCHASE', 'WALLET_TOPUP'].includes(purpose)) {
+      return failure(res, 400, 'Type de paiement invalide');
+    }
+
+    let amount = Number(req.body.amountFcfa);
+    let paymentPayload = {};
+    let description = String(req.body.note || 'Paiement MBoté').slice(0, 255);
+
+    if (purpose === 'GIFT_PURCHASE') {
+      const giftId = text(req.body.giftId, 'Cadeau', 80);
+      const quantity = Number(req.body.quantity || 1);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) return failure(res, 400, 'Quantité invalide');
+      const gift = await db.query('SELECT id,name,price_fcfa FROM gift_catalog WHERE id=$1 AND active=TRUE', [giftId]);
+      if (!gift.rowCount) return failure(res, 404, 'Cadeau introuvable');
+      amount = Number(gift.rows[0].price_fcfa) * quantity;
+      paymentPayload = { giftId, quantity };
+      description = `Achat MBoté: ${gift.rows[0].name} x${quantity}`;
+    } else if (purpose === 'BADGE_PURCHASE') {
+      const badgeId = text(req.body.badgeId, 'Badge', 80);
+      const badge = await db.query('SELECT id,title,price_fcfa FROM badge_catalog WHERE id=$1 AND active=TRUE', [badgeId]);
+      if (!badge.rowCount) return failure(res, 404, 'Badge introuvable');
+      const owned = await db.query(
+        'SELECT 1 FROM user_badges WHERE user_id=$1 AND badge_id=$2 AND active=TRUE',
+        [req.user.userId, badgeId],
+      );
+      if (owned.rowCount) return failure(res, 409, 'Badge déjà acquis');
+      amount = Number(badge.rows[0].price_fcfa);
+      paymentPayload = { badgeId };
+      description = `Badge MBoté: ${badge.rows[0].title}`;
+    } else {
+      if (!Number.isSafeInteger(amount) || amount <= 0) return failure(res, 400, 'Montant invalide');
+      if (purpose === 'WALLET_TOPUP') description = 'Recharge portefeuille MBoté';
+    }
 
     const local = await db.query(
-      'INSERT INTO payment_intents(user_id,provider,amount_fcfa,phone) VALUES($1,$2,$3,$4) RETURNING id',
-      [req.user.userId, provider, amount, phone],
+      `INSERT INTO payment_intents(user_id,provider,amount_fcfa,phone,purpose,payload)
+       VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [req.user.userId, provider, amount, phone, purpose, JSON.stringify(paymentPayload)],
     );
     const localIntentId = String(local.rows[0].id);
     const common = {
       amount,
       currency: 'XAF',
       external_reference: localIntentId,
-      description: String(req.body.note || 'Paiement MBoté').slice(0, 255),
+      description,
       customer_reference: String(req.user.userId),
-      metadata: { source: 'mbote', mbote_user_id: String(req.user.userId), requested_provider: provider },
+      metadata: {
+        source: 'mbote',
+        mbote_user_id: String(req.user.userId),
+        mbote_purpose: purpose,
+        requested_provider: provider,
+      },
     };
     const requestLoukaPay = async (body, idempotencySuffix = '') => {
       const controller = new AbortController();
@@ -1353,22 +1471,19 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
         throw Object.assign(new Error(detail), { status: upstream.status >= 400 && upstream.status < 500 ? 409 : 502 });
       }
       const status = loukaPayStatus(payload.status);
-      await db.query(
-        'UPDATE payment_intents SET provider_reference=$2,status=$3,updated_at=NOW() WHERE id=$1',
-        [localIntentId, payload.id || null, status],
+      const updated = await db.query(
+        'UPDATE payment_intents SET provider_reference=$2,status=$3,checkout_url=$4,updated_at=NOW() WHERE id=$1 RETURNING *',
+        [localIntentId, payload.id || null, status, payload.checkout_url || null],
       );
-      success(res, {
-        intentId: localIntentId,
-        status,
-        amount,
-        currency: 'XAF',
-        provider,
-        providerReference: payload.id || null,
-        checkoutUrl: payload.checkout_url || null,
+      let finalIntent = updated.rows[0] || local.rows[0];
+      if (status === 'COMPLETED') finalIntent = (await fulfillPaymentIntent(localIntentId)) || finalIntent;
+      success(res, paymentDto(finalIntent, {
         receiptUrl: payload.receipt_url || null,
         checkoutRequired: Boolean(payload.checkout_required),
-        instructions: payload.checkout_required ? 'Finalisez le paiement dans LoukaPay.' : 'Confirmez la demande Mobile Money sur votre téléphone.',
-      }, 201);
+        instructions: payload.checkout_required
+          ? 'Finalisez le paiement dans LoukaPay.'
+          : 'Confirmez la demande Mobile Money sur votre téléphone.',
+      }), 201);
     } catch (error) {
       if (error?.name === 'AbortError') {
         await db.query("UPDATE payment_intents SET status='FAILED',updated_at=NOW() WHERE id=$1", [localIntentId]);

@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           body="$(mktemp)"
-          code="$(curl -sS -o "$body" -w '%{http_code}' --connect-timeout 10 --max-time 30 https://mbote-backend.onrender.com/v1/readiness)"
+          code="$(curl -sS -o "$body" -w '%{http_code}' --connect-timeout 15 --max-time 60 https://mbote-backend.onrender.com/v1/readiness)"
           cat "$body"
           test "$code" = "200"
           grep -q '"releaseReady":true' "$body"

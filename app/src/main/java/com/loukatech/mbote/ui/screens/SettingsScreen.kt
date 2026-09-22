@@ -89,6 +89,8 @@ fun SettingsScreen(
     allMastaUsers: List<com.loukatech.mbote.model.MastaUser> = emptyList(),
     userGiftState: UserGiftState = UserGiftState(),
     onCashout: (amount: Long, provider: String, phone: String) -> Unit = { _, _, _ -> },
+    onTopUpWallet: (amount: Long, provider: String) -> Boolean = { _, _ -> false },
+    onBuyBadge: (BadgeType, String) -> Boolean = { _, _ -> false },
     onBuyBundle: (GiftBundle, String) -> Boolean = { _, _ -> false },
     onBuySingleGift: (GiftItem, Int, String) -> Boolean = { _, _, _ -> false },
     onLanguageChange: (AppLanguage) -> Unit = {},
@@ -158,9 +160,7 @@ fun SettingsScreen(
             userProfile = userProfile,
             userGiftState = userGiftState,
             onCashout = onCashout,
-            onTopUpWallet = { amount, provider ->
-                Toast.makeText(context, "Portefeuille rechargé de $amount FCFA via $provider", Toast.LENGTH_SHORT).show()
-            },
+            onTopUpWallet = onTopUpWallet,
             onOpenBadgeStore = { showBadgeStoreDialog = true },
             onOpenGiftStore = { showGiftStoreDialog = true },
             onDismiss = { showWalletHubDialog = false }
@@ -183,9 +183,7 @@ fun SettingsScreen(
     if (showBadgeStoreDialog) {
         com.loukatech.mbote.ui.components.BadgeStoreDialog(
             userProfile = userProfile,
-            onBuyBadge = { badge, provider ->
-                // buy badge logic
-            },
+            onBuyBadge = onBuyBadge,
             onDismiss = { showBadgeStoreDialog = false }
         )
     }

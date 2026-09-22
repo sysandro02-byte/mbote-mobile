@@ -38,7 +38,7 @@ fun MyWalletHubDialog(
     userProfile: UserProfile,
     userGiftState: UserGiftState,
     onCashout: (amount: Long, provider: String, phone: String) -> Unit,
-    onTopUpWallet: (amount: Long, provider: String) -> Unit,
+    onTopUpWallet: (amount: Long, provider: String) -> Boolean,
     onOpenBadgeStore: () -> Unit = {},
     onOpenGiftStore: () -> Unit = {},
     onDismiss: () -> Unit
@@ -387,7 +387,7 @@ fun MyWalletHubDialog(
 
                     Text("Opérateur de retrait :", fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
-                    listOf("MTN Mobile Money", "Airtel Money", "MBoté Pay (Instantané)").forEach { provider ->
+                    listOf("MTN Mobile Money", "Airtel Money").forEach { provider ->
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -459,7 +459,7 @@ fun MyWalletHubDialog(
 
                     Text("Payer avec :", fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
-                    listOf("MTN Mobile Money", "Airtel Money", "Carte Bancaire Visa").forEach { provider ->
+                    listOf("MTN Mobile Money", "Airtel Money").forEach { provider ->
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -485,9 +485,8 @@ fun MyWalletHubDialog(
                 Button(
                     onClick = {
                         val amount = topUpAmountText.toLongOrNull() ?: 0L
-                        if (amount > 0) {
-                            onTopUpWallet(amount, topUpProvider)
-                            Toast.makeText(context, "✅ Portefeuille rechargé de $amount FCFA via $topUpProvider !", Toast.LENGTH_SHORT).show()
+                        if (amount > 0 && onTopUpWallet(amount, topUpProvider)) {
+                            Toast.makeText(context, "Paiement initié. Le solde sera crédité après confirmation LoukaPay.", Toast.LENGTH_LONG).show()
                             showTopUpModal = false
                         }
                     },

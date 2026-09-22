@@ -777,6 +777,12 @@ class MainActivity : ComponentActivity() {
                                                         onCashout = { amount, provider, phone ->
                                                             viewModel.cashoutVirtualGifts(amount, provider, phone)
                                                         },
+                                                        onTopUpWallet = { amount, provider ->
+                                                            viewModel.topUpWallet(amount, provider)
+                                                        },
+                                                        onBuyBadge = { badge, provider ->
+                                                            viewModel.buyBadge(badge, provider)
+                                                        },
                                                         onBuyBundle = { bundle, provider ->
                                                             viewModel.buyGiftBundle(bundle, provider)
                                                         },
