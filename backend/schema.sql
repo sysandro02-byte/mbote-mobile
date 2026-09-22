@@ -482,6 +482,34 @@ CREATE TABLE IF NOT EXISTS payment_intents (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+ALTER TABLE payment_intents ADD COLUMN IF NOT EXISTS purpose VARCHAR(40) NOT NULL DEFAULT 'GENERIC';
+ALTER TABLE payment_intents ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE payment_intents ADD COLUMN IF NOT EXISTS checkout_url TEXT;
+ALTER TABLE payment_intents ADD COLUMN IF NOT EXISTS fulfilled_at TIMESTAMP WITH TIME ZONE;
+
+CREATE TABLE IF NOT EXISTS badge_catalog (
+    id VARCHAR(80) PRIMARY KEY,
+    title VARCHAR(160) NOT NULL,
+    price_fcfa BIGINT NOT NULL CHECK (price_fcfa > 0),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+INSERT INTO badge_catalog(id,title,price_fcfa,active) VALUES
+('badge_vip','Badge VIP Prestige',10000,TRUE),
+('badge_top_donor','Top Donateur Mécène',15000,TRUE),
+('badge_certified_creator','Créateur Certifié MBoté',20000,TRUE)
+ON CONFLICT (id) DO UPDATE SET
+title=EXCLUDED.title,price_fcfa=EXCLUDED.price_fcfa,active=EXCLUDED.active,updated_at=NOW();
+
+CREATE TABLE IF NOT EXISTS user_badges (
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    badge_id VARCHAR(80) REFERENCES badge_catalog(id),
+    acquired_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    PRIMARY KEY (user_id, badge_id)
+);
+
 ALTER TABLE users ADD COLUMN IF NOT EXISTS gift_earnings_balance_fcfa BIGINT NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS gift_catalog (
@@ -547,6 +575,8 @@ CREATE INDEX IF NOT EXISTS idx_job_applications_user ON job_applications(applica
 CREATE INDEX IF NOT EXISTS idx_group_calls_status ON group_call_sessions(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_gift_transactions_recipient ON gift_transactions(recipient_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_wallet_withdrawals_user ON wallet_withdrawals(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payment_intents_user_status ON payment_intents(user_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_badges_user ON user_badges(user_id, acquired_at DESC);
 
 
 CREATE TABLE IF NOT EXISTS parental_link_tokens (
