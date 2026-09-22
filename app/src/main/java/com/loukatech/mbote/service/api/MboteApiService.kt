@@ -951,7 +951,7 @@ class MboteApiService {
 
     suspend fun fetchMyBadges(): Result<List<String>> =
         executeHttpRequest<Unit, List<String>>(endpoint = "/badges/me") { json ->
-            MboteBackendConfig.jsonParser.decodeFromJsonElement<List<String>>(responseObject(json))
+            MboteBackendConfig.jsonParser.decodeFromJsonElement<List<String>>(responseArray(json))
         }
 
     suspend fun getRegistrationPublicConfig(): Result<RegistrationPublicConfig> =
