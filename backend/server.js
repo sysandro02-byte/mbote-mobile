@@ -297,17 +297,37 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     if (!apiKey || !endpoint) return false;
     const base = String(process.env.LOUKAPAY_BASE_URL || endpoint.replace(/\/v1\/payment-intents\/?$/, '')).replace(/\/$/, '');
     if (!base) return false;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+
+    const probeProviders = async (timeoutMs) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(`${base}/v1/providers`, {
+          headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) return false;
+        const providers = Array.isArray(payload?.providers) ? payload.providers : [];
+        return payload?.mode === 'live'
+          && payload?.live_allowed === true
+          && payload?.ready === true
+          && providers.length > 0;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
     try {
-      const response = await fetch(`${base}/v1/payment-intents?limit=1`, {
-        headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
-        signal: controller.signal,
-      });
-      return response.ok;
-    } finally {
-      clearTimeout(timer);
+      if (await probeProviders(18_000)) return true;
+    } catch (error) {
+      if (error?.name !== 'AbortError') throw error;
     }
+
+    // Render free services can be cold on the first request. Give LoukaPay one
+    // bounded retry rather than marking payments unavailable immediately.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    return probeProviders(18_000);
   }, 120_000);
   const probeFirebaseProvider = () => cachedIntegrationProbe('firebase', async () => {
     if (!firebaseServiceAccount()) return false;
