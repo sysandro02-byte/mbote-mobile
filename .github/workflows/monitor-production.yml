@@ -31,13 +31,14 @@ jobs:
           code="$(curl -sS -o "$body" -w '%{http_code}' --connect-timeout 10 --max-time 30 https://mbote-backend.onrender.com/v1/readiness)"
           cat "$body"
           test "$code" = "200"
+          grep -q '"releaseReady":true' "$body"
           grep -q '"database":true' "$body"
           grep -q '"emailOtp":true' "$body"
           grep -q '"liveTurn":true' "$body"
-          if grep -q '"status":"degraded"' "$body"; then
-            echo "Production readiness is degraded" >&2
-            exit 1
-          fi
+          grep -q '"ai":true' "$body"
+          grep -q '"payments":true' "$body"
+          grep -q '"paymentWebhook":true' "$body"
+          grep -q '"push":true' "$body"
 
 
       - name: Check authenticated WebSocket gateway
