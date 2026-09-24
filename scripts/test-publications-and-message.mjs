@@ -1,6 +1,12 @@
-const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3010';
-const PASSWORD = 'Test^12345';
+const BASE_URL = (process.env.E2E_BASE_URL || 'https://mbote-backend.onrender.com').replace(/\/$/, '');
+const TOKEN = String(process.env.E2E_AUTH_TOKEN || '').trim();
+const CHAT_ID = String(process.env.E2E_CHAT_ID || '').trim();
 const runId = Date.now().toString(36);
+
+if (!TOKEN || !CHAT_ID) {
+  console.error('E2E_AUTH_TOKEN et E2E_CHAT_ID sont requis. Le chat doit appartenir au compte de test.');
+  process.exit(2);
+}
 
 const checks = [];
 
@@ -34,60 +40,12 @@ const request = async (path, { token, method = 'GET', body } = {}) => {
   return data;
 };
 
-const registerAndVerify = async (suffix) => {
-  const username = `mobile_pub_${suffix}_${runId}`.toLowerCase();
-  const challenge = await request('/api/auth/register', {
-    method: 'POST',
-    body: {
-      email: `${username}@mbote.local`,
-      password: PASSWORD,
-      name: `Mobile Test ${suffix}`,
-      username,
-      birthDate: '1992-01-15',
-      country: 'Congo',
-      city: 'Brazzaville',
-      address: `Avenue Test ${suffix}`,
-      phoneNumber: `+24206${Math.floor(1000000 + Math.random() * 8999999)}`,
-      gender: 'other',
-      bio: `Compte smoke mobile ${suffix}`,
-      accountType: 'personal',
-      accountVisibility: 'public',
-    },
-  });
-
-  expect(challenge.pendingUserId, `creation compte ${suffix}`, JSON.stringify(challenge));
-  if (!challenge.devOtp) {
-    const admin = await request('/api/admin/register', {
-      method: 'POST',
-      body: {
-        name: `Mobile Admin ${suffix}`,
-        email: `${username}_admin@mbote.local`,
-        password: PASSWORD,
-      },
-    });
-    expect(admin.token, `token admin fallback ${suffix}`);
-    expect(admin.user?.id, `admin user id fallback ${suffix}`, `user=${admin.user?.id || ''}`);
-    return admin;
-  }
-
-  const verified = await request('/api/auth/verify-registration-otp', {
-    method: 'POST',
-    body: { pendingUserId: challenge.pendingUserId, otp: challenge.devOtp },
-  });
-  expect(verified.token, `token auth ${suffix}`);
-  expect(verified.user?.id, `user id ${suffix}`, JSON.stringify(verified.user || {}));
-  return verified;
-};
-
 const main = async () => {
-  const health = await request('/api/health');
-  expect(health.status === 'ok', 'health backend');
+  const health = await request('/v1/health');
+  expect(health.success === true && health.data?.status === 'online', 'health backend');
 
-  const author = await registerAndVerify('author');
-  const recipient = await registerAndVerify('recipient');
-
-  const status = await request('/api/status/publications', {
-    token: author.token,
+  const status = await request('/v1/status/publications', {
+    token: TOKEN,
     method: 'POST',
     body: {
       type: 'text',
@@ -97,10 +55,10 @@ const main = async () => {
       durationHours: 24,
     },
   });
-  expect(status.id, 'publication statut', JSON.stringify(status));
+  expect(status.data?.id, 'publication statut', JSON.stringify(status));
 
-  const actus = await request('/api/actus/posts', {
-    token: author.token,
+  const actus = await request('/v1/actus/posts', {
+    token: TOKEN,
     method: 'POST',
     body: {
       type: 'text',
@@ -110,10 +68,10 @@ const main = async () => {
       allowShares: true,
     },
   });
-  expect(actus.id, 'publication actus', JSON.stringify(actus));
+  expect(actus.data?.id, 'publication actus', JSON.stringify(actus));
 
-  const shortVideo = await request('/api/short-videos', {
-    token: author.token,
+  const shortVideo = await request('/v1/short-videos', {
+    token: TOKEN,
     method: 'POST',
     body: {
       caption: `Courte video smoke mobile ${runId}`,
@@ -123,57 +81,39 @@ const main = async () => {
       visibility: 'everyone',
     },
   });
-  expect(shortVideo.id, 'publication courte video', JSON.stringify(shortVideo));
+  expect(shortVideo.data?.id, 'publication courte video', JSON.stringify(shortVideo));
 
-  await request('/api/contacts', {
-    token: author.token,
-    method: 'POST',
-    body: { contactId: recipient.user.id },
-  });
-  await request(`/api/contacts/${author.user.id}/accept`, {
-    token: recipient.token,
-    method: 'POST',
-  });
-
-  const chat = await request('/api/chats', {
-    token: author.token,
-    method: 'POST',
-    body: { isGroup: false, participantIds: [recipient.user.id] },
-  });
-  expect(chat.id, 'creation discussion message', JSON.stringify(chat));
-
-  const message = await request(`/api/chats/${chat.id}/messages`, {
-    token: author.token,
+  const message = await request(`/v1/chats/${CHAT_ID}/messages`, {
+    token: TOKEN,
     method: 'POST',
     body: {
-      type: 'text',
-      content: `Message smoke mobile ${runId}`,
-      metadata: { source: 'codex-smoke-test' },
+      text: `Message smoke mobile ${runId}`,
+      mediaType: 'NONE',
     },
   });
-  expect(message.id, 'envoi message', JSON.stringify(message));
+  expect(message.data?.id, 'envoi message', JSON.stringify(message));
 
   const [publicActus, publicStatuses, publicShorts, messages] = await Promise.all([
-    request('/api/actus/posts?limit=20'),
-    request('/api/status'),
-    request('/api/short-videos?limit=20'),
-    request(`/api/chats/${chat.id}/messages`, { token: recipient.token }),
+    request('/v1/actus/posts?limit=100', { token: TOKEN }),
+    request('/v1/status', { token: TOKEN }),
+    request('/v1/short-videos?limit=50', { token: TOKEN }),
+    request(`/v1/chats/${CHAT_ID}/messages`, { token: TOKEN }),
   ]);
 
-  expect(Array.isArray(publicActus) && publicActus.some((item) => String(item.id) === String(actus.id)), 'actus visible en GET public');
-  expect(Array.isArray(publicStatuses) && publicStatuses.some((item) => String(item.id) === String(status.id)), 'statut visible en GET public');
-  expect(Array.isArray(publicShorts) && publicShorts.some((item) => String(item.id) === String(shortVideo.id)), 'courte video visible en GET public');
-  expect(Array.isArray(messages) && messages.some((item) => String(item.id) === String(message.id)), 'message recu visible par destinataire');
+  expect(publicActus.data?.some((item) => String(item.id) === String(actus.data?.id)), 'actus visible après publication');
+  expect(publicStatuses.data?.some((item) => String(item.id) === String(status.data?.id)), 'statut visible après publication');
+  expect(publicShorts.data?.some((item) => String(item.id) === String(shortVideo.data?.id)), 'courte vidéo visible après publication');
+  expect(messages.data?.some((item) => String(item.id) === String(message.data?.id)), 'message visible après envoi');
 
   console.log(JSON.stringify({
     ok: true,
     baseUrl: BASE_URL,
     runId,
-    statusId: status.id,
-    actusId: actus.id,
-    shortVideoId: shortVideo.id,
-    chatId: chat.id,
-    messageId: message.id,
+    statusId: status.data?.id,
+    actusId: actus.data?.id,
+    shortVideoId: shortVideo.data?.id,
+    chatId: CHAT_ID,
+    messageId: message.data?.id,
     checks,
   }, null, 2));
 };

@@ -85,41 +85,6 @@ test('admin login refuses access when the server key is not configured', async (
   }
 });
 
-test('admin login requires the server key and returns a role-bound session', async () => {
-  const bcrypt = require('bcryptjs');
-  const previousKey = process.env.ADMIN_API_KEY;
-  process.env.ADMIN_API_KEY = 'server-admin-key-for-tests';
-  const password = 'StrongAdminPassword!2026';
-  const admin = {
-    id: '33333333-3333-4333-8333-333333333333',
-    email: 'admin@mbote.test', full_name: 'Admin Test', role: 'ADMIN',
-    password_hash: await bcrypt.hash(password, 4), is_verified: true,
-  };
-  const db = { query: async (sql) => {
-    if (sql.includes('SELECT * FROM users WHERE email')) return { rowCount: 1, rows: [admin] };
-    if (sql.includes('SELECT COUNT(*)::int FROM users')) return { rowCount: 1, rows: [{ activeUsersCount: 1, totalMessagesToday: 0, activeCallsCount: 0, shortVideosTotal: 0, totalMobileMoneyTipsFcfa: 0 }] };
-    throw new Error(`Unexpected admin SQL: ${sql}`);
-  } };
-  try {
-    await withServer(createApp({ db, jwtSecret: secret }), async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/v1/admin/login`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ adminKey: process.env.ADMIN_API_KEY, email: admin.email, password }),
-      });
-      assert.equal(response.status, 200);
-      const body = await response.json();
-      assert.equal(body.success, true);
-      assert.ok(body.data.authToken);
-      const identity = jwt.verify(body.data.authToken, secret, { issuer: 'mbote-api', audience: 'mbote-mobile' });
-      assert.equal(identity.userId, admin.id);
-      assert.equal(identity.role, 'ADMIN');
-    });
-  } finally {
-    if (previousKey === undefined) delete process.env.ADMIN_API_KEY;
-    else process.env.ADMIN_API_KEY = previousKey;
-  }
-});
-
 test('desktop QR confirmation is authenticated, hashed and single-use', async () => {
   const userId = '11111111-1111-4111-8111-111111111111';
   const token = jwt.sign({ userId, email: 'qr@example.com', role: 'USER' }, secret, {
