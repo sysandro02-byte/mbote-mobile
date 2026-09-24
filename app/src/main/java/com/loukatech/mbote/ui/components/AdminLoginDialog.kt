@@ -275,7 +275,7 @@ fun AdminLoginDialog(
                     OutlinedTextField(
                         value = password,
                         onValueChange = { password = it; errorMessage = null },
-                        label = { Text("Mot de passe administrateur") },
+                        label = { Text("Mot de passe Maître (Optionnel)") },
                         placeholder = { Text("••••••••") },
                         leadingIcon = {
                             Icon(Icons.Outlined.Lock, contentDescription = null, tint = Color(0xFFA78BFA))
@@ -307,8 +307,8 @@ fun AdminLoginDialog(
 
                     Button(
                         onClick = {
-                            if (adminKey.isBlank() || email.isBlank() || password.isBlank()) {
-                                errorMessage = "Renseignez la clé, l’e-mail et le mot de passe administrateur."
+                            if (adminKey.isBlank()) {
+                                errorMessage = "Veuillez renseigner la clé secrète admin."
                                 return@Button
                             }
                             isLoading = true
@@ -323,7 +323,7 @@ fun AdminLoginDialog(
                                 }
                             }
                         },
-                        enabled = !isLoading && adminKey.isNotBlank() && email.isNotBlank() && password.isNotBlank(),
+                        enabled = !isLoading && adminKey.isNotBlank(),
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color(0xFF7C3AED),

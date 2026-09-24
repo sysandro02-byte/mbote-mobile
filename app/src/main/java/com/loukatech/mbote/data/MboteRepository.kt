@@ -1199,6 +1199,23 @@ class MboteRepository(
         return false
     }
 
+    fun buyBadge(badgeType: BadgeType, provider: String = "MTN Mobile Money"): Boolean {
+        _userProfile.update { u ->
+            val newBadges = if (u.badges.contains(badgeType)) u.badges else u.badges + badgeType
+            val newWallet = if (provider.contains("MBoté", ignoreCase = true)) {
+                (u.walletBalanceFcfa - badgeType.priceFcfa).coerceAtLeast(0L)
+            } else {
+                u.walletBalanceFcfa
+            }
+            u.copy(badges = newBadges, walletBalanceFcfa = newWallet)
+        }
+        // Admin receives the revenue
+        _userGiftState.update { current ->
+            current.copy(adminPlatformBadgeRevenueFcfa = current.adminPlatformBadgeRevenueFcfa + badgeType.priceFcfa)
+        }
+        return true
+    }
+
     fun updateGiftPrice(giftId: String, newPriceFcfa: Long) {
         _userGiftState.update { current ->
             val updatedGifts = current.storeGifts.map { gift ->

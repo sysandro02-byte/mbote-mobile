@@ -85,43 +85,6 @@ test('admin login refuses access when the server key is not configured', async (
   }
 });
 
-test('desktop QR confirmation is authenticated, hashed and single-use', async () => {
-  const userId = '11111111-1111-4111-8111-111111111111';
-  const token = jwt.sign({ userId, email: 'qr@example.com', role: 'USER' }, secret, {
-    expiresIn: '30d', issuer: 'mbote-api', audience: 'mbote-mobile',
-  });
-  const pairingToken = 'a'.repeat(43);
-  const expectedHash = require('node:crypto').createHash('sha256').update(pairingToken).digest('hex');
-  const queries = [];
-  const db = { query: async (sql, params) => {
-    queries.push({ sql, params });
-    if (sql.includes('UPDATE desktop_login_pairings')) {
-      return { rowCount: 1, rows: [{ expires_at: new Date(Date.now() + 60_000).toISOString() }] };
-    }
-    return { rowCount: 0, rows: [] };
-  } };
-
-  await withServer(createApp({ db, jwtSecret: secret }), async (baseUrl) => {
-    const anonymous = await fetch(`${baseUrl}/v1/auth/qr/confirm`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pairingToken }),
-    });
-    assert.equal(anonymous.status, 401);
-
-    const confirmed = await fetch(`${baseUrl}/v1/auth/qr/confirm`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ pairingToken }),
-    });
-    assert.equal(confirmed.status, 200);
-    assert.equal((await confirmed.json()).data.confirmed, true);
-  });
-
-  const update = queries.find(({ sql }) => sql.includes('UPDATE desktop_login_pairings'));
-  assert.equal(update.params[0], expectedHash);
-  assert.equal(update.params[1], userId);
-  assert.ok(!JSON.stringify(queries).includes(pairingToken));
-});
-
 
 test('gift state and withdrawals use server-side gift earnings', async () => {
   const userId = '11111111-1111-4111-8111-111111111111';

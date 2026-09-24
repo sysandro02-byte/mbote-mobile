@@ -260,8 +260,7 @@ data class AdminStatsData(
     val cpuUsagePercent: Float = 0f,
     val ramUsageMb: Int = 0,
     val databaseStatus: String = "Indisponible",
-    val apiVersion: String = "",
-    val authToken: String = ""
+    val apiVersion: String = ""
 )
 
 data class SendMessageDto(
@@ -1056,10 +1055,7 @@ class MboteApiService {
             requestBody = request
         ) { json ->
             val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AdminStatsData>>(json)
-            val data = response.data ?: throw IllegalStateException(response.error ?: response.message ?: "Connexion administrateur refusée")
-            if (data.authToken.isBlank()) throw IllegalStateException("Session administrateur absente")
-            MboteBackendConfig.adminToken = data.authToken
-            data
+            response.data ?: throw IllegalStateException(response.error ?: response.message ?: "Connexion administrateur refusée")
         }
     }
 
@@ -1067,7 +1063,7 @@ class MboteApiService {
      * Fetch Live Admin Statistics
      */
     suspend fun getAdminStats(): Result<AdminStatsData> {
-        return executeHttpRequest<Unit, AdminStatsData>(endpoint = "/admin/stats", token = MboteBackendConfig.adminToken) { json ->
+        return executeHttpRequest<Unit, AdminStatsData>(endpoint = "/admin/stats") { json ->
             MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AdminStatsData>>(json).data
                 ?: throw IllegalStateException("Statistiques administrateur indisponibles")
         }
