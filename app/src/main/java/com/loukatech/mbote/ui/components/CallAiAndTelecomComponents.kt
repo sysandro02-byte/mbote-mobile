@@ -512,47 +512,6 @@ fun AiCallerIdPremiumDialog(
     var searchResult by remember { mutableStateOf<AiCallerIdResult?>(null) }
     var isAutoBackgroundIdEnabled by remember { mutableStateOf(true) }
 
-    val sampleDatabase = remember {
-        listOf(
-            AiCallerIdResult(
-                phoneNumber = "+242 06 123 4567",
-                name = "Afriland First Bank Congo",
-                category = "Banque / Institution Financière",
-                location = "Brazzaville, Congo",
-                carrier = "MTN Congo (GSM)",
-                spamScore = 2,
-                trustBadgeText = "Numéro Certifié Officiel",
-                isVerified = true,
-                totalReports = 1520,
-                aiAnalysisSummary = "L'IA confirme qu'il s'agit du numéro officiel du service client d'Afriland First Bank Congo. Aucun risque de spam détecté."
-            ),
-            AiCallerIdResult(
-                phoneNumber = "+242 05 999 0011",
-                name = "Démarchage Commercial Suspect",
-                category = "Spam / Harcèlement téléphonique",
-                location = "Pointe-Noire, Congo",
-                carrier = "Airtel Congo",
-                spamScore = 88,
-                trustBadgeText = "Spam Suspecté (88% Risque)",
-                isVerified = false,
-                totalReports = 342,
-                aiAnalysisSummary = "Attention : Ce numéro a fait l'objet de 342 signalements récents pour appels d'arnaque de loterie non sollicités."
-            ),
-            AiCallerIdResult(
-                phoneNumber = "+242 06 888 7766",
-                name = "Hôtel Saphir Brazzaville",
-                category = "Hôtellerie & Restauration",
-                location = "Centre-ville, Brazzaville",
-                carrier = "MTN Congo",
-                spamScore = 5,
-                trustBadgeText = "Établissement Vérifié IA",
-                isVerified = true,
-                totalReports = 48,
-                aiAnalysisSummary = "Identification IA : Réception principale de l'Hôtel Saphir Brazzaville."
-            )
-        )
-    }
-
     Dialog(
         onDismissRequest = onDismiss
     ) {
@@ -692,23 +651,9 @@ fun AiCallerIdPremiumDialog(
                     Button(
                         onClick = {
                             if (inputNumber.isNotBlank()) {
-                                isSearching = true
-                                val matched = sampleDatabase.firstOrNull {
-                                    it.phoneNumber.replace(" ", "").contains(inputNumber.trim().replace(" ", ""))
-                                } ?: AiCallerIdResult(
-                                    phoneNumber = inputNumber,
-                                    name = "Numéro Inconnu Identifié par l'IA",
-                                    category = "Particulier / Ligne Réseau Congo",
-                                    location = "Brazzaville, Congo",
-                                    carrier = "Réseau Mobile GSM (MTN / Airtel)",
-                                    spamScore = 15,
-                                    trustBadgeText = "Confiance IA Moyen",
-                                    isVerified = false,
-                                    totalReports = 2,
-                                    aiAnalysisSummary = "L'analyse IA indique qu'il s'agit d'un numéro individuel standard non signalé comme spam."
-                                )
-                                searchResult = matched
                                 isSearching = false
+                                searchResult = null
+                                Toast.makeText(context, "Le service d’identification n’est pas encore disponible.", Toast.LENGTH_LONG).show()
                             }
                         },
                         shape = RoundedCornerShape(12.dp),

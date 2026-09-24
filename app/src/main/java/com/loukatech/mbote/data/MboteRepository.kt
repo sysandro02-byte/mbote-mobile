@@ -1799,14 +1799,7 @@ class MboteRepository(
 
     private fun isDemoChat(chat: Chat): Boolean {
         val demoIds = setOf("chat_luna", "chat_tech_hub", "chat_grace", "chat_canal_officiel", "chat_yannick")
-        val demoNames = setOf(
-            "Luna AI - MBoté Assistant",
-            "Tech Hub Brazzaville 🇨🇬",
-            "Grace Makiese",
-            "MBoté Actualités Officielles",
-            "Yannick Nguesso"
-        )
-        return chat.id in demoIds || chat.name in demoNames || chat.messages.any { it.id.startsWith("m_th_") || it.id.startsWith("m_g_") || it.id.startsWith("m_y_") || it.id.startsWith("m_ai_") }
+        return chat.id in demoIds || chat.messages.any { it.id.startsWith("m_th_") || it.id.startsWith("m_g_") || it.id.startsWith("m_y_") || it.id.startsWith("m_ai_") }
     }
 
     private fun createInitialCalls(): List<CallItem> = emptyList()

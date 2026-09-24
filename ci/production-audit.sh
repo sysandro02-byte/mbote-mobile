@@ -18,6 +18,8 @@ check_forbidden 'default_live' 'identifiant Live factice détecté'
 check_forbidden 'openrelay\.metered\.ca' 'fallback TURN public interdit en production'
 check_forbidden 'images\.unsplash\.com' 'identité/avatar de démonstration détecté dans le code applicatif'
 check_forbidden 'Kevine Moundele|Glodi Mavoungou|Grâce Kamba|Chancel Mbemba' 'profil utilisateur fictif détecté'
+check_forbidden 'Michel Loutala|Aïcha Diallo|Cedric Moukoko|Spam Bot 242|Grace Makiese|Aron Loutala' 'donnée utilisateur fictive détectée'
+check_forbidden 'MBOTE-ADMIN-2026|admin@loukatech\.com' 'identifiant administrateur intégré au client'
 
 if grep -RInE 'AIza[0-9A-Za-z_-]{20,}|xkeysib-[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z_-]{20,}' app/src/main backend --exclude-dir=build 2>/dev/null; then
   echo "ERROR: clé API potentiellement intégrée au dépôt" >&2

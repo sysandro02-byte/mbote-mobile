@@ -89,6 +89,17 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     try { req.user = jwt.verify(token, jwtSecret, { issuer: 'mbote-api', audience: 'mbote-mobile' }); return next(); }
     catch { return failure(res, 401, 'Session expirée ou invalide'); }
   };
+  const adminOnly = (req, res, next) => {
+    if (!['ADMIN', 'MODERATOR'].includes(String(req.user?.role || '').toUpperCase())) {
+      return failure(res, 403, 'Accès administrateur refusé');
+    }
+    return next();
+  };
+  const safeSecretEqual = (provided, expected) => {
+    const left = Buffer.from(String(provided || ''));
+    const right = Buffer.from(String(expected || ''));
+    return left.length > 0 && left.length === right.length && crypto.timingSafeEqual(left, right);
+  };
   const member = async (chatId, userId) => (await db.query('SELECT 1 FROM chat_participants WHERE chat_id = $1 AND user_id = $2', [chatId, userId])).rowCount > 0;
   const messageDto = (row, userId) => ({ id: row.id, chatId: row.chat_id, senderId: row.sender_id, senderName: row.sender_name, senderAvatar: row.sender_avatar || '', text: row.text || '', timestamp: row.created_at, mediaType: row.media_type || 'NONE', mediaUrl: row.media_url, isStarred: Boolean(row.is_starred), isMine: row.sender_id === userId });
 
@@ -547,6 +558,47 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     const result = await db.query('SELECT * FROM users WHERE id = $1', [req.user.userId]);
     return result.rowCount ? success(res, publicUser(result.rows[0])) : failure(res, 401, 'Compte introuvable');
   }));
+
+  const getAdminStats = async () => {
+    const result = await db.query(`
+      SELECT
+        (SELECT COUNT(*)::int FROM users) AS "activeUsersCount",
+        (SELECT COUNT(*)::bigint FROM messages WHERE created_at >= CURRENT_DATE) AS "totalMessagesToday",
+        (SELECT COUNT(*)::int FROM group_call_sessions WHERE status = 'ACTIVE') AS "activeCallsCount",
+        (SELECT COUNT(*)::int FROM short_videos) AS "shortVideosTotal",
+        (SELECT COALESCE(SUM(amount_fcfa), 0)::bigint FROM gift_transactions WHERE status = 'COMPLETED') AS "totalMobileMoneyTipsFcfa"
+    `);
+    const stats = result.rows[0] || {};
+    return {
+      activeUsersCount: Number(stats.activeUsersCount || 0),
+      onlineNowCount: 0,
+      totalMessagesToday: Number(stats.totalMessagesToday || 0),
+      activeCallsCount: Number(stats.activeCallsCount || 0),
+      shortVideosTotal: Number(stats.shortVideosTotal || 0),
+      totalMobileMoneyTipsFcfa: Number(stats.totalMobileMoneyTipsFcfa || 0),
+      serverUptimeSec: Math.floor(process.uptime()),
+      cpuUsagePercent: 0,
+      ramUsageMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      databaseStatus: 'Opérationnel',
+      apiVersion: API_VERSION,
+    };
+  };
+
+  app.post('/v1/admin/login', rateLimit({ windowMs: 15 * 60_000, max: 10, keyPrefix: 'admin-login' }), route(async (req, res) => {
+    const configuredKey = String(process.env.ADMIN_API_KEY || '');
+    if (!configuredKey) return failure(res, 503, 'Accès administrateur non configuré');
+    if (!safeSecretEqual(req.body.adminKey, configuredKey)) return failure(res, 401, 'Identifiants administrateur invalides');
+    const email = text(req.body.email, 'Email', 255).toLowerCase();
+    const password = text(req.body.password, 'Mot de passe', 256);
+    const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = result.rows[0];
+    if (!user || !user.password_hash || !['ADMIN', 'MODERATOR'].includes(String(user.role || '').toUpperCase()) || !(await bcrypt.compare(password, user.password_hash))) {
+      return failure(res, 401, 'Identifiants administrateur invalides');
+    }
+    return success(res, await getAdminStats());
+  }));
+
+  app.get('/v1/admin/stats', auth, adminOnly, route(async (_req, res) => success(res, await getAdminStats())));
   app.post('/v1/auth/google', route(async (req, res) => {
     const idToken = text(req.body.idToken, 'Jeton Google', 10000);
     if (!process.env.GOOGLE_CLIENT_ID) return failure(res, 503, 'Google OAuth n’est pas configuré');

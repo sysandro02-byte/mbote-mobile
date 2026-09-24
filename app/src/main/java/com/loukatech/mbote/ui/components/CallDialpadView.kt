@@ -226,8 +226,7 @@ fun CallDialpadView(
             Surface(
                 onClick = {
                     view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                    val numberToCall = if (dialedNumber.isNotBlank()) dialedNumber else "Grace Makiese"
-                    onStartCall(numberToCall, false)
+                    dialedNumber.takeIf(String::isNotBlank)?.let { onStartCall(it, false) }
                 },
                 shape = RoundedCornerShape(32.dp),
                 color = Color(0xFF22C55E), // Material green
@@ -264,8 +263,7 @@ fun CallDialpadView(
             Surface(
                 onClick = {
                     view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                    val numberToCall = if (dialedNumber.isNotBlank()) dialedNumber else "Grace Makiese"
-                    onStartCall(numberToCall, true)
+                    dialedNumber.takeIf(String::isNotBlank)?.let { onStartCall(it, true) }
                 },
                 shape = RoundedCornerShape(32.dp),
                 color = PurplePrimary,

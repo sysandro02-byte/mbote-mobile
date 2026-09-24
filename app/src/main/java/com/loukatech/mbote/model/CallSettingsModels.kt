@@ -28,7 +28,7 @@ data class CallSettings(
     val assistedDialingEnabled: Boolean = true,
     val defaultCountryCode: String = "+242", // Congo (+242), RDC (+243), France (+33), etc.
     val blockUnknownCallers: Boolean = false,
-    val blockedNumbers: List<String> = listOf("+242 06 999 0000", "+243 81 000 9999"),
+    val blockedNumbers: List<String> = emptyList(),
     
     // Calls & Network
     val callWaitingEnabled: Boolean = true,
@@ -63,10 +63,7 @@ data class CallSettings(
     val visualVoicemailActive: Boolean = false, // toggled when user retries / activates
 
     // Contact Ringtones
-    val contactRingtones: Map<String, String> = mapOf(
-        "Grace Makiese" to "MBoté VIP Flute",
-        "Aron Loutala" to "MBoté Afro Pulse"
-    ),
+    val contactRingtones: Map<String, String> = emptyMap(),
 
     // Advanced
     val callerIdAnnouncement: String = "Toujours", // "Toujours", "Uniquement avec casque", "Jamais"

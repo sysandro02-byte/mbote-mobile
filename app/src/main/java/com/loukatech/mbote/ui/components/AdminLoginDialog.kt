@@ -90,8 +90,8 @@ fun AdminLoginDialog(
     onSaveServerConfig: (url: String) -> Unit,
     viewModel: com.loukatech.mbote.ui.viewmodel.MboteViewModel? = null
 ) {
-    var adminKey by remember { mutableStateOf("MBOTE-ADMIN-2026") }
-    var email by remember { mutableStateOf("admin@loukatech.com") }
+    var adminKey by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
@@ -175,7 +175,7 @@ fun AdminLoginDialog(
 
                     Spacer(modifier = Modifier.height(18.dp))
 
-                    // Notice / Preset Hint
+                    // Security notice
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = Color(0xFF1E293B),
@@ -194,7 +194,7 @@ fun AdminLoginDialog(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Clé Admin par défaut : MBOTE-ADMIN-2026",
+                                text = "Utilisez la clé administrateur configurée sur le serveur.",
                                 color = Color(0xFFE2E8F0),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -371,40 +371,13 @@ private fun AdminDashboardContent(
     var actionToast by remember { mutableStateOf<String?>(null) }
     val reportsList by (viewModel?.reports ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsState(initial = emptyList())
 
-    // Sample admin users
-    var adminUsers by remember {
-        mutableStateOf(
-            listOf(
-                AdminUserItem("u_1", "Michel Loutala", "m.loutala@gmail.com", "+242 06 800 00 01", "Admin", true, false, "12 Jan 2026", "Brazzaville"),
-                AdminUserItem("u_2", "Aïcha Diallo", "aicha.diallo@afriq.cg", "+242 05 500 12 34", "Modérateur", true, false, "01 Fév 2026", "Pointe-Noire"),
-                AdminUserItem("u_3", "Cedric Moukoko", "cedric.m@gmail.com", "+242 06 912 34 56", "Utilisateur", false, false, "15 Fév 2026", "Brazzaville"),
-                AdminUserItem("u_4", "Spam Bot 242", "spambot@anonymous.net", "+242 04 000 99 99", "Utilisateur", false, true, "20 Fév 2026", "Inconnu")
-            )
-        )
-    }
+    // These collections stay empty until their server-backed moderation APIs
+    // return data. Production must never display fabricated accounts/content.
+    var adminUsers by remember { mutableStateOf(emptyList<AdminUserItem>()) }
 
-    // Sample jobs moderation
-    var adminJobs by remember {
-        mutableStateOf(
-            listOf(
-                AdminJobItem("j_1", "Développeur Mobile Android Kotlin", "LoukaTech R&D", "Brazzaville", "850.000 FCFA", "Approuvé"),
-                AdminJobItem("j_2", "Responsable Logistique & Port", "Congo Transit", "Pointe-Noire", "600.000 FCFA", "En attente"),
-                AdminJobItem("j_3", "Chef de Projet Énergie Solaire", "Solar Congo", "Oyo", "750.000 FCFA", "En attente")
-            )
-        )
-    }
+    var adminJobs by remember { mutableStateOf(emptyList<AdminJobItem>()) }
 
-    // Sample channels moderation
-    var adminChannels by remember {
-        mutableStateOf(
-            listOf(
-                AdminChannelItem("ch_1", "MBoté Officiel", "LoukaTech", 4820, true, true, 0),
-                AdminChannelItem("ch_2", "Aventures & Découvertes", "Aïcha Diallo", 2310, true, false, 0),
-                AdminChannelItem("ch_3", "Tech Congo", "Michel Loutala", 3150, true, false, 1),
-                AdminChannelItem("ch_4", "Brazza & Kin Musique", "Collectif 242", 6840, true, false, 2)
-            )
-        )
-    }
+    var adminChannels by remember { mutableStateOf(emptyList<AdminChannelItem>()) }
 
     // Broadcast message state
     var broadcastTitle by remember { mutableStateOf("Annonce MBoté") }
@@ -600,6 +573,7 @@ private fun AdminDashboardContent(
 
                 AdminTab.GIFTS_BADGES -> {
                     AdminGiftsBadgesTabContent(
+                        totalRevenueFcfa = stats.totalMobileMoneyTipsFcfa,
                         onPriceUpdated = { giftName, newPrice ->
                             actionToast = "Prix de '$giftName' ajusté à $newPrice FCFA !"
                         },
@@ -1307,6 +1281,7 @@ private fun AdminMetricTile(title: String, value: String, color: Color) {
 
 @Composable
 private fun AdminGiftsBadgesTabContent(
+    totalRevenueFcfa: Long,
     onPriceUpdated: (giftName: String, newPrice: Long) -> Unit,
     onRestocked: (giftName: String, count: Int) -> Unit
 ) {
@@ -1355,9 +1330,9 @@ private fun AdminGiftsBadgesTabContent(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        AdminMetricTile(title = "Revenus Cadeaux Vente", value = "1.845.000 F", color = Color(0xFFFFD700))
-                        AdminMetricTile(title = "Revenus Badges VIP", value = "785.000 F", color = Color(0xFF38BDF8))
-                        AdminMetricTile(title = "Total Encaissé", value = "2.630.000 F", color = Color(0xFF4ADE80))
+                        AdminMetricTile(title = "Revenus enregistrés", value = "$totalRevenueFcfa F", color = Color(0xFFFFD700))
+                        AdminMetricTile(title = "Source", value = "Serveur", color = Color(0xFF38BDF8))
+                        AdminMetricTile(title = "Total encaissé", value = "$totalRevenueFcfa F", color = Color(0xFF4ADE80))
                     }
                 }
             }

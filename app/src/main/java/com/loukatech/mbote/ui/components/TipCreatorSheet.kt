@@ -65,7 +65,7 @@ fun TipCreatorSheet(
     // Cashout state
     var cashoutAmountText by remember { mutableStateOf(userGiftState.totalVirtualEarnedFcfa.toString()) }
     var cashoutProvider by remember { mutableStateOf("MTN Mobile Money") }
-    var cashoutPhone by remember { mutableStateOf("+242 06 400 00 00") }
+    var cashoutPhone by remember { mutableStateOf("") }
 
     val providers = listOf(
         "MBoté Pay (Solde)",

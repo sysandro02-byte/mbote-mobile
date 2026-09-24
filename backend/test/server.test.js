@@ -66,6 +66,25 @@ test('password recovery never simulates email delivery when Brevo is unavailable
   }
 });
 
+test('admin login refuses access when the server key is not configured', async () => {
+  const previousKey = process.env.ADMIN_API_KEY;
+  delete process.env.ADMIN_API_KEY;
+  const db = { query: async () => { throw new Error('database must not be queried without admin configuration'); } };
+  try {
+    await withServer(createApp({ db, jwtSecret: secret }), async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/v1/admin/login`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ adminKey: 'not-configured', email: 'admin@example.com', password: 'not-a-real-password' }),
+      });
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).success, false);
+    });
+  } finally {
+    if (previousKey === undefined) delete process.env.ADMIN_API_KEY;
+    else process.env.ADMIN_API_KEY = previousKey;
+  }
+});
+
 
 test('gift state and withdrawals use server-side gift earnings', async () => {
   const userId = '11111111-1111-4111-8111-111111111111';

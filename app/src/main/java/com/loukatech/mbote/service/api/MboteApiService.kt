@@ -250,17 +250,17 @@ data class AuthResponseData(
 
 @Serializable
 data class AdminStatsData(
-    val activeUsersCount: Int = 12450,
-    val onlineNowCount: Int = 3840,
-    val totalMessagesToday: Long = 98450L,
-    val activeCallsCount: Int = 142,
-    val shortVideosTotal: Int = 1280,
-    val totalMobileMoneyTipsFcfa: Long = 4850000L,
-    val serverUptimeSec: Long = 1249500L,
-    val cpuUsagePercent: Float = 14.8f,
-    val ramUsageMb: Int = 512,
-    val databaseStatus: String = "Opérationnel (PostgreSQL 16 High-Availability)",
-    val apiVersion: String = "v1.4.2-mbote-prod"
+    val activeUsersCount: Int = 0,
+    val onlineNowCount: Int = 0,
+    val totalMessagesToday: Long = 0L,
+    val activeCallsCount: Int = 0,
+    val shortVideosTotal: Int = 0,
+    val totalMobileMoneyTipsFcfa: Long = 0L,
+    val serverUptimeSec: Long = 0L,
+    val cpuUsagePercent: Float = 0f,
+    val ramUsageMb: Int = 0,
+    val databaseStatus: String = "Indisponible",
+    val apiVersion: String = ""
 )
 
 data class SendMessageDto(
@@ -1049,7 +1049,14 @@ class MboteApiService {
      * Admin Portal Login API
      */
     suspend fun loginAdmin(request: AdminLoginRequest): Result<AdminStatsData> {
-        return Result.failure(UnsupportedOperationException("Connectez-vous avec un compte administrateur réel."))
+        return executeHttpRequest(
+            endpoint = "/admin/login",
+            method = "POST",
+            requestBody = request
+        ) { json ->
+            val response = MboteBackendConfig.jsonParser.decodeFromString<ApiResponse<AdminStatsData>>(json)
+            response.data ?: throw IllegalStateException(response.error ?: response.message ?: "Connexion administrateur refusée")
+        }
     }
 
     /**

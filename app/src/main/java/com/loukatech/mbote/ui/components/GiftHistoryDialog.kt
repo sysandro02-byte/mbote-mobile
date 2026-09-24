@@ -47,7 +47,7 @@ fun GiftHistoryDialog(
     // Cashout form states
     var cashoutAmount by remember { mutableStateOf("${userGiftState.totalVirtualEarnedFcfa}") }
     var cashoutProvider by remember { mutableStateOf("MTN Mobile Money") }
-    var cashoutPhone by remember { mutableStateOf("+242 06 123 4567") }
+    var cashoutPhone by remember { mutableStateOf("") }
 
     val filteredTransactions = remember(selectedFilter, userGiftState.transactions) {
         when (selectedFilter) {
