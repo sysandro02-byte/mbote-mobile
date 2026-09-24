@@ -5,8 +5,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -95,7 +93,6 @@ fun AdminLoginDialog(
     var adminKey by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var selectedPortalRole by remember { mutableStateOf("ADMIN") }
     var showPassword by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -119,7 +116,6 @@ fun AdminLoginDialog(
                 // FULL ENTERPRISE ADMIN CONSOLE
                 AdminDashboardContent(
                     stats = adminStats!!,
-                    portalRole = selectedPortalRole,
                     onDismiss = onDismiss,
                     showServerConfig = showServerConfig,
                     onToggleServerConfig = { showServerConfig = !showServerConfig },
@@ -136,8 +132,7 @@ fun AdminLoginDialog(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                        .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -164,7 +159,7 @@ fun AdminLoginDialog(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = if (selectedPortalRole == "ADMIN") "Connexion Administrateur" else "Connexion Modérateur",
+                        text = "Console d'Administration MBoté",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -172,49 +167,13 @@ fun AdminLoginDialog(
                     )
 
                     Text(
-                        text = if (selectedPortalRole == "ADMIN")
-                            "Gestion générale, sécurité et supervision MBoté"
-                        else "Modération des contenus, signalements et utilisateurs",
+                        text = "Système de supervision et gestion centrale LoukaTech 🇨🇬",
                         fontSize = 12.sp,
                         color = Color(0xFF94A3B8),
                         textAlign = TextAlign.Center
                     )
 
                     Spacer(modifier = Modifier.height(18.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        listOf(
-                            "ADMIN" to "Administrateur",
-                            "MODERATOR" to "Modérateur"
-                        ).forEach { (role, label) ->
-                            FilterChip(
-                                selected = selectedPortalRole == role,
-                                onClick = {
-                                    selectedPortalRole = role
-                                    errorMessage = null
-                                },
-                                label = { Text(label, fontWeight = FontWeight.SemiBold) },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = if (role == "ADMIN") Icons.Outlined.AdminPanelSettings else Icons.Outlined.Gavel,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = if (role == "ADMIN") Color(0xFF6D28D9) else Color(0xFF0369A1),
-                                    selectedLabelColor = Color.White,
-                                    selectedLeadingIconColor = Color.White
-                                )
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
 
                     // Security notice
                     Surface(
@@ -235,7 +194,7 @@ fun AdminLoginDialog(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Accès réservé aux comptes autorisés. Toutes les connexions sont contrôlées par le serveur.",
+                                text = "Utilisez la clé administrateur configurée sur le serveur.",
                                 color = Color(0xFFE2E8F0),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold
@@ -267,7 +226,7 @@ fun AdminLoginDialog(
                     OutlinedTextField(
                         value = adminKey,
                         onValueChange = { adminKey = it; errorMessage = null },
-                        label = { Text("Clé d’accès sécurisée") },
+                        label = { Text("Clé Secrète Admin (Master Key)") },
                         leadingIcon = {
                             Icon(Icons.Outlined.Key, contentDescription = null, tint = Color(0xFFA78BFA))
                         },
@@ -292,7 +251,7 @@ fun AdminLoginDialog(
                     OutlinedTextField(
                         value = email,
                         onValueChange = { email = it; errorMessage = null },
-                        label = { Text(if (selectedPortalRole == "ADMIN") "E-mail administrateur" else "E-mail modérateur") },
+                        label = { Text("Email Administrateur") },
                         leadingIcon = {
                             Icon(Icons.Outlined.Badge, contentDescription = null, tint = Color(0xFFA78BFA))
                         },
@@ -316,7 +275,7 @@ fun AdminLoginDialog(
                     OutlinedTextField(
                         value = password,
                         onValueChange = { password = it; errorMessage = null },
-                        label = { Text("Mot de passe") },
+                        label = { Text("Mot de passe administrateur") },
                         placeholder = { Text("••••••••") },
                         leadingIcon = {
                             Icon(Icons.Outlined.Lock, contentDescription = null, tint = Color(0xFFA78BFA))
@@ -349,7 +308,7 @@ fun AdminLoginDialog(
                     Button(
                         onClick = {
                             if (adminKey.isBlank() || email.isBlank() || password.isBlank()) {
-                                errorMessage = "Renseignez la clé, l’e-mail et le mot de passe."
+                                errorMessage = "Renseignez la clé, l’e-mail et le mot de passe administrateur."
                                 return@Button
                             }
                             isLoading = true
@@ -378,10 +337,7 @@ fun AdminLoginDialog(
                         if (isLoading) {
                             CircularProgressIndicator(color = Color.White, modifier = Modifier.size(22.dp))
                         } else {
-                            Text(
-                                if (selectedPortalRole == "ADMIN") "Accéder à l’administration" else "Accéder à la modération",
-                                fontWeight = FontWeight.Bold
-                            )
+                            Text("Connexion Sécurisée", fontWeight = FontWeight.Bold)
                         }
                     }
 
@@ -402,7 +358,6 @@ fun AdminLoginDialog(
 @Composable
 private fun AdminDashboardContent(
     stats: AdminStatsData,
-    portalRole: String,
     onDismiss: () -> Unit,
     showServerConfig: Boolean,
     onToggleServerConfig: () -> Unit,
@@ -450,7 +405,7 @@ private fun AdminDashboardContent(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (portalRole == "ADMIN") "Administration MBoté" else "Modération MBoté",
+                            text = "Admin Studio MBoté",
                             fontWeight = FontWeight.Bold,
                             fontSize = 17.sp,
                             color = Color.White
@@ -462,7 +417,7 @@ private fun AdminDashboardContent(
                             border = BorderStroke(1.dp, Color(0xFF7C3AED))
                         ) {
                             Text(
-                                text = if (portalRole == "ADMIN") "ADMIN" else "MODÉRATEUR",
+                                text = "v2.6 Cluster",
                                 color = Color(0xFFC084FC),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,

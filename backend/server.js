@@ -452,11 +452,12 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       payments: paymentsReady,
       paymentWebhook: Boolean(process.env.PAYMENTS_WEBHOOK_SECRET),
       push: pushReady,
+      adminAccess: Boolean(process.env.ADMIN_API_KEY),
       googleOAuthBackend: Boolean(process.env.GOOGLE_CLIENT_ID),
       githubOAuthBackend: Boolean(process.env.GITHUB_CLIENT_ID),
     };
     const coreRequired = ['database', 'emailOtp', 'liveTurn'];
-    const fullRequired = ['database', 'emailOtp', 'liveTurn', 'ai', 'payments', 'paymentWebhook', 'push'];
+    const fullRequired = ['database', 'emailOtp', 'liveTurn', 'ai', 'payments', 'paymentWebhook', 'push', 'adminAccess'];
     const coreReady = coreRequired.every((name) => capabilities[name] === true);
     const releaseReady = fullRequired.every((name) => capabilities[name] === true);
     const missingCapabilities = fullRequired.filter((name) => capabilities[name] !== true);
@@ -559,6 +560,63 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     return result.rowCount ? success(res, publicUser(result.rows[0])) : failure(res, 401, 'Compte introuvable');
   }));
 
+  app.post('/v1/auth/qr/pairings', rateLimit({ windowMs: 60_000, max: 10, keyPrefix: 'qr-pairing-create' }), route(async (_req, res) => {
+    const pairingToken = crypto.randomBytes(32).toString('base64url');
+    const tokenHash = crypto.createHash('sha256').update(pairingToken).digest('hex');
+    const result = await db.query(
+      "INSERT INTO desktop_login_pairings(token_hash) VALUES($1) RETURNING expires_at",
+      [tokenHash],
+    );
+    return success(res, { pairingToken, expiresAt: result.rows[0].expires_at }, 201);
+  }));
+
+  app.get('/v1/auth/qr/pairings/:pairingToken', rateLimit({ windowMs: 60_000, max: 120, keyPrefix: 'qr-pairing-poll' }), route(async (req, res) => {
+    const pairingToken = text(req.params.pairingToken, 'Jeton de connexion QR', 256);
+    if (!/^[A-Za-z0-9_-]{32,256}$/.test(pairingToken)) return failure(res, 400, 'Jeton de connexion QR invalide');
+    const tokenHash = crypto.createHash('sha256').update(pairingToken).digest('hex');
+    const result = await db.query(
+      `UPDATE desktop_login_pairings pairing
+       SET consumed_at=NOW()
+       FROM users
+       WHERE pairing.token_hash=$1
+         AND pairing.confirmed_by=users.id
+         AND pairing.confirmed_at IS NOT NULL
+         AND pairing.consumed_at IS NULL
+         AND pairing.expires_at>NOW()
+       RETURNING users.*`,
+      [tokenHash],
+    );
+    if (!result.rowCount) {
+      const pending = await db.query(
+        'SELECT confirmed_at, consumed_at, expires_at FROM desktop_login_pairings WHERE token_hash=$1',
+        [tokenHash],
+      );
+      if (!pending.rowCount || new Date(pending.rows[0].expires_at).getTime() <= Date.now()) return failure(res, 410, 'Session QR expirée');
+      if (pending.rows[0].consumed_at) return failure(res, 410, 'Session QR déjà utilisée');
+      return success(res, { status: 'PENDING' });
+    }
+    const user = result.rows[0];
+    return success(res, { status: 'CONFIRMED', authToken: tokenFor(user), user: publicUser(user) });
+  }));
+
+  app.post('/v1/auth/qr/confirm', auth, rateLimit({ windowMs: 60_000, max: 20, keyPrefix: 'qr-pairing-confirm' }), route(async (req, res) => {
+    const pairingToken = text(req.body.pairingToken, 'Jeton de connexion QR', 256);
+    if (!/^[A-Za-z0-9_-]{32,256}$/.test(pairingToken)) return failure(res, 400, 'Jeton de connexion QR invalide');
+    const tokenHash = crypto.createHash('sha256').update(pairingToken).digest('hex');
+    const result = await db.query(
+      `UPDATE desktop_login_pairings
+       SET confirmed_by=$2, confirmed_at=NOW()
+       WHERE token_hash=$1
+         AND confirmed_at IS NULL
+         AND consumed_at IS NULL
+         AND expires_at>NOW()
+       RETURNING expires_at`,
+      [tokenHash, req.user.userId],
+    );
+    if (!result.rowCount) return failure(res, 410, 'Session QR expirée ou déjà utilisée');
+    return success(res, { confirmed: true, expiresAt: result.rows[0].expires_at });
+  }));
+
   const getAdminStats = async () => {
     const result = await db.query(`
       SELECT
@@ -595,7 +653,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     if (!user || !user.password_hash || !['ADMIN', 'MODERATOR'].includes(String(user.role || '').toUpperCase()) || !(await bcrypt.compare(password, user.password_hash))) {
       return failure(res, 401, 'Identifiants administrateur invalides');
     }
-    return success(res, await getAdminStats());
+    return success(res, { ...await getAdminStats(), authToken: tokenFor(user) });
   }));
 
   app.get('/v1/admin/stats', auth, adminOnly, route(async (_req, res) => success(res, await getAdminStats())));

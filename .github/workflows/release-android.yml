@@ -108,6 +108,7 @@ jobs:
           grep -q '"payments":true' "$body"
           grep -q '"paymentWebhook":true' "$body"
           grep -q '"push":true' "$body"
+          grep -q '"adminAccess":true' "$body"
 
 
       - name: Build signed release APK and AAB
