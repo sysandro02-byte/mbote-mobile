@@ -91,6 +91,7 @@ fun SettingsScreen(
     onCashout: (amount: Long, provider: String, phone: String) -> Unit = { _, _, _ -> },
     onBuyBundle: (GiftBundle, String) -> Boolean = { _, _ -> false },
     onBuySingleGift: (GiftItem, Int, String) -> Boolean = { _, _, _ -> false },
+    onBuyBadge: (BadgeType, String) -> Boolean = { _, _ -> false },
     onLanguageChange: (AppLanguage) -> Unit = {},
     onCurrencyChange: (AppCurrency) -> Unit = {},
     onSaveParentalControl: (Boolean, String, Boolean, Int, Int, Boolean, Boolean) -> Unit = { _, _, _, _, _, _, _ -> },
@@ -184,7 +185,7 @@ fun SettingsScreen(
         com.loukatech.mbote.ui.components.BadgeStoreDialog(
             userProfile = userProfile,
             onBuyBadge = { badge, provider ->
-                // buy badge logic
+                onBuyBadge(badge, provider)
             },
             onDismiss = { showBadgeStoreDialog = false }
         )
@@ -1343,9 +1344,9 @@ fun SettingsScreen(
                     // Espace Administration & Modération
                     SettingsClickRow(
                         icon = Icons.Outlined.AdminPanelSettings,
-                        title = "Espace Administration & Modération",
-                        subtitle = "Statistiques, santé serveur LoukaTech, logs",
-                        badge = "🔐 Admin",
+                        title = "Administration et modération",
+                        subtitle = "Gérer MBoté, traiter les signalements et superviser la plateforme",
+                        badge = "Accès sécurisé",
                         badgeColor = Color(0xFF7C3AED),
                         iconColor = Color(0xFF7C3AED),
                         onClick = onAdminClick
@@ -2619,7 +2620,7 @@ fun AiToolsSubSettingsDialog(onDismiss: () -> Unit) {
                     OutlinedButton(
                         onClick = {
                             com.loukatech.mbote.service.AppUsageTrackingService.triggerRecap(context)
-                            Toast.makeText(context, "Bilan hebdomadaire simulé envoyé !", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Bilan hebdomadaire généré à partir de votre activité", Toast.LENGTH_SHORT).show()
                         },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
@@ -2629,7 +2630,7 @@ fun AiToolsSubSettingsDialog(onDismiss: () -> Unit) {
                     ) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Simuler le bilan hebdomadaire 📊", color = MbotePurplePrimary, fontSize = 13.sp)
+                        Text("Générer mon bilan maintenant 📊", color = MbotePurplePrimary, fontSize = 13.sp)
                     }
                 }
 
