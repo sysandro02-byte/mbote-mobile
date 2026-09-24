@@ -389,9 +389,9 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
 
   app.disable('x-powered-by');
   app.use(cors({ origin(origin, callback) { return !origin || origins.includes(origin) ? callback(null, true) : callback(new Error('Origine CORS non autorisée')); } }));
-  // Publication videos are streamed directly to PostgreSQL-backed storage metadata.
-  // Keep this raw-body middleware before express.json so Android can upload real video bytes.
-  app.use('/v1/uploads/:surface', express.raw({ type: ['video/*', 'application/octet-stream'], limit: '50mb' }));
+  // Publication media are streamed directly to PostgreSQL-backed storage metadata.
+  // Keep this raw-body middleware before express.json so Android can upload real image/audio/video bytes.
+  app.use('/v1/uploads/:surface', express.raw({ type: ['video/*', 'image/*', 'audio/*', 'application/octet-stream'], limit: '50mb' }));
   app.use(express.json({
     limit: '5mb',
     verify(req, _res, buf) {
@@ -403,11 +403,19 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
 
   app.post('/v1/uploads/:surface', auth, route(async (req, res) => {
     const surface = req.params.surface;
-    if (!['short-videos', 'actus-videos'].includes(surface)) return failure(res, 404, 'Surface de publication inconnue');
-    if (!Buffer.isBuffer(req.body) || req.body.length === 0) return failure(res, 400, 'Vidéo vide ou invalide');
-    if (req.body.length > 50 * 1024 * 1024) return failure(res, 413, 'Vidéo trop volumineuse');
+    const acceptedTypesBySurface = {
+      'short-videos': ['video/'],
+      'actus-videos': ['video/'], // legacy Android builds
+      'actus-media': ['image/', 'audio/', 'video/'],
+      'status-media': ['image/', 'audio/', 'video/'],
+    };
+    const acceptedTypes = acceptedTypesBySurface[surface];
+    if (!acceptedTypes) return failure(res, 404, 'Surface de publication inconnue');
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) return failure(res, 400, 'Média vide ou invalide');
+    if (req.body.length > 50 * 1024 * 1024) return failure(res, 413, 'Média trop volumineux');
     const contentType = String(req.get('content-type') || '').split(';')[0].trim().toLowerCase();
-    if (!contentType.startsWith('video/')) return failure(res, 415, 'Le fichier sélectionné n’est pas une vidéo');
+    const accepted = contentType === 'application/octet-stream' || acceptedTypes.some((prefix) => contentType.startsWith(prefix));
+    if (!accepted) return failure(res, 415, 'Type de média non pris en charge pour cette publication');
     const created = await db.query(
       `INSERT INTO publication_uploads (owner_id, surface, content_type, file_size, content)
        VALUES ($1,$2,$3,$4,$5) RETURNING id`,

@@ -435,8 +435,11 @@ class MainActivity : ComponentActivity() {
                                                 currentTab = currentTab,
                                                 userProfile = userProfile,
                                                 unreadNotificationsCount = notifications.count { !it.isRead },
+                                                onHomeClick = {
+                                                    viewModel.setTab(NavigationTab.ACTUS)
+                                                },
                                                 onSearchClick = {
-                                                    viewModel.setTab(NavigationTab.MESSAGES)
+                                                    viewModel.setTab(NavigationTab.MASTA)
                                                 },
                                                 onNotificationsClick = {
                                                     viewModel.setShowNotificationsSheet(true)
@@ -444,8 +447,8 @@ class MainActivity : ComponentActivity() {
                                                 onJobsClick = {
                                                     viewModel.setShowJobsScreen(true)
                                                 },
-                                                onMeetingsClick = {
-                                                    viewModel.setTab(NavigationTab.MEETINGS)
+                                                onShortVideosClick = {
+                                                    viewModel.openShortVideos("/app?tab=actus")
                                                 },
                                                 onProfileClick = {
                                                     viewModel.setTab(NavigationTab.SETTINGS)
@@ -761,6 +764,7 @@ class MainActivity : ComponentActivity() {
                                                         onThemeModeChange = { viewModel.setThemeMode(it) },
                                                         onToggleNotifications = { viewModel.toggleNotifications() },
                                                         onToggleOfflineMode = { viewModel.toggleOfflineMode() },
+                                                        isOfflineModeEnabled = isOffline,
                                                         onJobsClick = { viewModel.setShowJobsScreen(true) },
                                                         onSyncContactsClick = { viewModel.setShowContactsSyncSheet(true) },
                                                         onAronQuestionsClick = { viewModel.setShowAronQuestionsSheet(true) },

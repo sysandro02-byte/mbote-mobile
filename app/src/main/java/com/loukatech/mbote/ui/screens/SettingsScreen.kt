@@ -71,6 +71,7 @@ fun SettingsScreen(
     onThemeModeChange: (AppThemeMode) -> Unit = {},
     onToggleNotifications: () -> Unit,
     onToggleOfflineMode: () -> Unit = {},
+    isOfflineModeEnabled: Boolean = false,
     onJobsClick: () -> Unit,
     onSyncContactsClick: () -> Unit = {},
     onAronQuestionsClick: () -> Unit = {},
@@ -119,7 +120,6 @@ fun SettingsScreen(
     var showThemeDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
     var showCurrencyDialog by remember { mutableStateOf(false) }
-    var offlineModeEnabled by remember { mutableStateOf(false) }
     var activeSubSetting by remember { mutableStateOf<SettingSection?>(null) }
     var showGiftHistoryDialog by remember { mutableStateOf(false) }
     var showGiftStoreDialog by remember { mutableStateOf(false) }
@@ -1210,13 +1210,13 @@ fun SettingsScreen(
                         icon = Icons.Outlined.WifiOff,
                         title = "Mode hors ligne",
                         subtitle = "Désactiver les notifications et utiliser le stockage local",
-                        isChecked = offlineModeEnabled,
+                        isChecked = isOfflineModeEnabled,
                         onToggle = {
-                            offlineModeEnabled = !offlineModeEnabled
+                            val nextOfflineState = !isOfflineModeEnabled
                             onToggleOfflineMode()
                             Toast.makeText(
                                 context,
-                                if (offlineModeEnabled) "Mode hors ligne activé" else "Mode hors ligne désactivé",
+                                if (nextOfflineState) "Mode hors ligne activé" else "Mode hors ligne désactivé",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
@@ -1329,7 +1329,7 @@ fun SettingsScreen(
         // Section: Aide, Administration & Session
         item {
             Spacer(modifier = Modifier.height(10.dp))
-            SectionHeader(title = "Espace Pro & Administration")
+            SectionHeader(title = "Administration")
         }
 
         item {

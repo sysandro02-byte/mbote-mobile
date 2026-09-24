@@ -1466,6 +1466,17 @@ class MboteRepository(
         return result
     }
 
+    private fun normalizePublicationMediaType(mediaType: String): String {
+        val raw = mediaType.trim().lowercase()
+        return when {
+            raw in setOf("text", "texte") -> "text"
+            raw in setOf("image", "photo") || raw.startsWith("image/") -> "image"
+            raw in setOf("audio", "voice", "vocal") || raw.startsWith("audio/") -> "audio"
+            raw in setOf("video", "vidéo") || raw.startsWith("video/") -> "video"
+            else -> "text"
+        }
+    }
+
     suspend fun addStatus(
         text: String,
         mediaDataUrl: String? = null,
@@ -1473,15 +1484,7 @@ class MboteRepository(
         background: String? = null,
         visibility: String = "friends"
     ): Result<StatusItem> {
-        val normalizedType = mediaType.trim().lowercase().let { raw ->
-            when {
-                raw in setOf("text", "texte") -> "text"
-                raw in setOf("image", "photo") || raw.startsWith("image/") -> "image"
-                raw in setOf("audio", "voice", "vocal") || raw.startsWith("audio/") -> "audio"
-                raw in setOf("video", "vidéo") || raw.startsWith("video/") -> "video"
-                else -> "text"
-            }
-        }
+        val normalizedType = normalizePublicationMediaType(mediaType)
         val content = mediaDataUrl?.takeIf(String::isNotBlank) ?: text.trim()
         if (content.isBlank()) {
             return Result.failure(IllegalArgumentException("Le statut doit contenir du texte ou un média."))
@@ -1506,11 +1509,11 @@ class MboteRepository(
         background: String? = null,
         visibility: String = "friends"
     ): Result<StatusItem> {
-        val dataUrl = if (mediaUri != null && mediaType != "text") {
-            val inlineLimit = if (mediaType == "audio") maxInlineStatusAudioBytes else maxInlineStatusImageBytes
-            contentUriToDataUrl(context, mediaUri, inlineLimit).getOrElse { return Result.failure(it) }
+        val normalizedType = normalizePublicationMediaType(mediaType)
+        val mediaUrl = if (mediaUri != null && normalizedType != "text") {
+            apiService.uploadPublicationMedia(context, mediaUri, "status-media").getOrElse { return Result.failure(it) }
         } else null
-        return addStatus(text, dataUrl, mediaType, background, visibility)
+        return addStatus(text, mediaUrl, normalizedType, background, visibility)
     }
 
     suspend fun markStatusViewed(statusId: String): Result<Unit> = publicationApiService.markStatusViewed(statusId)
@@ -1537,7 +1540,7 @@ class MboteRepository(
         durationSeconds: Int? = null
     ): Result<NewsPost> {
         val description = listOf(title.trim(), content.trim(), category.takeIf(String::isNotBlank)?.let { "Catégorie : $it" }).filterNotNull().filter(String::isNotBlank).joinToString("\n")
-        val type = mediaType.lowercase().takeIf { it in setOf("text", "image", "audio", "video") } ?: "text"
+        val type = normalizePublicationMediaType(mediaType)
         val request = CreateActusPostRequest(
             type = type,
             content = if (type == "text") description else mediaUrl.orEmpty(),
@@ -1558,12 +1561,13 @@ class MboteRepository(
         category: String,
         mediaType: String
     ): Result<NewsPost> {
-        val media = when {
-            mediaUri == null || mediaType == "text" -> null
-            mediaType == "video" -> apiService.uploadPublicationVideo(context, mediaUri, "actus-videos").getOrElse { return Result.failure(it) }
-            else -> contentUriToDataUrl(context, mediaUri, maxInlineActusImageBytes).getOrElse { return Result.failure(it) }
+        val normalizedType = normalizePublicationMediaType(mediaType)
+        val media = if (mediaUri == null || normalizedType == "text") {
+            null
+        } else {
+            apiService.uploadPublicationMedia(context, mediaUri, "actus-media").getOrElse { return Result.failure(it) }
         }
-        return publishPostApi(title, content, media, category, mediaType)
+        return publishPostApi(title, content, media, category, normalizedType)
     }
 
     private suspend fun contentUriToDataUrl(

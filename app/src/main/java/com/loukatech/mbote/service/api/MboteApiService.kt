@@ -1505,12 +1505,16 @@ class MboteApiService {
     suspend fun markShortViewed(videoId: String): Result<Unit> =
         executeHttpRequest<Unit, Unit>("/short-videos/$videoId/views", "POST") { Unit }
 
-    suspend fun uploadPublicationVideo(context: Context, source: Uri, surface: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun uploadPublicationMedia(context: Context, source: Uri, surface: String): Result<String> = withContext(Dispatchers.IO) {
         val token = MboteBackendConfig.authToken?.trim().orEmpty()
         if (token.isBlank()) return@withContext Result.failure(IllegalStateException("Session MBoté requise."))
-        val safeSurface = if (surface == "actus-videos") "actus-videos" else "short-videos"
+        val safeSurface = when (surface) {
+            "short-videos", "actus-videos", "actus-media", "status-media" -> surface
+            else -> return@withContext Result.failure(IllegalArgumentException("Surface de publication non prise en charge."))
+        }
         val resolver = context.contentResolver
-        val mimeType = resolver.getType(source)?.takeIf { it.startsWith("video/") } ?: "application/octet-stream"
+        val mimeType = resolver.getType(source)?.substringBefore(';')?.trim()?.lowercase().takeUnless { it.isNullOrBlank() }
+            ?: "application/octet-stream"
         var connection: HttpURLConnection? = null
         try {
             connection = (URL("${MboteBackendConfig.baseUrl}/uploads/$safeSurface").openConnection() as HttpURLConnection).apply {
@@ -1525,7 +1529,7 @@ class MboteApiService {
             }
             resolver.openInputStream(source)?.use { input ->
                 connection.outputStream.use { output -> input.copyTo(output, 256 * 1024) }
-            } ?: return@withContext Result.failure(IllegalStateException("Vidéo Android inaccessible."))
+            } ?: return@withContext Result.failure(IllegalStateException("Média Android inaccessible."))
             val code = connection.responseCode
             val stream = if (code in 200..299) connection.inputStream else connection.errorStream
             val response = readHttpText(
@@ -1546,6 +1550,9 @@ class MboteApiService {
             connection?.disconnect()
         }
     }
+
+    suspend fun uploadPublicationVideo(context: Context, source: Uri, surface: String): Result<String> =
+        uploadPublicationMedia(context, source, surface)
 
     private fun mapShortVideo(video: BackendShortVideoDto) = ShortVideo(
         id = video.id.toString().trim('"'),
