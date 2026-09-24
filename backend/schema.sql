@@ -52,6 +52,19 @@ CREATE TABLE IF NOT EXISTS auth_challenges (
 CREATE INDEX IF NOT EXISTS idx_auth_challenges_expiry ON auth_challenges(expires_at);
 CREATE INDEX IF NOT EXISTS idx_auth_challenges_email_flow ON auth_challenges(email, flow);
 
+-- Short-lived, single-use pairing sessions for "MBoté sur ordinateur".
+-- Only a SHA-256 digest is persisted; possession of the QR token is required
+-- to poll the session and retrieve the authenticated desktop session.
+CREATE TABLE IF NOT EXISTS desktop_login_pairings (
+    token_hash CHAR(64) PRIMARY KEY,
+    confirmed_by UUID REFERENCES users(id) ON DELETE CASCADE,
+    confirmed_at TIMESTAMP WITH TIME ZONE,
+    consumed_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT (NOW() + INTERVAL '5 minutes'),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_desktop_login_pairings_expiry ON desktop_login_pairings(expires_at);
+
 -- 2. CHATS & CONVERSATIONS
 CREATE TABLE IF NOT EXISTS chats (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

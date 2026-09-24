@@ -1344,9 +1344,9 @@ fun SettingsScreen(
                     // Espace Administration & Modération
                     SettingsClickRow(
                         icon = Icons.Outlined.AdminPanelSettings,
-                        title = "Administration et modération",
-                        subtitle = "Gérer MBoté, traiter les signalements et superviser la plateforme",
-                        badge = "Accès sécurisé",
+                        title = "Espace Administration & Modération",
+                        subtitle = "Statistiques, santé serveur LoukaTech, logs",
+                        badge = "🔐 Admin",
                         badgeColor = Color(0xFF7C3AED),
                         iconColor = Color(0xFF7C3AED),
                         onClick = onAdminClick

@@ -783,6 +783,9 @@ class MainActivity : ComponentActivity() {
                                                         onBuySingleGift = { gift, count, provider ->
                                                             viewModel.buySingleGift(gift, count, provider)
                                                         },
+                                                        onBuyBadge = { badge, provider ->
+                                                            viewModel.buyBadge(badge, provider)
+                                                        },
                                                         onLanguageChange = { lang ->
                                                             viewModel.updateLanguage(lang)
                                                         },

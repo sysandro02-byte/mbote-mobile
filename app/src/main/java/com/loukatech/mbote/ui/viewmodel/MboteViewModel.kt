@@ -1390,7 +1390,16 @@ class MboteViewModel(
     }
 
     fun buyBadge(badgeType: BadgeType, provider: String = "MTN Mobile Money"): Boolean {
-        return repository.buyBadge(badgeType, provider)
+        if (!repository.isAuthenticated.value) return false
+        viewModelScope.launch {
+            repository.requestGiftPurchase(badgeType.priceFcfa, provider)
+                .onSuccess { intent ->
+                    _publicationError.value = intent.instructions
+                        ?: "Paiement ${intent.status.lowercase()}. Référence ${intent.id}. Le badge sera activé après confirmation."
+                }
+                .onFailure { _publicationError.value = it.message ?: "Paiement du badge impossible." }
+        }
+        return true
     }
 
     fun updateGiftPrice(giftId: String, newPriceFcfa: Long) {

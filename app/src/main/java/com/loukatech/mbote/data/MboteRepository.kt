@@ -174,7 +174,6 @@ class MboteRepository(
         }
         MboteBackendConfig.authToken = null
         MboteBackendConfig.refreshToken = null
-        MboteBackendConfig.adminToken = null
         _isAuthenticated.value = false
         clearCachedSession()
     }

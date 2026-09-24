@@ -452,12 +452,11 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
       payments: paymentsReady,
       paymentWebhook: Boolean(process.env.PAYMENTS_WEBHOOK_SECRET),
       push: pushReady,
-      adminAccess: Boolean(process.env.ADMIN_API_KEY),
       googleOAuthBackend: Boolean(process.env.GOOGLE_CLIENT_ID),
       githubOAuthBackend: Boolean(process.env.GITHUB_CLIENT_ID),
     };
     const coreRequired = ['database', 'emailOtp', 'liveTurn'];
-    const fullRequired = ['database', 'emailOtp', 'liveTurn', 'ai', 'payments', 'paymentWebhook', 'push', 'adminAccess'];
+    const fullRequired = ['database', 'emailOtp', 'liveTurn', 'ai', 'payments', 'paymentWebhook', 'push'];
     const coreReady = coreRequired.every((name) => capabilities[name] === true);
     const releaseReady = fullRequired.every((name) => capabilities[name] === true);
     const missingCapabilities = fullRequired.filter((name) => capabilities[name] !== true);
@@ -653,7 +652,7 @@ function createApp({ db, jwtSecret = process.env.JWT_SECRET, allowedOrigins = pr
     if (!user || !user.password_hash || !['ADMIN', 'MODERATOR'].includes(String(user.role || '').toUpperCase()) || !(await bcrypt.compare(password, user.password_hash))) {
       return failure(res, 401, 'Identifiants administrateur invalides');
     }
-    return success(res, { ...await getAdminStats(), authToken: tokenFor(user) });
+    return success(res, await getAdminStats());
   }));
 
   app.get('/v1/admin/stats', auth, adminOnly, route(async (_req, res) => success(res, await getAdminStats())));

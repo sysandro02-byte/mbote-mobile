@@ -176,14 +176,14 @@ fun BadgeStoreDialog(
                     }
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        text = "Félicitations !",
+                        text = "Paiement en attente",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF10B981)
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Votre $successBadgeName est maintenant actif et visible par toute la communauté !",
+                        text = "La demande pour $successBadgeName a été envoyée. Le badge sera activé après confirmation du paiement.",
                         fontSize = 13.sp,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurface
@@ -385,7 +385,7 @@ fun BadgeStoreDialog(
                         successBadgeName = badge.title
                         isSuccess = true
                         selectedBadgeToBuy = null
-                        Toast.makeText(context, "✅ ${badge.title} activé avec succès !", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Demande de paiement envoyée", Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MbotePurplePrimary)
                 ) {
