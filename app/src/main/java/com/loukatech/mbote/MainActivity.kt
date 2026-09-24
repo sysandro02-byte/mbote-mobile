@@ -380,14 +380,20 @@ class MainActivity : ComponentActivity() {
                                 onBookmarkJob = { jobId -> viewModel.toggleJobBookmark(jobId) },
                                 onApplyJob = { jobId, cvUrl, done ->
                                     val job = jobs.firstOrNull { it.id == jobId }
-                                    if (job != null && !jobId.startsWith("mbote-")) {
-                                        val uri = android.net.Uri.parse(job.applyUrl)
-                                        if (uri.scheme in listOf("https", "http", "mailto")) {
-                                            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri)) }
-                                                .onFailure { android.widget.Toast.makeText(context, "Aucune application pour ouvrir ce lien.", android.widget.Toast.LENGTH_LONG).show() }
+                                    val externalApplyUrl = job?.applyUrl?.trim().orEmpty()
+                                    val uri = externalApplyUrl.takeIf(String::isNotBlank)?.let(android.net.Uri::parse)
+                                    if (uri?.scheme in listOf("https", "http", "mailto")) {
+                                        runCatching {
+                                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, uri))
+                                        }.onSuccess {
+                                            done(true)
+                                        }.onFailure {
+                                            android.widget.Toast.makeText(context, "Aucune application pour ouvrir ce lien.", android.widget.Toast.LENGTH_LONG).show()
+                                            done(false)
                                         }
-                                        done(false)
-                                    } else viewModel.applyToJob(jobId, done, cvUrl)
+                                    } else {
+                                        viewModel.applyToJob(jobId, done, cvUrl)
+                                    }
                                 },
                                 onPostJob = { title, company, location, domain, contractType, workMode, salary, description, reqs, bens, done ->
                                     viewModel.postJobOffer(
