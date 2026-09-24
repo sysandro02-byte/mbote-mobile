@@ -1,0 +1,2 @@
+GitHub Actions trigger for the MBoté QA APK build.
+Triggered after publishing the admin, API, QR, payment and production fixes.
